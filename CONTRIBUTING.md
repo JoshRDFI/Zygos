@@ -84,10 +84,11 @@ out to be wrong, write a new RFC that supersedes it.
    as a work-in-progress signal — use a draft PR for that instead.
 3. **Follow the commit style.** Commits use the form `type(scope): subject`, where
    `type` is one of `feat`, `fix`, `docs`, `test`, or `chore`, and `scope` identifies
-   the affected module or subsystem. For v2 backend work, include the scope; for
-   repository-wide changes, scope may be omitted. Examples:
-   - `feat(plugins): add PluginRegistry.list method`
-   - `fix(config): reject duplicate provider routes`
+   the affected module or subsystem. Backend (v2) work uses `(v2)` as the scope;
+   documentation-only changes use `docs` with no scope; v1 bugfixes use `fix` with
+   no scope or `fix(v1)`. Examples:
+   - `feat(v2): add PluginRegistry.list method`
+   - `fix(v2): reject duplicate provider routes`
    - `docs: add CONTRIBUTING.md and STYLE_GUIDE.md`
 4. **Describe what and why, not just how.** The PR description should explain the
    motivation for the change so that a reviewer who has no context can evaluate
