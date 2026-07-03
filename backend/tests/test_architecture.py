@@ -7,6 +7,8 @@ FastAPI-adapter milestone once ``zygos/api`` exists.
 import ast
 from pathlib import Path
 
+import pytest
+
 FORBIDDEN = {"fastapi", "starlette", "uvicorn"}
 PACKAGE_ROOT = Path(__file__).resolve().parents[1] / "zygos"
 
@@ -27,7 +29,10 @@ def test_runtime_core_never_imports_web_frameworks():
     for file in PACKAGE_ROOT.rglob("*.py"):
         if "api" in file.relative_to(PACKAGE_ROOT).parts:
             continue  # the adapter layer may import FastAPI
-        imported = _imported_top_level_modules(file.read_text(encoding="utf-8"))
+        try:
+            imported = _imported_top_level_modules(file.read_text(encoding="utf-8"))
+        except SyntaxError as exc:
+            pytest.fail(f"Unparseable source {file}: {exc}")
         if imported & FORBIDDEN:
             offenders.append(str(file))
     assert offenders == [], f"Runtime core imports web frameworks: {offenders}"
