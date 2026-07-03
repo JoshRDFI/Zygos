@@ -84,6 +84,53 @@ the community-ecosystem milestone and its RFC, after a community exists to need 
 
 ---
 
+## Runtime Lifecycle
+
+Every run of the runtime moves through the same fixed sequence of stages. The
+lifecycle is the backbone the milestones fill in: stages never reorder, they
+only gain implementations.
+
+```
+Bootstrap
+  → Load Configuration
+  → Resolve Plugins
+  → Initialize Services
+  → Register Capabilities
+  → Load Skills
+  → Load Memory
+  → Start Scheduler
+  → Accept Requests
+  → Execute
+  → Graceful Shutdown
+```
+
+| Stage | Status |
+|---|---|
+| Bootstrap | Implemented — `backend/zygos/runtime/bootstrap.py` (M1) |
+| Load Configuration | Implemented — Pydantic schema + loader (M1) |
+| Resolve Plugins | Implemented — config-declared resolver (M1, [ADR-0003](./docs/adr/ADR-0003-config-declared-plugins.md)) |
+| Initialize Services | Implemented — constructor injection at the composition root (M1, [ADR-0002](./docs/adr/ADR-0002-constructor-injection.md)) |
+| Register Capabilities | Planned — design pending [RFC-0003](./docs/rfcs/README.md#index) |
+| Load Skills | Planned — M6 (`SkillService`) |
+| Load Memory | Planned — M4 (`MemoryService`) |
+| Start Scheduler | Planned — scheduler & autonomy milestone |
+| Accept Requests | Planned — M8 (FastAPI adapter + WebSocket) |
+| Execute | Planned — session loop and services fill in across M2–M7 |
+| Graceful Shutdown | Planned — reverse-order teardown |
+
+One deliberate naming choice: the stage is **Resolve Plugins**, not "Discover
+Plugins". Zygos loads exactly the plugins declared in configuration and never
+scans the filesystem or installed packages for code
+([ADR-0003](./docs/adr/ADR-0003-config-declared-plugins.md)). Detecting the
+environment at install time, or reading user files as data at run time, is
+unaffected — code is declared; data is discovered.
+
+Graceful shutdown tears the stack down in reverse order. The guarantee the
+[Tool Contract](#tool-contract) makes per-tool — `cleanup` always runs — applies
+to the runtime as a whole.
+
+---
+
 ## State and Introspection
 
 All runtime state that v1 kept as hidden private fields becomes named, snapshotable
