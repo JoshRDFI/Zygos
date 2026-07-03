@@ -25,7 +25,7 @@ The dependency rule is strict and unidirectional: the runtime core (`runtime/`,
 `services/`) imports nothing from `api/`, `cli/`, or any web framework. FastAPI never
 appears below the adapter layer. Experience with v1 showed that convention alone is not
 sufficient; the rule is therefore enforced mechanically by
-`backend/tests/test_architecture.py` today, and will be replaced by an
+`backend/tests/test_architecture.py` today, and will be supplemented by an
 [import-linter](https://import-linter.readthedocs.io) contract in CI once
 `zygos/api` exists. A failing build is the signal — not a code review comment.
 

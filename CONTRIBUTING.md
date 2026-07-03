@@ -26,6 +26,8 @@ and `auto_apply_low_risk=False` exist to enforce the constitutional requirement 
 human approval is required for any behavioral mutation to the runtime. No contribution
 may weaken either default. Changing them even in tests requires explicit justification.
 
+Code and documentation conventions are catalogued in the [Style Guide](./STYLE_GUIDE.md).
+
 ## Development Setup
 
 ### v2 (Python backend)
