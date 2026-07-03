@@ -12,3 +12,11 @@ Local-first is preferred whenever practical.
 Open standards over proprietary formats.
 Documentation evolves alongside implementation.
 Architectural debt is treated as seriously as technical debt.
+
+## Principles of Evolution
+
+Evolution is incremental.
+Backward compatibility is preferred when practical.
+Breaking changes require an RFC and a migration plan.
+Experimental features remain isolated until proven.
+The architecture evolves before the implementation.
