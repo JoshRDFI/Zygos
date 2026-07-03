@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 900" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+  </defs>
+  <style>
+    .layer { fill: #f1f5f9; stroke: #334155; stroke-width: 1.5; rx: 8; }
+    .planned { fill: #fefce8; stroke: #a16207; stroke-width: 1.5; stroke-dasharray: 6 4; rx: 8; }
+    .box { fill: #ffffff; stroke: #64748b; stroke-width: 1; rx: 6; }
+    .title { font-size: 17px; font-weight: bold; fill: #0f172a; }
+    .label { font-size: 13px; fill: #0f172a; }
+    .note { font-size: 12px; fill: #64748b; font-style: italic; }
+    .flow { stroke: #334155; stroke-width: 1.5; marker-end: url(#arrow); }
+  </style>
+
+  <text x="430" y="30" text-anchor="middle" class="title">Zygos Runtime — RFC-0001</text>
+
+  <rect x="230" y="50" width="400" height="60" class="layer"/>
+  <text x="430" y="75" text-anchor="middle" class="title">Browser</text>
+  <text x="430" y="95" text-anchor="middle" class="label">React + Tailwind UI (planned)</text>
+
+  <line x1="430" y1="110" x2="430" y2="140" class="flow"/>
+
+  <rect x="150" y="140" width="560" height="70" class="layer"/>
+  <text x="430" y="165" text-anchor="middle" class="title">Adapters</text>
+  <rect x="180" y="175" width="230" height="26" class="box"/>
+  <text x="295" y="193" text-anchor="middle" class="label">FastAPI — REST + one WebSocket</text>
+  <rect x="450" y="175" width="230" height="26" class="box"/>
+  <text x="565" y="193" text-anchor="middle" class="label">CLI — zygos / inspect / trace</text>
+
+  <line x1="430" y1="210" x2="430" y2="240" class="flow"/>
+  <text x="640" y="230" class="note">runtime never imports adapters</text>
+
+  <rect x="230" y="240" width="400" height="60" class="layer"/>
+  <text x="430" y="265" text-anchor="middle" class="title">Runtime</text>
+  <text x="430" y="285" text-anchor="middle" class="label">composition root — construction only</text>
+
+  <line x1="430" y1="300" x2="430" y2="330" class="flow"/>
+
+  <rect x="230" y="330" width="400" height="55" class="planned"/>
+  <text x="430" y="353" text-anchor="middle" class="title">Event Bus</text>
+  <text x="430" y="372" text-anchor="middle" class="note">planned — RFC-0002 (facts as events; commands stay direct)</text>
+
+  <line x1="430" y1="385" x2="430" y2="415" class="flow"/>
+
+  <rect x="70" y="415" width="720" height="160" class="layer"/>
+  <text x="430" y="440" text-anchor="middle" class="title">Services (Protocols)</text>
+  <rect x="95" y="455" width="140" height="26" class="box"/>
+  <text x="165" y="473" text-anchor="middle" class="label">ModelService</text>
+  <rect x="255" y="455" width="140" height="26" class="box"/>
+  <text x="325" y="473" text-anchor="middle" class="label">MemoryService</text>
+  <rect x="415" y="455" width="140" height="26" class="box"/>
+  <text x="485" y="473" text-anchor="middle" class="label">ToolService</text>
+  <rect x="575" y="455" width="140" height="26" class="box"/>
+  <text x="645" y="473" text-anchor="middle" class="label">SkillService</text>
+  <rect x="95" y="495" width="140" height="26" class="box"/>
+  <text x="165" y="513" text-anchor="middle" class="label">TraceService</text>
+  <rect x="255" y="495" width="140" height="26" class="box"/>
+  <text x="325" y="513" text-anchor="middle" class="label">ConfigService</text>
+  <rect x="415" y="495" width="140" height="26" class="box"/>
+  <text x="485" y="513" text-anchor="middle" class="label">PluginService</text>
+  <rect x="575" y="495" width="140" height="26" class="box"/>
+  <text x="645" y="513" text-anchor="middle" class="label">SchedulerService</text>
+  <rect x="335" y="535" width="140" height="26" class="box"/>
+  <text x="405" y="553" text-anchor="middle" class="label">VoiceService</text>
+  <text x="640" y="553" class="note">state exposed via snapshots</text>
+
+  <line x1="430" y1="575" x2="430" y2="605" class="flow"/>
+
+  <rect x="150" y="605" width="560" height="95" class="layer"/>
+  <text x="430" y="630" text-anchor="middle" class="title">Providers (config-declared plugins)</text>
+  <rect x="175" y="645" width="90" height="26" class="box"/>
+  <text x="220" y="663" text-anchor="middle" class="label">ollama</text>
+  <rect x="280" y="645" width="90" height="26" class="box"/>
+  <text x="325" y="663" text-anchor="middle" class="label">openai</text>
+  <rect x="385" y="645" width="90" height="26" class="box"/>
+  <text x="430" y="663" text-anchor="middle" class="label">anthropic</text>
+  <rect x="490" y="645" width="90" height="26" class="box"/>
+  <text x="535" y="663" text-anchor="middle" class="label">vllm</text>
+  <rect x="595" y="645" width="90" height="26" class="box"/>
+  <text x="640" y="663" text-anchor="middle" class="label">fake</text>
+
+  <line x1="430" y1="700" x2="430" y2="730" class="flow"/>
+
+  <rect x="230" y="730" width="400" height="60" class="layer"/>
+  <text x="430" y="755" text-anchor="middle" class="title">Models</text>
+  <text x="430" y="775" text-anchor="middle" class="label">local (Ollama, vLLM) and cloud (OpenAI, Anthropic)</text>
+
+  <rect x="70" y="820" width="720" height="55" class="planned"/>
+  <text x="430" y="843" text-anchor="middle" class="title">Voice I/O — STT in, TTS out</text>
+  <text x="430" y="862" text-anchor="middle" class="note">planned — required before 2.0 (binary audio frames over the session WebSocket)</text>
+</svg>
