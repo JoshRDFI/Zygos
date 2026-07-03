@@ -4,11 +4,13 @@
 - **Author:** Zygos maintainers
 - **Created:** 2026-07-03
 - **Governs:** Zygos 2.0 runtime core, service contracts, wiring, and API adapter design
+- **Implementation status:** tracked in [ROADMAP.md](../../ROADMAP.md) (Milestone 1 complete as of 2026-07-03)
 
 ## Motivation
 
 Zygos 2.0 migrates the proven TypeScript v1 runtime to a Python-first AI runtime
-(ZYGOS_V2_IMPLEMENTATION.md). The migration's core principle is "do not rewrite —
+(see [VISION.md](../../VISION.md) and [ROADMAP.md](../../ROADMAP.md), which
+absorbed the original working blueprints). The migration's core principle is "do not rewrite —
 migrate": preserve the concepts that work (provider routing, RDT reasoning,
 layered context, learning, tools) while fixing the architectural debts the v1
 code review identified. This RFC defines the service architecture every
@@ -194,7 +196,8 @@ class Tool(Protocol):
 ## Migration Plan
 
 Order of porting, each step a working, tested milestone (v1 stays frozen as the
-reference; Stage 0 bugfix-only policy continues):
+reference; Stage 0 bugfix-only policy continues). Live status lives in
+[ROADMAP.md](../../ROADMAP.md):
 
 1. **Config** — Pydantic schema + loader (port fail-fast credential semantics).
 2. **Providers + router** — ModelService with Ollama/OpenAI/Anthropic/vLLM
