@@ -46,7 +46,7 @@ service's concrete class. The nine service contracts are:
 | `TraceService` | `begin_trace`, `record_event`, `snapshot_state`, `finish_trace`, `reflect` | provider observability (extended) |
 | `ConfigService` | `load`, `validate`, `get` | config loader/schema (Pydantic) |
 | `PluginService` | `resolve(kind, name) -> type` | — (new) |
-| `SchedulerService` | `schedule`, `cancel`, `list` | — (interface only; implementation deferred to Phase 7) |
+| `SchedulerService` | `schedule`, `cancel`, `list` | — (interface only; implementation deferred to the scheduler and autonomy milestone) |
 | `VoiceService` | `transcribe_stream(audio) -> text events`, `synthesize_stream(text) -> audio` | — (interface only; engines arrive in the voice RFC) |
 
 `VoiceService` is defined from the start so that the transport and service layers are
@@ -78,7 +78,7 @@ providers:
 
 Reading the config tells you exactly what code runs. Nothing auto-activates from the
 filesystem or installed entry points. Entry-point discovery is deliberately deferred to
-the Phase 8 ecosystem RFC, after a community exists to need it.
+the community-ecosystem milestone and its RFC, after a community exists to need it.
 
 ---
 
@@ -178,7 +178,7 @@ See [ROADMAP.md](./ROADMAP.md) for the full milestone plan.
 
 ## Appendix A — v1 Reference Implementation
 
-The v1 TypeScript runtime is frozen (Stage 0: bug-fixes only). It is the reference the
+The v1 TypeScript runtime is frozen (Stage 0: bugfixes only). It is the reference the
 Python migration ports from; concepts that worked are preserved, structural problems
 identified in the v1 review are fixed. Six subsystems make up the frozen runtime:
 
@@ -192,7 +192,7 @@ See [docs/v1/PROVIDER_HARDENING.md](./docs/v1/PROVIDER_HARDENING.md).
 Prelude → Recurrent → Coda reasoning pipeline, confidence gating (coherence,
 completeness, consistency metrics), adaptive compute heuristics, and attention mode
 control. Operates entirely above the model API — no access to model internals required.
-The v2 counterpart is `ReasoningState` and the RDT service (Phase 3).
+The v2 counterpart is `ReasoningState` and the RDT milestone (M3).
 See [docs/v1/RDT_REASONING_GUIDE.md](./docs/v1/RDT_REASONING_GUIDE.md).
 
 **Context management** (`src/context/`). Layered memory with SQLite in WAL mode and an

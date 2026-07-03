@@ -4,7 +4,7 @@ Zygos is an open, modular AI runtime designed to serve as the infrastructure lay
 
 ## Philosophy
 
-Zygos is built on a single organizing conviction: everything required to run an intelligent system should be modular, inspectable, replaceable, and understandable. That conviction shapes every design decision. There is no hidden state. Every decision is traceable back to the inputs and context that drove it. Every subsystem exposes a clean, stable interface. Every model can be swapped without touching the rest of the runtime. Every memory can be inspected by the operator. Every skill lives as a discrete, auditable artifact. Every tool can be replaced with an alternative implementation. Every workflow is composable from smaller, well-defined pieces.
+Zygos is built on a single organizing conviction: everything required to run an intelligent system should be modular, inspectable, replaceable, and understandable. That conviction shapes every design decision. Nothing is designed to hide state. Every decision is traceable back to the inputs and context that drove it. Every subsystem exposes a clean, stable interface. Every model can be swapped without touching the rest of the runtime. Every memory can be inspected by the operator. Every skill lives as a discrete, auditable artifact. Every tool can be replaced with an alternative implementation. Every workflow is composable from smaller, well-defined pieces.
 
 These principles are captured in their immutable form in [CONSTITUTION.md](CONSTITUTION.md), which governs all changes to the runtime's core behavior.
 

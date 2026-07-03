@@ -1,6 +1,6 @@
 # Zygos Roadmap
 
-Zygos v1 (the TypeScript CLI runtime) is frozen at Stage 0: bugfix-only, no new
+Zygos v1 (the TypeScript CLI runtime) is frozen at Stage 0: bugfixes only, no new
 features. It serves as the reference implementation — the proven concepts to
 migrate, not the architecture to extend.
 
@@ -33,7 +33,7 @@ decision requires an accepted RFC before implementation begins.
   implementation until that RFC is accepted. Where RFC-0001 already governs a
   milestone, that acceptance carries through; subsequent milestones (React UI,
   Voice, and the community ecosystem) each need their own RFC.
-- **v1 stays frozen.** The TypeScript runtime remains Stage 0 (bugfix-only)
+- **v1 stays frozen.** The TypeScript runtime remains Stage 0 (bugfixes only)
   throughout the v2 build. It is the reference, not the runway.
 - **Constitution defaults never weaken.** Learning and self-modification ship
   with `approval_mode: manual` and `auto_apply_low_risk: false` as the only
@@ -43,7 +43,7 @@ decision requires an accepted RFC before implementation begins.
 ## v1
 
 The v1 architecture is documented in [ARCHITECTURE.md](ARCHITECTURE.md)
-(Appendix A) and will be preserved in `docs/v1/` as the v1 documentation is migrated. Until then, the TypeScript source under `src/` and
-the current [ARCHITECTURE.md](ARCHITECTURE.md) serve as the v1 record. The
+(Appendix A). The v1 guides live in [docs/v1/](./docs/v1/), and the TypeScript
+source under `src/` remains the authoritative implementation reference. The
 [docs/rfcs/](docs/rfcs/) directory is the decision log that governs everything
 built from here.
