@@ -55,4 +55,10 @@ ships and at the 2.0 release.
 | **Skills** | No guarantee — breaking changes allowed, noted in commit history | Beta (format may evolve with migration notes) |
 | **Plugins** | No guarantee — breaking changes allowed, noted in commit history | Stable (constructor contract `cls(settings, client)` and Protocol conformance) |
 | **Configs** | No guarantee — breaking changes allowed, noted in commit history | Stable (schema versioned, one-minor deprecation cycle) |
-| **Traces** | No guarantee — breaking changes allowed, noted in commit history | Beta (schema may evolve with migration notes) |
+| **Memory database** | No guarantee — schema may change without migration; deleting and rebuilding the database is an acceptable upgrade path | Beta (schema versioned; forward migrations provided at minor versions) |
+| **Trace schema** | No guarantee — breaking changes allowed, noted in commit history | Beta (schema carries a version field and may evolve with migration notes) |
+
+Stateful artifacts — the memory database and the trace store — follow a
+migration policy rather than an interface policy: compatibility means your
+existing data survives an upgrade. The table above states when that survival is
+promised and in what form.
