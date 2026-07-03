@@ -1,6 +1,6 @@
 # RFC-0001: Service Architecture
 
-- **Status:** Draft
+- **Status:** Accepted (2026-07-03)
 - **Author:** Zygos maintainers
 - **Created:** 2026-07-03
 - **Governs:** Zygos 2.0 runtime core, service contracts, wiring, and API adapter design
