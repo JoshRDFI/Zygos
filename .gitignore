@@ -43,15 +43,14 @@ Thumbs.db
 *.db
 *.sqlite
 *.sqlite3
+
+# Agent tooling (local-only; not part of the project)
+.claude/
 .gitnexus
+.superpowers/
+docs/superpowers/
 AGENTS.md
 CLAUDE.md
-.claude/skills/gitnexus/gitnexus-cli/SKILL.md
-.claude/skills/gitnexus/gitnexus-debugging/SKILL.md
-.claude/skills/gitnexus/gitnexus-exploring/SKILL.md
-.claude/skills/gitnexus/gitnexus-guide/SKILL.md
-.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md
-.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md
 
 # Python (backend v2)
 backend/.venv/
