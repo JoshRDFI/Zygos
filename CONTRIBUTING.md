@@ -63,15 +63,7 @@ An RFC is required before implementing:
 RFCs are numbered sequentially and live in [`docs/rfcs/`](docs/rfcs/). File your RFC as
 `docs/rfcs/RFC-NNNN-short-title.md`, where `NNNN` is the next available number.
 
-Every RFC must contain the following sections in order:
-
-1. **Motivation** — why this change matters
-2. **Problem Statement** — what is broken or missing today
-3. **Proposed Design** — the concrete solution, with enough detail to implement
-4. **Alternatives Considered** — what else was evaluated and why it was rejected
-5. **Migration Plan** — how existing consumers move from old to new
-6. **Risks** — what could go wrong and how those risks are mitigated
-7. **Acceptance Criteria** — the observable conditions that confirm the RFC is done
+The process, available statuses, and canonical section template are documented in [docs/rfcs/README.md](./docs/rfcs/README.md). Every RFC ends with an **Architectural Impact** section answering whether the change increases coupling, creates hidden state, bypasses a service boundary, or violates the Constitution.
 
 Open a pull request with the RFC document only. The RFC must be reviewed and merged
 before any implementation code is written. Once an RFC is accepted it is **immutable**
