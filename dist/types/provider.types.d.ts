@@ -1,4 +1,4 @@
-import type { HarnessError, ProviderRoute, UserTurnInput } from './core.types.js';
+import type { ZygosError, ProviderRoute, UserTurnInput } from './core.types.js';
 export type SupportedProviderKey = 'openai' | 'anthropic' | 'ollama' | 'vllm' | 'custom';
 export type ProtocolType = 'openai_chat' | 'anthropic_messages';
 export type ProtocolMessageRole = 'system' | 'user' | 'assistant' | 'tool';
@@ -59,7 +59,7 @@ export type ProviderStreamEvent = {
     response: ModelResponse;
 } | {
     type: 'error';
-    error: HarnessError;
+    error: ZygosError;
 };
 export interface Provider {
     readonly key: SupportedProviderKey;
@@ -85,7 +85,7 @@ export interface ProviderPlan {
 }
 export interface ProviderFailureContext {
     attemptedRoute: ProviderRoute;
-    error: HarnessError;
+    error: ZygosError;
     plan: ProviderPlan;
     attempt: number;
 }

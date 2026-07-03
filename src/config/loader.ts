@@ -163,8 +163,8 @@ const defaultConfig: ZygosConfig = {
   },
   learning: {
     enabled: true,
-    approvalMode: 'auto',
-    autoApplyLowRisk: true,
+    approvalMode: 'manual',
+    autoApplyLowRisk: false,
     maxProposalsPerCycle: 3,
     minObservationsForProposal: 8,
     observeWindowSize: 200,

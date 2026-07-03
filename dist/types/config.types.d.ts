@@ -61,12 +61,12 @@ export interface ProvidersConfig {
         custom?: ProviderCredentialConfig;
     };
 }
-export interface HarnessConfig {
+export interface ZygosConfig {
     runtime: RuntimeConfig;
     providers: ProvidersConfig;
     rdt: RDTConfig;
     learning: LearningConfig;
     interview: InterviewConfig;
 }
-export type HarnessConfigSchema = z.infer<typeof configSchema>;
+export type ZygosConfigSchema = z.infer<typeof configSchema>;
 //# sourceMappingURL=config.types.d.ts.map

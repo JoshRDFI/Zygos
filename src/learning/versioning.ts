@@ -14,7 +14,7 @@ import type {
 
 const DEFAULT_STATE: LearningState = {
   enabled: true,
-  approvalMode: 'auto',
+  approvalMode: 'manual',
   metrics: {
     observedExecutions: 0,
     proposalsCreated: 0,

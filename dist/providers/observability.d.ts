@@ -1,4 +1,4 @@
-import type { HarnessError } from '../types/core.types.js';
+import type { ZygosError } from '../types/core.types.js';
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export interface LogEntry {
     level: LogLevel;
@@ -67,6 +67,6 @@ export declare class RdtMetrics {
     }): void;
     snapshot(): RdtMetricSnapshot;
 }
-export declare function sanitizeError(error: unknown): HarnessError;
-export declare function isTransientError(error: HarnessError): boolean;
+export declare function sanitizeError(error: unknown): ZygosError;
+export declare function isTransientError(error: ZygosError): boolean;
 //# sourceMappingURL=observability.d.ts.map

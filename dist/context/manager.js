@@ -20,7 +20,7 @@ export class ContextManager {
     compactor;
     searchService;
     snapshotCache = new Map();
-    logger = new StructuredLogger('context.manager', process.env.HARNESS_DEBUG === '1');
+    logger = new StructuredLogger('context.manager', process.env.ZYGOS_DEBUG === '1');
     metrics = new ContextMetrics();
     lockChains = new Map();
     initialized = false;

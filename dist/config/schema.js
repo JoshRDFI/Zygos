@@ -160,8 +160,8 @@ const rdtSchema = z
 });
 const learningSchema = z.object({
     enabled: z.boolean().default(true),
-    approvalMode: learningApprovalModeSchema.default('auto'),
-    autoApplyLowRisk: z.boolean().default(true),
+    approvalMode: learningApprovalModeSchema.default('manual'),
+    autoApplyLowRisk: z.boolean().default(false),
     maxProposalsPerCycle: z.number().int().positive().max(20).default(3),
     minObservationsForProposal: z.number().int().positive().max(200).default(8),
     observeWindowSize: z.number().int().positive().max(2000).default(200),

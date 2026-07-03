@@ -8,7 +8,7 @@ export class BaseProvider {
     logger;
     constructor(config) {
         this.config = config;
-        this.logger = new StructuredLogger(`provider.${this.constructor.name}`, process.env.HARNESS_DEBUG === '1');
+        this.logger = new StructuredLogger(`provider.${this.constructor.name}`, process.env.ZYGOS_DEBUG === '1');
     }
     supportsModel(model) {
         if (!this.config.models || this.config.models.length === 0) {

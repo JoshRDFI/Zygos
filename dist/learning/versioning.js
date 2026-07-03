@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 const DEFAULT_STATE = {
     enabled: true,
-    approvalMode: 'auto',
+    approvalMode: 'manual',
     metrics: {
         observedExecutions: 0,
         proposalsCreated: 0,

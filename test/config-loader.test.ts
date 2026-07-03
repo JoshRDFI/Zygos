@@ -12,6 +12,12 @@ test('loadConfig returns hardened defaults', async () => {
   assert.equal(typeof config.providers.observability.debug, 'boolean');
 });
 
+test('loadConfig defaults learning to human approval (never autonomous)', async () => {
+  const config = await loadConfig();
+  assert.equal(config.learning.autoApplyLowRisk, false);
+  assert.equal(config.learning.approvalMode, 'manual');
+});
+
 test('loadConfig validates malformed fallback routes', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ghv2-'));
   const file = join(dir, 'config.yaml');

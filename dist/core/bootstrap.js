@@ -132,7 +132,7 @@ export async function createEngine(configPath, routeOverride) {
         }
     }
     const stateStore = new InMemoryStateStore();
-    const contextDbPath = process.env.HARNESS_CONTEXT_DB ?? '.golden/context.db';
+    const contextDbPath = process.env.ZYGOS_CONTEXT_DB ?? '.zygos/context.db';
     const contextManager = new ContextManager(new SQLiteContextStorage({ dbPath: contextDbPath }), {
         defaultModelContextTokens: 32_000
     });
@@ -155,7 +155,7 @@ export async function createEngine(configPath, routeOverride) {
         }
     });
     const toolExecutor = new ToolExecutor(registry);
-    const learningDbPath = process.env.HARNESS_LEARNING_DB ?? '.golden/learning.db';
+    const learningDbPath = process.env.ZYGOS_LEARNING_DB ?? '.zygos/learning.db';
     const learningManager = new LearningManager({
         config: config.learning,
         dbPath: learningDbPath,
@@ -194,7 +194,7 @@ export async function createEngine(configPath, routeOverride) {
         gracefulDegradationMessage: config.providers.gracefulDegradationMessage
     });
     const interviewer = new Interviewer({
-        dbPath: process.env.HARNESS_INTERVIEW_DB ?? contextDbPath,
+        dbPath: process.env.ZYGOS_INTERVIEW_DB ?? contextDbPath,
         config: config.interview,
         askProvider: async (prompt) => {
             const interviewInput = {

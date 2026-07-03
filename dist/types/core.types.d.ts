@@ -1,4 +1,4 @@
-import type { HarnessConfig } from './config.types.js';
+import type { ZygosConfig } from './config.types.js';
 import type { ProviderPlan } from './provider.types.js';
 import type { ToolCall, ToolExecutionContext, ToolExecutionEvent, ToolProgressEvent, ToolResult } from './tool.types.js';
 import type { ContextManagerLike, SearchQuery, SearchResult } from './context.types.js';
@@ -37,7 +37,7 @@ export interface QuerySessionState {
     outputBuffer: string;
     startedAt: number;
     updatedAt: number;
-    lastError?: HarnessError;
+    lastError?: ZygosError;
 }
 export interface TurnResult {
     sessionId: string;
@@ -67,7 +67,7 @@ export interface TurnResult {
         };
     };
 }
-export interface HarnessError {
+export interface ZygosError {
     code: 'recoverable_provider_error' | 'network_timeout' | 'malformed_response' | 'rate_limited' | 'authentication_error' | 'provider_unavailable' | 'tool_contract_error' | 'permission_denied' | 'budget_exhausted' | 'fatal_runtime_error';
     message: string;
     details?: Record<string, unknown>;
@@ -140,7 +140,7 @@ export type EngineEvent = {
     result: TurnResult;
 } | {
     type: 'turn_failed';
-    error: HarnessError;
+    error: ZygosError;
 };
 export interface StateStore {
     saveSession(session: QuerySessionState): Promise<void>;
@@ -173,7 +173,7 @@ export interface ToolExecutorLike {
     }>;
 }
 export interface QueryEngineDeps {
-    config: HarnessConfig;
+    config: ZygosConfig;
     stateStore: StateStore;
     toolExecutor: ToolExecutorLike;
     contextManager?: ContextManagerLike;

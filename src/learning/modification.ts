@@ -176,14 +176,19 @@ export class ToolModificationSystem {
       baselineLatency += baselineResult.durationMs;
       if (baselineResult.ok) baselineOk += 1;
 
-      // temporarily swap for candidate execution
+      // temporarily swap for candidate execution; always restore the baseline
+      // even if the candidate run throws, so a failed test never leaves the
+      // runtime mutated.
       this.runtime.updateTool(proposal.toolName, patchedDef);
-      const started = Date.now();
-      const candidateResult = await this.runtime.executeForLearning({ ...call, name: patchedDef.meta.name });
-      const elapsed = Date.now() - started;
-      candidateLatency += Math.min(candidateResult.durationMs || elapsed, this.options.maxResourceCostPerTestMs);
-      if (candidateResult.ok) candidateOk += 1;
-      this.runtime.updateTool(proposal.toolName, originalDef);
+      try {
+        const started = Date.now();
+        const candidateResult = await this.runtime.executeForLearning({ ...call, name: patchedDef.meta.name });
+        const elapsed = Date.now() - started;
+        candidateLatency += Math.min(candidateResult.durationMs || elapsed, this.options.maxResourceCostPerTestMs);
+        if (candidateResult.ok) candidateOk += 1;
+      } finally {
+        this.runtime.updateTool(proposal.toolName, originalDef);
+      }
     }
 
     const record: ABTestRecord = {
