@@ -62,6 +62,9 @@ Every RFC must end with an **Architectural Impact** section that answers, at min
 - Does this create hidden state that is not visible at service boundaries?
 - Does this bypass a service boundary established by a prior RFC?
 - Does it violate the [Constitution](../../CONSTITUTION.md)?
+- Can it be tested independently of the services it touches?
+- Does it require a new service, or does it belong in an existing one?
+- Can it be removed later without affecting the runtime core?
 
 ## Index
 
