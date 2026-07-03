@@ -7,7 +7,7 @@ skills, plugins, configs, and traces across releases.
 ## API stability levels
 
 **Stable** — Breaking changes only at a major version, after a deprecation cycle
-of at least one minor version. Deprecated symbols are annotated and logged; they
+of one minor version. Deprecated symbols are annotated and logged; they
 are removed in the next major.
 
 **Beta** — Breaking changes are allowed at minor versions; migration notes are

@@ -28,6 +28,8 @@ After the work ships, the maintainer updates the status to **Implemented**. The 
 
 **Rejected** — the proposal was not accepted; kept in this directory for the historical record.
 
+**Reserved** — the RFC number has been allocated and the title is locked; no document exists yet.
+
 Amendments to Accepted or later RFCs may only be made by writing a new RFC that supersedes the original.
 
 ## Numbering

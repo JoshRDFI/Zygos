@@ -9,7 +9,9 @@ Zygos v1 is a working TypeScript CLI runtime located in `src/`. It implements th
 
 The v2 vision calls for a self-hosted AI runtime with first-class support for local inference, voice (STT/TTS), Pydantic-validated data contracts, and an asyncio-native execution model. The frameworks most naturally suited to that goal — FastAPI, Pydantic, Whisper-family inference libraries, and the broader Python ML ecosystem — are Python-first. Maintaining the TypeScript runtime while simultaneously building a Python runtime that depended on interop layers or a shared language would increase both complexity and contributor overhead with no architectural benefit.
 
-The only serious alternative was continuing in TypeScript with Node.js ML bindings and an ONNX runtime. That path would have required third-party bindings for every inference library, and it would have cut the project off from the PyPI ecosystem that community AI tooling overwhelmingly targets.
+The primary alternative evaluated was continuing in TypeScript with Node.js ML bindings and an ONNX runtime. That path would have required third-party bindings for every inference library, and it would have cut the project off from the PyPI ecosystem that community AI tooling overwhelmingly targets.
+
+(This decision was evaluated at project inception; no RFC covers this decision.)
 
 ## Decision
 

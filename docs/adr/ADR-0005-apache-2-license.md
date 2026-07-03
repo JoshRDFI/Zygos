@@ -12,6 +12,8 @@ Two alternatives were evaluated:
 - **MIT**: maximally permissive and familiar, but provides no explicit patent grant. Corporate legal teams evaluating infrastructure software frequently flag the absence of a patent grant as a compliance risk; MIT's brevity becomes a liability in that context.
 - **AGPL-3.0**: provides the strongest copyleft protection and would require anyone operating a modified version as a network service to publish their changes. This is appropriate for some projects but deters corporate adoption of infrastructure components, which runs counter to the goal of building a widely-used plugin ecosystem.
 
+This decision was evaluated at project inception; no RFC covers this decision.
+
 ## Decision
 
 Zygos is licensed under the Apache License, Version 2.0. Apache-2.0 includes an explicit patent grant from all contributors, making the license safe for corporate infrastructure use. It permits commercial use, modification, and distribution with minimal conditions (preservation of notices), which keeps the plugin ecosystem adoption-friendly. The `LICENSE` file at the repository root is authoritative.
