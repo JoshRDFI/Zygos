@@ -11,3 +11,4 @@ The runtime should degrade gracefully.
 Local-first is preferred whenever practical.
 Open standards over proprietary formats.
 Documentation evolves alongside implementation.
+Architectural debt is treated as seriously as technical debt.
