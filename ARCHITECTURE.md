@@ -147,6 +147,42 @@ architecture bug**.
 
 ---
 
+## Event Model (planned — RFC-0002)
+
+> **Design pending.** This section records architectural intent. The event
+> schema, delivery semantics, and the relationship to `ExecutionContext` are
+> decided by RFC-0002 ("Runtime Event Bus and ExecutionContext", currently
+> [Reserved](./docs/rfcs/README.md#index)) — not by this page.
+
+Every significant runtime action emits an event onto a runtime event bus:
+request started, memory retrieved, skill executed, tool completed, model
+selected, trace finalized. Facts are emitted as events; commands stay direct
+service calls.
+
+The event bus is first-class because of what it removes. Tracing, metrics, and
+future plugins subscribe to events instead of coupling to service internals, so
+a new subscriber — the Introspection Console, a metrics exporter, a third-party
+extension — is added without modifying any emitting service.
+
+## Capability Registry (planned — RFC-0003)
+
+> **Design pending.** The registry contract is decided by RFC-0003
+> ("Capability Registry, Runtime Manifest, and Inspection", currently
+> [Reserved](./docs/rfcs/README.md#index)), which also covers the runtime
+> manifest and `zygos inspect`.
+
+Services ask the registry "who can satisfy the *Vision* capability?" rather
+than asking a specific provider "do you support vision?". Capabilities include
+local inference, web search, speech, image generation, scheduling, and
+filesystem access.
+
+The registry is the mechanism behind the Constitution's "Every component must
+be replaceable": consumers bind to capabilities, never to implementations —
+which is also what makes capability renegotiation possible when a provider
+fails.
+
+---
+
 ## Tool Contract
 
 Tools implement a four-phase Protocol. Only `execute` is mandatory; the other three
