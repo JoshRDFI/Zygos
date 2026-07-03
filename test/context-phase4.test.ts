@@ -82,6 +82,36 @@ test('token budget calculates plan and report with overflow risk', () => {
   assert.ok(['low', 'medium', 'high'].includes(report.overflowRisk));
 });
 
+test('markTurnsCompacted flags exactly the requested turns, including large batches', async () => {
+  await withTempStorage(async (storage) => {
+    await storage.upsertSession('s-batch', 'session');
+    const total = 600; // exceeds one bind-variable chunk
+    const turns = Array.from({ length: total }, (_unused, index) =>
+      makeTurn({
+        id: `bt${index}`,
+        sessionId: 's-batch',
+        turnIndex: index,
+        speaker: 'user',
+        contentType: 'message',
+        content: `turn number ${index}`
+      })
+    );
+    await storage.saveTurns(turns);
+
+    // compact all but the last turn
+    const toCompact = turns.slice(0, total - 1).map((turn) => turn.id);
+    await storage.markTurnsCompacted('s-batch', toCompact);
+
+    const remaining = await storage.getTurns('s-batch', false);
+    assert.equal(remaining.length, 1);
+    assert.equal(remaining[0]?.id, `bt${total - 1}`);
+
+    const all = await storage.getTurns('s-batch', true);
+    assert.equal(all.length, total);
+    assert.equal(all.filter((turn) => turn.isCompacted).length, total - 1);
+  });
+});
+
 test('compaction preserves tool results and creates summary turn', async () => {
   const budget = new TokenBudgetSystem();
   const compactor = new ContextCompactor(budget);

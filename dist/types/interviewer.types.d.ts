@@ -95,6 +95,8 @@ export interface InterviewSession {
     maxQuestions: number;
     complexitySignal: number;
     scopeCreepSignal: number;
+    /** Non-fatal degradations (e.g. askProvider failures) surfaced for inspection. */
+    providerWarnings?: string[];
     activePlanId?: string;
 }
 export interface InterviewTemplate {

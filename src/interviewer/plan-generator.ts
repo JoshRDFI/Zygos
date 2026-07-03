@@ -106,6 +106,11 @@ export class BuildPlanGenerator {
       '## Risks',
       ...(plan.risks.length > 0 ? plan.risks.map((risk) => `- ${risk}`) : ['- No critical risks captured']),
       '',
+      '## Unresolved Questions',
+      ...(plan.unresolvedQuestions.length > 0
+        ? plan.unresolvedQuestions.map((question) => `- ${question}`)
+        : ['- None — all asked questions were answered']),
+      '',
       '## Roadmap',
       ...plan.roadmap.flatMap((phase) => [
         `### ${phase.title}`,

@@ -112,7 +112,7 @@ export class StreamingToolExecutor {
         }
         return results;
     }
-    async *executeOneStream(call, ctx) {
+    async *executeOneStream(call, ctx, allowFallback = true) {
         const startedAt = Date.now();
         const parsedCall = toolCallSchema.parse(call);
         yield { type: 'tool_started', call: parsedCall };
@@ -260,14 +260,40 @@ export class StreamingToolExecutor {
                 ctx.cancellationToken?.signal.removeEventListener('abort', onAbort);
             }
         }
-        if (result && !result.ok && def.meta.fallbackTool) {
+        // One level of fallback only: the nested call runs with allowFallback=false,
+        // so fallback chains/cycles can never recurse.
+        if (result && !result.ok && allowFallback && def.meta.fallbackTool && def.meta.fallbackTool !== def.meta.name) {
             const fallback = this.registry.getByName(def.meta.fallbackTool);
             if (fallback) {
-                this.logger.log('warn', 'Primary tool failed, fallback configured', {
+                this.logger.log('warn', 'Primary tool failed, executing fallback', {
                     primary: def.meta.name,
                     fallback: fallback.meta.name,
                     callId: parsedCall.id
                 });
+                const inner = this.executeOneStream({ ...parsedCall, name: fallback.meta.name }, ctx, false);
+                let fallbackResult;
+                while (true) {
+                    const next = await inner.next();
+                    if (next.done) {
+                        fallbackResult = next.value;
+                        break;
+                    }
+                    // Forward the fallback's started/progress events for traceability, but
+                    // suppress its tool_completed: exactly one completion is emitted below.
+                    if (next.value.type !== 'tool_completed') {
+                        yield next.value;
+                    }
+                }
+                if (fallbackResult.ok) {
+                    result = toolResultSchema.parse({
+                        ...fallbackResult,
+                        warnings: [
+                            ...fallbackResult.warnings,
+                            `Recovered via fallback tool '${fallback.meta.name}' after '${def.meta.name}' failed`
+                        ]
+                    });
+                }
+                // If the fallback also failed, keep the primary error as the result.
             }
         }
         const finalResult = result ?? normalizeErrorResult(parsedCall.id, 'Unknown execution failure', Date.now() - startedAt);

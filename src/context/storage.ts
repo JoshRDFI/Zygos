@@ -256,11 +256,19 @@ export class SQLiteContextStorage {
 
     await this.enqueueWrite(async () => {
       const db = this.requireWriteDb();
-      const stmt = db.prepare('UPDATE turns SET is_compacted = 1, updated_at = ? WHERE session_id = ? AND id = ?');
       const now = Date.now();
+      // Batch with IN (...) instead of one UPDATE per turn; chunk to stay
+      // safely under SQLite's bind-variable limit.
+      const chunkSize = 500;
       const tx = db.transaction((ids: string[]) => {
-        for (const id of ids) {
-          stmt.run(now, sessionId, id);
+        for (let offset = 0; offset < ids.length; offset += chunkSize) {
+          const chunk = ids.slice(offset, offset + chunkSize);
+          const placeholders = chunk.map(() => '?').join(', ');
+          db.prepare(`UPDATE turns SET is_compacted = 1, updated_at = ? WHERE session_id = ? AND id IN (${placeholders})`).run(
+            now,
+            sessionId,
+            ...chunk
+          );
         }
       });
       tx(turnIds);

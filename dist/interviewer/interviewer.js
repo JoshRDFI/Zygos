@@ -411,7 +411,14 @@ export class Interviewer {
                 .join('\n\n');
             return (await this.deps.askProvider?.(prompt))?.trim() ?? baseQuestion;
         }
-        catch {
+        catch (error) {
+            // Degrade gracefully to the base question, but record why so the
+            // failure is inspectable on the session instead of silently hidden.
+            const message = error instanceof Error ? error.message : String(error);
+            session.providerWarnings = [
+                ...(session.providerWarnings ?? []),
+                `askProvider failed; used base question instead: ${message}`
+            ];
             return baseQuestion;
         }
     }

@@ -228,18 +228,32 @@ function resolveEnvPlaceholders(value: unknown, keyPath = ''): unknown {
 }
 
 function validateCredentialRequirements(config: ZygosConfig): void {
-  const routes = [config.providers.primary, ...config.providers.fallbacks];
-  for (const route of routes) {
+  const routes = [
+    { route: config.providers.primary, isPrimary: true },
+    ...config.providers.fallbacks.map((route) => ({ route, isPrimary: false }))
+  ];
+  for (const { route, isPrimary } of routes) {
     const credential = config.providers.credentials[route.provider as keyof typeof config.providers.credentials];
     if (!credential || credential.enabled === false) {
       continue;
     }
 
     const requireApiKey = credential.requireApiKey ?? ['openai', 'anthropic'].includes(route.provider);
-    if (requireApiKey && !credential.apiKey) {
+    const envKey = `${route.provider.toUpperCase()}_API_KEY`;
+    if (requireApiKey && !credential.apiKey && !process.env[envKey]) {
+      if (isPrimary) {
+        // The primary route cannot work without a key: fail at startup, not mid-request.
+        throw new Error(
+          `Missing apiKey for primary route ${route.provider}:${route.model}. ` +
+            `Set providers.credentials.${route.provider}.apiKey, export ${envKey}, ` +
+            `or set providers.credentials.${route.provider}.enabled: false.`
+        );
+      }
+      // Fallbacks are optional redundancy: keep the loud warning; the router skips them.
       // eslint-disable-next-line no-console
       console.warn(
-        `[config] Missing apiKey for route ${route.provider}:${route.model}. Route will be skipped at runtime unless env var is set.`
+        `[config] Missing apiKey for fallback route ${route.provider}:${route.model}; ` +
+          `this route will be skipped at runtime. Set providers.credentials.${route.provider}.apiKey or ${envKey}.`
       );
     }
   }
@@ -247,7 +261,9 @@ function validateCredentialRequirements(config: ZygosConfig): void {
 
 export async function loadConfig(configPath?: string): Promise<ZygosConfig> {
   if (!configPath) {
-    return configSchema.parse(resolveEnvPlaceholders(defaultConfig)) as ZygosConfig;
+    const defaults = configSchema.parse(resolveEnvPlaceholders(defaultConfig)) as ZygosConfig;
+    validateCredentialRequirements(defaults);
+    return defaults;
   }
 
   const raw = await readFile(configPath, 'utf8');
