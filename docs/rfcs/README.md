@@ -4,7 +4,7 @@ Every significant architectural change to Zygos requires an accepted RFC before 
 
 ## Process
 
-Anyone may write an RFC. Submit it as a pull request that adds a single file named `RFC-NNNN-Title.md` with status **Draft**. Discussion happens on the pull request; the maintainer advances the RFC to **Review** once it is ready for broader evaluation, then to **Accepted** or **Rejected** based on the outcome.
+Anyone may write an RFC. Submit it as a pull request that adds a single file named `RFC-NNNN-Title-Case.md` with status **Draft**. Discussion happens on the pull request; the maintainer advances the RFC to **Review** once it is ready for broader evaluation, then to **Accepted** or **Rejected** based on the outcome.
 
 An RFC is required before implementing:
 

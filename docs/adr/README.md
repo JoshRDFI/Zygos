@@ -2,6 +2,8 @@
 
 Architecture Decision Records (ADRs) document decisions that have already been made — the choice taken, the context that made it necessary, and the consequences that follow from it. They are not proposals. For proposed changes that require discussion and approval before implementation begins, see [../rfcs/README.md](../rfcs/README.md).
 
+Where an accepted RFC already governs a decision, the RFC remains authoritative; the ADR is a focused single-decision extract for quick reference.
+
 ## Format
 
 Each ADR contains the following sections in order:

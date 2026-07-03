@@ -61,7 +61,7 @@ An RFC is required before implementing:
 - any behavior that cuts across multiple services
 
 RFCs are numbered sequentially and live in [`docs/rfcs/`](docs/rfcs/). File your RFC as
-`docs/rfcs/RFC-NNNN-short-title.md`, where `NNNN` is the next available number.
+`docs/rfcs/RFC-NNNN-Title-Case.md`, where `NNNN` is the next available number.
 
 The process, available statuses, and canonical section template are documented in [docs/rfcs/README.md](./docs/rfcs/README.md). Every RFC ends with an **Architectural Impact** section answering whether the change increases coupling, creates hidden state, bypasses a service boundary, or violates the Constitution.
 

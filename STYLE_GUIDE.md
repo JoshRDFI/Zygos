@@ -55,7 +55,7 @@ implementation traceable. Example:
 Public API consists of names exported through package `__init__.py` `__all__` lists
 and all `typing.Protocol` classes. Internal API includes underscore-prefixed modules
 (e.g., `zygos.services._breaker`) and any unexported names. Every module docstring
-must cite its governing RFC section and declare its stability level from
+must cite, where applicable, its governing RFC section and declare its stability level from
 [COMPATIBILITY.md](./COMPATIBILITY.md). Example for Experimental stability:
 `"""Provider routing (RFC-0001 §4). Stability: Experimental."""` Applied prospectively
 — no retroactive renames.
