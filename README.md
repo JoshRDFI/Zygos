@@ -53,6 +53,8 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for branch conventions, code standards,
 - [Architecture](./ARCHITECTURE.md)
 - [Roadmap](./ROADMAP.md)
 - [Constitution](./CONSTITUTION.md)
+- [Compatibility](./COMPATIBILITY.md)
+- [ADRs](./docs/adr/)
 - [Contributing](./CONTRIBUTING.md)
 - [Style Guide](./STYLE_GUIDE.md)
 - [RFCs](./docs/rfcs/)
