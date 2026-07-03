@@ -1,4 +1,4 @@
-"""Declarative configuration schema (RFC-0001 §3, §8)."""
+"""Declarative configuration schema (RFC-0001 §3, §8). Stability: Experimental."""
 
 from typing import Literal
 

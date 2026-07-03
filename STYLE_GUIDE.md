@@ -50,6 +50,14 @@ implementation traceable. Example:
 """Composition root (RFC-0001 §3)."""
 ```
 
+**Public vs internal.** Public API consists of names exported through package
+`__init__.py` `__all__` lists and all `typing.Protocol` classes. Internal API
+includes underscore-prefixed modules (e.g., `zygos.services._breaker`) and any
+unexported names. Every module docstring must cite its governing RFC section and
+declare its stability level from [COMPATIBILITY.md](./COMPATIBILITY.md). Example
+for Experimental stability: `"""Provider routing (RFC-0001 §4). Stability: Experimental."""`
+New code follows this convention; existing modules are updated prospectively as needed.
+
 **Imports at module level.** All import statements belong at the top of the file,
 after the module docstring. Local imports inside functions or classes are not
 permitted except in the rare case where they are required to break a circular import

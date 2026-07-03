@@ -1,4 +1,4 @@
-"""``${ENV_VAR}`` placeholder resolution, ported from v1 loader semantics."""
+"""``${ENV_VAR}`` placeholder resolution, ported from v1 loader semantics. Stability: Experimental."""
 
 import os
 import re

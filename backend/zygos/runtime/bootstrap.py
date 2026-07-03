@@ -1,4 +1,4 @@
-"""Composition root (RFC-0001 §3).
+"""Composition root (RFC-0001 §3). Stability: Experimental.
 
 The ONLY module allowed to construct concrete service implementations.
 It may only construct and connect — any logic beyond assembly is a

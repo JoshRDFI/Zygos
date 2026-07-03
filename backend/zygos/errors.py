@@ -1,4 +1,4 @@
-"""Unified error hierarchy (RFC-0001 §7)."""
+"""Unified error hierarchy (RFC-0001 §7). Stability: Experimental."""
 
 
 class ZygosError(Exception):

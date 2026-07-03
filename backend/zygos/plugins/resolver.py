@@ -1,4 +1,4 @@
-"""Config-declared plugin resolution (RFC-0001 §3).
+"""Config-declared plugin resolution (RFC-0001 §3). Stability: Experimental.
 
 Plugins are declared in config as ``kind -> name -> "module.path:ClassName"``.
 Reading the config tells you exactly what code runs; nothing auto-activates.

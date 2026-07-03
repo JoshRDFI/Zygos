@@ -1,4 +1,4 @@
-"""Config loading: YAML -> env resolution -> validation (RFC-0001 §3, §8)."""
+"""Config loading: YAML -> env resolution -> validation (RFC-0001 §3, §8). Stability: Experimental."""
 
 import logging
 import os
