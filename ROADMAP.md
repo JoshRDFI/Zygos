@@ -40,11 +40,10 @@ decision requires an accepted RFC before implementation begins.
   defaults; no milestone may loosen them. See [ARCHITECTURE.md](ARCHITECTURE.md)
   for the full constitutional constraints on the runtime.
 
-## v1 Reference
+## v1
 
 The v1 architecture is documented in [ARCHITECTURE.md](ARCHITECTURE.md)
-(Appendix A) and will be preserved in `docs/v1/` once that directory is
-established in a later task. Until then, the TypeScript source under `src/` and
+(Appendix A) and will be preserved in `docs/v1/` as the v1 documentation is migrated. Until then, the TypeScript source under `src/` and
 the current [ARCHITECTURE.md](ARCHITECTURE.md) serve as the v1 record. The
 [docs/rfcs/](docs/rfcs/) directory is the decision log that governs everything
 built from here.
