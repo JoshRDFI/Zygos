@@ -13,3 +13,39 @@ class ConfigError(ZygosError):
 
 class PluginError(ZygosError):
     code = "plugin_resolution_failed"
+
+
+class ProviderError(ZygosError):
+    """A model-provider call failed. `retryable` drives router fallback."""
+
+    code = "provider_error"
+    retryable: bool = False
+
+    def __init__(self, message: str, *, provider: str) -> None:
+        super().__init__(message)
+        self.provider = provider
+
+
+class ProviderTimeout(ProviderError):
+    code = "provider_timeout"
+    retryable = True
+
+
+class ProviderRateLimited(ProviderError):
+    code = "provider_rate_limited"
+    retryable = True
+
+
+class ProviderAuthFailed(ProviderError):
+    code = "provider_auth_failed"
+    retryable = False
+
+
+class ProviderUnavailable(ProviderError):
+    code = "provider_unavailable"
+    retryable = True
+
+
+class ProviderProtocolError(ProviderError):
+    code = "provider_protocol_error"
+    retryable = False
