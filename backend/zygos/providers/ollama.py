@@ -1,4 +1,7 @@
-"""Ollama provider — native /api/chat, NDJSON streaming."""
+"""Ollama provider — native /api/chat, NDJSON streaming (RFC-0001 §2).
+
+Stability: Experimental.
+"""
 
 import json
 from typing import AsyncIterator

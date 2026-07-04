@@ -3,6 +3,8 @@
 The ONLY module allowed to construct concrete service implementations.
 It may only construct and connect — any logic beyond assembly is a
 review-blocking smell.
+
+Stability: Experimental.
 """
 
 from dataclasses import dataclass

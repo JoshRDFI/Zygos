@@ -137,6 +137,8 @@ class ProviderRouter:
             provider = self._providers[route.provider]
             routed = request.model_copy(update={"model": route.model})
             for attempt in range(1, self._max_attempts + 1):
+                # Each attempt (including retries) consumes a rate-limit window
+                # because each represents a real provider request.
                 self._limiters[route.provider].record()
                 try:
                     result = await provider.generate(routed)
