@@ -1,6 +1,6 @@
 # RFC-0004: Secret Storage and Key Entry
 
-- **Status:** Draft
+- **Status:** Accepted (2026-07-04)
 - **Author:** Zygos maintainers
 - **Created:** 2026-07-04
 - **Governs:** how provider API keys (and future runtime secrets) are stored,
