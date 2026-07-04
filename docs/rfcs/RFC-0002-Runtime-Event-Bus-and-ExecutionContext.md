@@ -1,6 +1,6 @@
 # RFC-0002: Runtime Event Bus and ExecutionContext
 
-- **Status:** Draft
+- **Status:** Accepted (2026-07-04)
 - **Author:** Zygos maintainers
 - **Created:** 2026-07-04
 - **Governs:** the runtime event bus, the `ExecutionContext` object, and the
@@ -174,20 +174,60 @@ half-open forever.
 
 ### 2. Event bus (strict, observational)
 
-**`Event`** is an immutable Pydantic model:
+**`Event`** is an immutable Pydantic envelope carrying correlation metadata and a
+**strictly typed payload**. Every event type has its own frozen payload model; the
+`payload` field is a closed discriminated union keyed by the payload's `type`, so
+`extra="forbid"` plus the discriminator make a malformed or mistyped payload a
+construction-time error rather than a runtime surprise (mirrors the closed error
+hierarchy in `errors.py`):
 
 ```python
+class EventPayload(BaseModel):
+    """Base for per-event-type payloads. Frozen; unknown fields forbidden."""
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+class RouteClaimed(EventPayload):
+    type: Literal["route.claimed"] = "route.claimed"
+    provider: str
+    model: str
+    probe: bool
+
+class CircuitOpened(EventPayload):
+    type: Literal["circuit.opened"] = "circuit.opened"
+    provider: str
+    model: str
+    last_error_code: str
+
+class ToolCompleted(EventPayload):
+    type: Literal["tool.completed"] = "tool.completed"
+    tool: str
+    ok: bool
+    duration_ms: int
+
+# ... exactly one payload model per taxonomy entry
+AnyPayload = Annotated[
+    Union[RouteClaimed, CircuitOpened, ToolCompleted, ...],
+    Field(discriminator="type"),
+]
+
 class Event(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    type: str            # closed, past-tense taxonomy (see below)
     run_id: str
     session_id: str | None
     span_id: str
     parent_span_id: str | None
     source: str          # emitting service/component name
-    payload: Mapping[str, object]  # event-type-specific shape, documented per type
+    payload: AnyPayload  # strict; the payload's `type` is the discriminator
+
+    @property
+    def type(self) -> str:
+        return self.payload.type
 ```
+
+The closed taxonomy is therefore a set of **(type, payload model)** pairs, not
+bare type strings; adding an event means adding its payload model to the union,
+which — per the extensibility rule below — is a future-RFC change.
 
 Event `type` is a **closed, past-tense taxonomy** — facts that already happened,
 never commands. It is seeded from the ARCHITECTURE Event Model examples plus the
@@ -240,9 +280,9 @@ class ExecutionContext:
     _bus: EventBus
     _cancel: CancelToken
 
-    async def emit(self, type: str, source: str, **payload: object) -> None:
+    async def emit(self, payload: EventPayload, *, source: str) -> None:
         await self._bus.emit(Event(
-            type=type, run_id=self.run_id, session_id=self.session_id,
+            run_id=self.run_id, session_id=self.session_id,
             span_id=self.span_id, parent_span_id=self.parent_span_id,
             source=source, payload=payload,
         ))
@@ -255,8 +295,9 @@ class ExecutionContext:
         return self._cancel.is_set()
 ```
 
-- `emit()` auto-stamps the context's correlation ids onto every event, so a
-  service emits a fact without ever handling ids by hand.
+- `emit()` takes a typed `EventPayload` and auto-stamps the context's correlation
+  ids onto the envelope, so a service emits a validated fact without handling ids
+  by hand.
 - `child(span_id)` derives a read-only sub-context for each nested operation
   (per-tool execution, per-RDT-step), preserving the parent/child span chain.
 - It holds **no service references** — services still receive their dependencies
@@ -348,7 +389,8 @@ that it *fixes* the three defects, each proven by a new test.
   `_try_claim` keeps the section small and lock-free by design.
 - **Taxonomy churn.** A closed event taxonomy could invite frequent RFCs.
   Mitigation: seed it from real needs, mark it explicitly extensible by future
-  RFC, and document `payload` shape per event type so additions are additive.
+  RFC, and give each event type a frozen payload model so additions are additive
+  and validated at construction.
 - **Subscriber latency on the hot path.** Synchronous delivery means a slow
   subscriber slows the emitter. Mitigation: the bus contract requires subscribers
   to be fast and observational; heavy work offloads to a subscriber-owned task;
@@ -366,8 +408,9 @@ that it *fixes* the three defects, each proven by a new test.
 2. **Drop-all-subscribers invariant:** a runtime assembled with zero subscribers
    produces identical observable behavior to one with subscribers attached —
    test-proven.
-3. `ExecutionContext.emit()` stamps correlation ids automatically, and
-   `child()` preserves the parent/child span chain — test-proven.
+3. `ExecutionContext.emit()` stamps correlation ids automatically, `child()`
+   preserves the parent/child span chain, and a payload with an unknown field or
+   the wrong shape for its `type` is rejected at construction — test-proven.
 4. The router admits **at most** `max_per_minute` under concurrent `generate()`
    calls (no over-admission) — test-proven with a deliberately concurrent case.
 5. A circuit-breaker opened by a failure is **not** reset by a concurrent
