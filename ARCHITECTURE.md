@@ -8,7 +8,7 @@ TypeScript runtime, which v2 migrates from, is documented in
 
 ---
 
-![Zygos runtime architecture: Browser → Adapters → Runtime → Event Bus (planned) → Services → Providers → Models](./docs/assets/architecture.svg)
+![Zygos runtime architecture: Browser → Adapters → Runtime → Event Bus (planned) → Services → Providers → Models, with a planned Capability Registry alongside the services](./docs/assets/architecture.svg)
 
 ## Layering
 
