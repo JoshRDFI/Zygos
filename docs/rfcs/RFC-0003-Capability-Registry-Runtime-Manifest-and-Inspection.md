@@ -1,6 +1,6 @@
 # RFC-0003: Capability Registry, Runtime Manifest, and Inspection
 
-- **Status:** Draft
+- **Status:** Accepted (2026-07-04)
 - **Author:** Zygos maintainers
 - **Created:** 2026-07-04
 - **Governs:** the capability registry, how plugins advertise capabilities, the
