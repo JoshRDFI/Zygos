@@ -10,12 +10,18 @@ def _request() -> GenerationRequest:
     return GenerationRequest(messages=(Message(role="user", content="hi"),))
 
 
-async def _noop_sleep(_s: float) -> None:
-    return None
+def _sleep_recorder() -> tuple[list[float], callable]:
+    """Return a (sleeps list, sleep function) pair for recording backoff durations."""
+    sleeps: list[float] = []
+    async def record_sleep(duration: float) -> None:
+        sleeps.append(duration)
+    return sleeps, record_sleep
 
 
 def _router(routes, providers, **kw):
-    kw.setdefault("sleep", _noop_sleep)
+    # Allow caller to override sleep; default to recording sleep durations
+    if "sleep" not in kw:
+        _, kw["sleep"] = _sleep_recorder()
     kw.setdefault("backoff_ms", 1)
     return ProviderRouter(routes, providers, **kw)
 
@@ -36,12 +42,17 @@ async def test_retryable_failure_retries_then_falls_back():
     }
     providers["p1"].name = "p1"
     providers["p2"].name = "p2"
-    router = _router([RouteChoice("p1", "m1"), RouteChoice("p2", "m2")], providers)
+    sleeps, record_sleep = _sleep_recorder()
+    router = _router([RouteChoice("p1", "m1"), RouteChoice("p2", "m2")], providers, sleep=record_sleep)
     result = await router.generate(_request())
     assert result.text == "rescued"
     snap = router.snapshot()
     assert snap.routes[0].consecutive_failures == 3
     assert snap.routes[0].last_error_code == "provider_unavailable"
+    # Assert exact exponential backoff sequence: backoff_ms=1, multiplier=2.0, max_attempts=3
+    # sleep[i] = 1 * 2^(i) / 1000.0 for attempts 1, 2; no sleep on attempt 3 (last)
+    expected_sleeps = [0.001, 0.002]
+    assert sleeps == pytest.approx(expected_sleeps)
 
 
 async def test_non_retryable_failure_skips_retries():
