@@ -12,7 +12,7 @@ For this project, the name captures the core design philosophy:
 - Balance, alignment, and synchronization between components
 - A control interface between independent actors (LLMs, tools, memory)
 
-Zygos is not just a name change; it reflects how the system orchestrates independent capabilities into one coherent, reliable agent runtime.
+The name is more than a label; it reflects how the system orchestrates independent capabilities into one coherent, reliable agent runtime.
 
 ## Project Status
 
