@@ -8,7 +8,10 @@ def test_classify_task_heuristics():
     assert classify_task("def add(a, b): return a + b") == "code"
     assert classify_task("Why does the circuit breaker design trade off availability?") == "complex_reasoning"
     assert classify_task("hi") == "simple"
-    assert classify_task("Summarize the meeting notes from Tuesday about the quarterly report please.") == "standard"
+    assert classify_task("Summarize the meeting notes from Tuesday about the quarterly report for the team please.") == "standard"
+    # Boundary tests: threshold is exactly 80 characters
+    assert classify_task("a" * 79) == "simple"
+    assert classify_task("a" * 80) == "standard"
 
 
 def _service(text: str = "ok") -> DefaultModelService:

@@ -23,7 +23,7 @@ def classify_task(prompt: str) -> TaskClassification:
         return "code"
     if len(prompt) > 800 or _REASONING.search(prompt):
         return "complex_reasoning"
-    if len(prompt) < 70:
+    if len(prompt) < 80:
         return "simple"
     return "standard"
 
