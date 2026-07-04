@@ -12,6 +12,11 @@ def test_classify_task_heuristics():
     # Boundary tests: threshold is exactly 80 characters
     assert classify_task("a" * 79) == "simple"
     assert classify_task("a" * 80) == "standard"
+    # Precedence: code markers win over reasoning keywords
+    assert classify_task("Why does def foo(x): work?") == "code"
+    assert classify_task("analyze this: import os; os.listdir()") == "code"
+    # Trade-off keyword branch: must contain only trade-?off, no other reasoning keywords or code markers
+    assert classify_task("List every tradeoff in the caching strategy") == "complex_reasoning"
 
 
 def _service(text: str = "ok") -> DefaultModelService:
