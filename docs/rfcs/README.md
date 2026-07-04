@@ -73,5 +73,6 @@ Every RFC must end with an **Architectural Impact** section that answers, at min
 | [RFC-0001](RFC-0001-Service-Architecture.md) | Service Architecture | Accepted — implementation in progress ([ROADMAP](../../ROADMAP.md)) |
 | [RFC-0002](RFC-0002-Runtime-Event-Bus-and-ExecutionContext.md) | Runtime Event Bus and ExecutionContext | Accepted — implementation before M3 |
 | [RFC-0003](RFC-0003-Capability-Registry-Runtime-Manifest-and-Inspection.md) | Capability Registry, Runtime Manifest, and Inspection | Accepted — implementation before M3 |
+| [RFC-0004](RFC-0004-Secret-Storage-and-Key-Entry.md) | Secret Storage and Key Entry | Draft — amends RFC-0001 §8; not an M3 gate |
 
 > **Note on RFC-0001:** This RFC predates the Summary and Architectural Impact sections. Its Architectural Fitness Test table served that role and remains the authoritative impact record for that decision.
