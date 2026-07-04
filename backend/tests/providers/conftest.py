@@ -23,12 +23,14 @@ async def run_error_contract(make_provider: Callable[[httpx.AsyncClient], Provid
     for status, expected in ((401, ProviderAuthFailed), (429, ProviderRateLimited), (500, ProviderUnavailable)):
         client = make_client(lambda req, status=status: httpx.Response(status, json={"error": "x"}))
         provider = make_provider(client)
-        with pytest.raises(expected):
+        with pytest.raises(expected) as exc_info:
             await provider.generate(contract_request())
+        assert exc_info.value.provider == provider.name
 
     def raise_timeout(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectTimeout("slow", request=request)
 
     provider = make_provider(make_client(raise_timeout))
-    with pytest.raises(ProviderTimeout):
+    with pytest.raises(ProviderTimeout) as exc_info:
         await provider.generate(contract_request())
+    assert exc_info.value.provider == provider.name
