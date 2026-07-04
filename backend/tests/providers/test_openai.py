@@ -54,3 +54,25 @@ async def test_stream_parses_sse():
 
 async def test_error_contract():
     await run_error_contract(_make)
+
+
+async def test_generate_omits_auth_header_without_api_key():
+    keyless_settings = ProviderSettings(base_url="https://api.openai.com/v1", api_key=None)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/chat/completions"
+        assert "authorization" not in request.headers
+        body = json.loads(request.content)
+        assert body["stream"] is False
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"role": "assistant", "content": "pong"}}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 2},
+            },
+        )
+
+    provider = OpenAIProvider(settings=keyless_settings, client=make_client(handler))
+    result = await provider.generate(contract_request())
+    assert result.text == "pong"
+    assert result.provider == "openai"
