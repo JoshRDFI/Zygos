@@ -41,8 +41,26 @@ class CircuitClosed(EventPayload):
     model: str
 
 
+class RequestStarted(EventPayload):
+    type: Literal["request.started"] = "request.started"
+    prompt_chars: int
+
+
+class RequestFinished(EventPayload):
+    type: Literal["request.finished"] = "request.finished"
+    ok: bool
+    loops_used: int
+
+
+class ModelSelected(EventPayload):
+    type: Literal["model.selected"] = "model.selected"
+    provider: str
+    model: str
+    classification: str
+
+
 AnyPayload = Annotated[
-    Union[RouteClaimed, CircuitOpened, CircuitClosed],
+    Union[RouteClaimed, CircuitOpened, CircuitClosed, RequestStarted, RequestFinished, ModelSelected],
     Field(discriminator="type"),
 ]
 
