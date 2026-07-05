@@ -46,6 +46,7 @@ class _CircuitBreaker:
         self.consecutive_failures = 0
         self._opened_at: float | None = None
         self.last_error_code: str | None = None
+        self._probing = False
 
     @property
     def state(self) -> str:
@@ -58,14 +59,37 @@ class _CircuitBreaker:
     def allows(self) -> bool:
         return self.state != "open"
 
-    def record_success(self) -> None:
-        self.consecutive_failures = 0
-        self._opened_at = None
-        self.last_error_code = None
+    def admit(self) -> tuple[bool, bool]:
+        """Atomically decide admission. Returns (admit, probe). No await."""
+        state = self.state
+        if state == "closed":
+            return (True, False)
+        if state == "open":
+            return (False, False)
+        # half_open (cooldown elapsed): admit exactly one probe.
+        if self._probing:
+            return (False, False)
+        self._probing = True
+        return (True, True)
 
-    def record_failure(self, code: str) -> None:
-        self.consecutive_failures += 1
+    def record_success(self, *, probe: bool) -> None:
+        self._probing = False
+        if probe:
+            self.consecutive_failures = 0
+            self._opened_at = None
+            self.last_error_code = None
+        elif self._opened_at is None:
+            # A stale non-probe success only resets a still-closed breaker; it
+            # must NOT reset a breaker a concurrent failure just opened (AC5).
+            self.consecutive_failures = 0
+
+    def record_failure(self, code: str, *, probe: bool) -> None:
+        self._probing = False
         self.last_error_code = code
+        if probe:
+            self._opened_at = self._now()  # failed probe re-opens with fresh cooldown
+            return
+        self.consecutive_failures += 1
         if self.consecutive_failures >= self._threshold:
             self._opened_at = self._now()
 
