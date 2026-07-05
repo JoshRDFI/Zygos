@@ -9,7 +9,8 @@ Stability: Experimental.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Union
+import logging
+from typing import Annotated, Awaitable, Callable, Literal, Protocol, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -59,3 +60,31 @@ class Event(BaseModel):
     @property
     def type(self) -> str:
         return self.payload.type
+
+
+logger = logging.getLogger("zygos.events")
+
+Subscriber = Callable[[Event], Awaitable[None]]
+
+
+class EventBus(Protocol):
+    def subscribe(self, handler: Subscriber) -> None: ...
+
+    async def emit(self, event: Event) -> None: ...
+
+
+class InProcessEventBus:
+    """Synchronous, in-loop, error-isolated delivery in registration order."""
+
+    def __init__(self) -> None:
+        self._subscribers: list[Subscriber] = []
+
+    def subscribe(self, handler: Subscriber) -> None:
+        self._subscribers.append(handler)
+
+    async def emit(self, event: Event) -> None:
+        for handler in self._subscribers:
+            try:
+                await handler(event)
+            except Exception:  # noqa: BLE001 - isolation is the contract
+                logger.exception("event subscriber raised; isolated (type=%s)", event.type)
