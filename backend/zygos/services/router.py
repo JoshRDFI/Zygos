@@ -196,15 +196,17 @@ class ProviderRouter:
             routed = request.model_copy(update={"model": route.model})
             breaker = self._breakers[route]
             for attempt in range(1, self._max_attempts + 1):
+                if ctx.cancelled:
+                    raise ProviderUnavailable("cancelled", provider="router")
                 claim = self._try_claim(route)
                 if claim is None:
                     break  # route not admitting (rate-limited or open); next route
-                await ctx.emit(
-                    RouteClaimed(provider=route.provider, model=route.model, probe=claim.probe),
-                    source="router",
-                )
                 settled = False
                 try:
+                    await ctx.emit(
+                        RouteClaimed(provider=route.provider, model=route.model, probe=claim.probe),
+                        source="router",
+                    )
                     try:
                         result = await provider.generate(routed)  # the only await in the attempt
                     except ProviderError as error:
@@ -239,16 +241,18 @@ class ProviderRouter:
             provider = self._providers[route.provider]
             routed = request.model_copy(update={"model": route.model})
             breaker = self._breakers[route]
+            if ctx.cancelled:
+                raise ProviderUnavailable("cancelled", provider="router")
             claim = self._try_claim(route)
             if claim is None:
                 continue
-            await ctx.emit(
-                RouteClaimed(provider=route.provider, model=route.model, probe=claim.probe),
-                source="router",
-            )
             started = False
             settled = False
             try:
+                await ctx.emit(
+                    RouteClaimed(provider=route.provider, model=route.model, probe=claim.probe),
+                    source="router",
+                )
                 async for chunk in provider.stream(routed):
                     started = True
                     yield chunk

@@ -432,3 +432,39 @@ async def test_dead_probe_does_not_wedge_breaker():
     with pytest.raises(RuntimeError):
         await router.generate(ctx, _request())  # call 3: admitted again (not wedged)
     assert provider.calls == 3
+
+
+async def test_generate_stops_when_cancelled_before_attempt():
+    provider = _CountingProvider()
+    router = _router([RouteChoice("cnt", "m")], {"cnt": provider})
+    ctx = _ctx()
+    ctx._cancel.trip()  # cancelled before any attempt
+    with pytest.raises(ProviderUnavailable):
+        await router.generate(ctx, _request())
+    assert provider.calls == 0  # no attempt made
+
+
+async def test_route_claimed_emitted_inside_probe_guard():
+    # The route.claimed emit is now inside the attempt try, so a probe that dies
+    # after emit still clears _probing (no wedge). Reuses _DeadProbeProvider but
+    # asserts the emit still happened for the probe attempt.
+    events, sub = _recorder()
+    bus = InProcessEventBus()
+    bus.subscribe(sub)
+    clock = {"t": 0.0}
+    provider = _DeadProbeProvider()
+    router = _router(
+        [RouteChoice("dp", "m")], {"dp": provider},
+        max_attempts=1, failure_threshold=1, cooldown_s=10.0, now=lambda: clock["t"],
+    )
+    ctx = root_context(bus)
+    with pytest.raises(ProviderUnavailable):
+        await router.generate(ctx, _request())  # opens
+    clock["t"] = 11.0
+    with pytest.raises(RuntimeError):
+        await router.generate(ctx, _request())  # probe dies after emitting route.claimed
+    with pytest.raises(RuntimeError):
+        await router.generate(ctx, _request())  # re-admitted -> not wedged
+    assert provider.calls == 3
+    probe_claims = [e for e in events if e.type == "route.claimed" and e.payload.probe]
+    assert len(probe_claims) >= 1  # the probe attempt emitted route.claimed
