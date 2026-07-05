@@ -60,6 +60,19 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for branch conventions, code standards,
 - [RFCs](./docs/rfcs/)
 - [v1 Guides](./docs/v1/)
 
+## How Zygos Is Built
+
+Zygos is developed AI-native, and deliberately so. Architecture, design review, and
+direction are human: the RFCs, the governance gates, and every decision about what is
+correct and what ships originate with the maintainer. The code is primarily authored by
+Claude (Anthropic) under that direction, and research and ideation draw on a range of LLM
+tools upstream of implementation. Commit trailers reflect this split — the human is the
+commit author and the accountable party, and the assistant is credited as co-author.
+
+This is a methodology, not an accident of tooling. Zygos treats human judgment as the
+scarce input and AI as leverage on it — the same principle of coordinated, inspectable
+orchestration that the runtime itself is built to embody.
+
 ## License
 
 Apache-2.0 — see [LICENSE](./LICENSE).
