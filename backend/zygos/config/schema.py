@@ -66,6 +66,7 @@ class ProvidersConfig(BaseModel):
     retry: RetryConfig = Field(default_factory=RetryConfig)
     circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
+    task_routes: dict[str, ProviderRoute] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def reject_duplicate_routes(self) -> "ProvidersConfig":
@@ -87,10 +88,18 @@ class LearningConfig(BaseModel):
     auto_apply_low_risk: bool = False
 
 
+class ReasoningConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    profile: Literal["shallow", "balanced", "deep"] = "balanced"
+
+
 class ZygosConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     learning: LearningConfig = Field(default_factory=LearningConfig)
+    reasoning: ReasoningConfig = Field(default_factory=ReasoningConfig)
     # plugin kind -> plugin name -> "module.path:ClassName" (RFC-0001 §3)
     plugins: dict[str, dict[str, str]] = Field(default_factory=_default_plugins)

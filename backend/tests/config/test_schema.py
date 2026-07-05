@@ -6,6 +6,7 @@ from zygos.config.schema import (
     RetryConfig,
     CircuitBreakerConfig,
     RateLimitConfig,
+    ReasoningConfig,
 )
 
 
@@ -85,3 +86,24 @@ def test_circuit_breaker_config_cooldown_s_negative_rejected():
 def test_rate_limit_config_max_requests_per_minute_below_minimum_rejected():
     with pytest.raises(ValidationError):
         RateLimitConfig(max_requests_per_minute=0)
+
+
+def test_reasoning_defaults_off_balanced():
+    cfg = ZygosConfig()
+    assert cfg.reasoning.enabled is False
+    assert cfg.reasoning.profile == "balanced"
+
+
+def test_reasoning_rejects_unknown_profile():
+    import pytest
+    with pytest.raises(Exception):
+        ReasoningConfig(profile="turbo")
+
+
+def test_task_routes_default_empty_and_typed():
+    cfg = ZygosConfig()
+    assert cfg.providers.task_routes == {}
+    cfg2 = ZygosConfig.model_validate(
+        {"providers": {"task_routes": {"complex_reasoning": {"provider": "ollama", "model": "big"}}}}
+    )
+    assert cfg2.providers.task_routes["complex_reasoning"].model == "big"
