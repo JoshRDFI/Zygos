@@ -80,26 +80,40 @@ class _CircuitBreaker:
         self._probing = True
         return (True, True)
 
-    def record_success(self, *, probe: bool) -> None:
+    def clear_probe(self) -> None:
+        """Finally-path escape hatch: release the half-open probe slot if the
+        probe attempt died without recording an outcome (RFC-0002 §1)."""
         self._probing = False
+
+    def record_success(self, *, probe: bool) -> bool:
+        """Record a success. Returns True iff this closed an open/half-open breaker."""
         if probe:
+            self._probing = False
+            was_open = self._opened_at is not None
             self.consecutive_failures = 0
             self._opened_at = None
             self.last_error_code = None
-        elif self._opened_at is None:
-            # A stale non-probe success only resets a still-closed breaker; it
-            # must NOT reset a breaker a concurrent failure just opened (AC5).
+            return was_open
+        # Non-probe success: only meaningful when the breaker is closed. It must
+        # not touch _probing (a concurrent probe may be outstanding) and must not
+        # reset a breaker a concurrent failure just opened (AC5).
+        if self._opened_at is None:
             self.consecutive_failures = 0
+        return False
 
-    def record_failure(self, code: str, *, probe: bool) -> None:
-        self._probing = False
+    def record_failure(self, code: str, *, probe: bool) -> bool:
+        """Record a failure. Returns True iff this opened/re-opened the breaker."""
         self.last_error_code = code
         if probe:
+            self._probing = False
             self._opened_at = self._now()  # failed probe re-opens with fresh cooldown
-            return
+            return True  # half_open -> open transition
+        # Non-probe failure: must not touch _probing.
         self.consecutive_failures += 1
-        if self.consecutive_failures >= self._threshold:
+        if self._opened_at is None and self.consecutive_failures >= self._threshold:
             self._opened_at = self._now()
+            return True  # closed -> open transition
+        return False
 
 
 class _RateLimiter:
@@ -189,30 +203,34 @@ class ProviderRouter:
                     RouteClaimed(provider=route.provider, model=route.model, probe=claim.probe),
                     source="router",
                 )
-                state_before = breaker.state
+                settled = False
                 try:
-                    result = await provider.generate(routed)  # the only await in the attempt
-                except ProviderError as error:
-                    last_error = error
-                    breaker.record_failure(error.code, probe=claim.probe)
-                    if breaker.state == "open" and state_before != "open":
+                    try:
+                        result = await provider.generate(routed)  # the only await in the attempt
+                    except ProviderError as error:
+                        settled = True
+                        last_error = error
+                        if breaker.record_failure(error.code, probe=claim.probe):
+                            await ctx.emit(
+                                CircuitOpened(
+                                    provider=route.provider, model=route.model, last_error_code=error.code
+                                ),
+                                source="router",
+                            )
+                        if not error.retryable or attempt == self._max_attempts:
+                            break
+                        await self._sleep(self._backoff_ms * (self._backoff_multiplier ** (attempt - 1)) / 1000.0)
+                        continue
+                    settled = True
+                    if breaker.record_success(probe=claim.probe):
                         await ctx.emit(
-                            CircuitOpened(
-                                provider=route.provider, model=route.model, last_error_code=error.code
-                            ),
+                            CircuitClosed(provider=route.provider, model=route.model),
                             source="router",
                         )
-                    if not error.retryable or attempt == self._max_attempts:
-                        break
-                    await self._sleep(self._backoff_ms * (self._backoff_multiplier ** (attempt - 1)) / 1000.0)
-                    continue
-                breaker.record_success(probe=claim.probe)
-                if breaker.state == "closed" and state_before != "closed":
-                    await ctx.emit(
-                        CircuitClosed(provider=route.provider, model=route.model),
-                        source="router",
-                    )
-                return result
+                    return result
+                finally:
+                    if claim.probe and not settled:
+                        breaker.clear_probe()
         raise last_error or ProviderUnavailable("No eligible provider routes", provider="router")
 
     async def stream(self, ctx: ExecutionContext, request: GenerationRequest) -> AsyncIterator[GenerationChunk]:
@@ -228,22 +246,22 @@ class ProviderRouter:
                 RouteClaimed(provider=route.provider, model=route.model, probe=claim.probe),
                 source="router",
             )
-            state_before = breaker.state
             started = False
+            settled = False
             try:
                 async for chunk in provider.stream(routed):
                     started = True
                     yield chunk
-                breaker.record_success(probe=claim.probe)
-                if breaker.state == "closed" and state_before != "closed":
+                settled = True
+                if breaker.record_success(probe=claim.probe):
                     await ctx.emit(
                         CircuitClosed(provider=route.provider, model=route.model),
                         source="router",
                     )
                 return
             except ProviderError as error:
-                breaker.record_failure(error.code, probe=claim.probe)
-                if breaker.state == "open" and state_before != "open":
+                settled = True
+                if breaker.record_failure(error.code, probe=claim.probe):
                     await ctx.emit(
                         CircuitOpened(
                             provider=route.provider, model=route.model, last_error_code=error.code
@@ -253,6 +271,9 @@ class ProviderRouter:
                 if started or not error.retryable:
                     raise
                 last_error = error
+            finally:
+                if claim.probe and not settled:
+                    breaker.clear_probe()
         raise last_error or ProviderUnavailable("No eligible provider routes", provider="router")
 
     def snapshot(self) -> RouterSnapshot:

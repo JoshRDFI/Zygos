@@ -48,3 +48,25 @@ async def test_cancel_token_trips():
     assert ctx.cancelled is False
     ctx._cancel.trip()
     assert ctx.cancelled is True
+
+
+import dataclasses
+
+import pytest
+
+
+def test_execution_context_is_frozen():
+    ctx = root_context(InProcessEventBus())
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        ctx.run_id = "mutated"  # type: ignore[misc]
+
+
+async def test_cancel_token_wait_returns_after_trip():
+    import asyncio
+
+    ctx = root_context(InProcessEventBus())
+    waiter = asyncio.create_task(ctx._cancel.wait())
+    await asyncio.sleep(0)
+    assert not waiter.done()
+    ctx._cancel.trip()
+    await asyncio.wait_for(waiter, timeout=1.0)  # returns promptly once tripped

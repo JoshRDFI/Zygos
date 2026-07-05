@@ -54,3 +54,37 @@ def test_stale_success_does_not_reset_open_breaker():
     assert breaker.state == "open"
     breaker.record_success(probe=False)          # stale in-flight success
     assert breaker.state == "open"               # still open
+
+
+def test_record_failure_returns_true_only_on_open_edge():
+    breaker, _ = _breaker(threshold=2)
+    assert breaker.record_failure("e", probe=False) is False  # cf=1, no edge
+    assert breaker.record_failure("e", probe=False) is True   # cf=2, closed->open
+    assert breaker.record_failure("e", probe=False) is False  # already open, no new edge
+
+
+def test_record_success_returns_true_only_on_close_edge():
+    breaker, clock = _breaker(threshold=1, cooldown=10.0)
+    breaker.record_failure("e", probe=False)  # open
+    clock["v"] = 11.0
+    breaker.admit()  # half_open, probing
+    assert breaker.record_success(probe=True) is True  # half_open->closed
+    assert breaker.record_success(probe=False) is False  # already closed, no edge
+
+
+def test_nonprobe_outcome_does_not_touch_probing():
+    breaker, clock = _breaker(threshold=1, cooldown=10.0)
+    breaker.record_failure("e", probe=False)  # open
+    clock["v"] = 11.0
+    breaker.admit()  # probing = True
+    breaker.record_success(probe=False)  # stale non-probe success
+    assert breaker.admit() == (False, False)  # probe slot still held (not cleared)
+
+
+def test_clear_probe_releases_the_slot():
+    breaker, clock = _breaker(threshold=1, cooldown=10.0)
+    breaker.record_failure("e", probe=False)
+    clock["v"] = 11.0
+    breaker.admit()  # probing = True
+    breaker.clear_probe()
+    assert breaker.admit() == (True, True)  # slot released, new probe admitted

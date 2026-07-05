@@ -306,3 +306,129 @@ async def test_circuit_opened_and_closed_emitted_on_transition():
     closed = [e for e in events if e.type == "circuit.closed"]
     assert len(opened) == 1 and opened[0].payload.last_error_code == "provider_unavailable"
     assert len(closed) == 1 and closed[0].payload.provider == "p1"
+
+
+class _GatedFailProvider:
+    name = "gf"
+
+    def __init__(self) -> None:
+        self.entered = 0
+        self.gate = asyncio.Event()
+
+    async def generate(self, request):
+        self.entered += 1
+        await self.gate.wait()
+        raise ProviderUnavailable("boom", provider=self.name)
+
+    async def stream(self, request):
+        yield GenerationChunk(text="x", done=True)
+
+
+async def test_circuit_opened_emitted_once_under_concurrent_failures():
+    # I1: two concurrent same-route failures crossing the threshold must emit
+    # circuit.opened exactly ONCE (the old state_before/after code emitted twice).
+    events, sub = _recorder()
+    bus = InProcessEventBus()
+    bus.subscribe(sub)
+    provider = _GatedFailProvider()
+    router = _router([RouteChoice("gf", "m")], {"gf": provider}, max_attempts=1, failure_threshold=1)
+    ctx = root_context(bus)
+    tasks = [asyncio.create_task(router.generate(ctx, _request())) for _ in range(2)]
+    while provider.entered < 2:  # both admitted and in-flight before either records
+        await asyncio.sleep(0)
+    provider.gate.set()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    opened = [e for e in events if e.type == "circuit.opened"]
+    assert len(opened) == 1
+
+
+class _StaleProbeProvider:
+    name = "sp"
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.a_entered = asyncio.Event()
+        self.a_release = asyncio.Event()
+        self.d_entered = asyncio.Event()
+        self.d_release = asyncio.Event()
+
+    async def generate(self, request):
+        self.calls += 1
+        n = self.calls
+        if n == 1:  # A: non-probe, admitted while closed, blocks then succeeds
+            self.a_entered.set()
+            await self.a_release.wait()
+            return GenerationResult(text="A-ok", model=request.model, provider=self.name)
+        if n == 2:  # B: fails to open the breaker
+            raise ProviderUnavailable("boom", provider=self.name)
+        # n == 3: D, the probe, blocks then succeeds
+        self.d_entered.set()
+        await self.d_release.wait()
+        return GenerationResult(text="D-ok", model=request.model, provider=self.name)
+
+    async def stream(self, request):
+        yield GenerationChunk(text="x", done=True)
+
+
+async def test_stale_nonprobe_success_does_not_admit_second_probe():
+    # I2: a non-probe success completing during half_open must NOT clear _probing;
+    # a concurrent second admit stays denied (exactly one probe).
+    clock = {"t": 0.0}
+    provider = _StaleProbeProvider()
+    router = _router(
+        [RouteChoice("sp", "m")], {"sp": provider},
+        max_attempts=1, failure_threshold=1, cooldown_s=10.0, now=lambda: clock["t"],
+    )
+    ctx = root_context(InProcessEventBus())
+    a = asyncio.create_task(router.generate(ctx, _request()))  # A admitted while closed
+    await provider.a_entered.wait()
+    with pytest.raises(ProviderUnavailable):
+        await router.generate(ctx, _request())  # B opens the breaker
+    assert router.snapshot().routes[0].circuit == "open"
+    clock["t"] = 11.0  # -> half_open
+    d = asyncio.create_task(router.generate(ctx, _request()))  # D admitted as the probe
+    await provider.d_entered.wait()
+    provider.a_release.set()
+    assert (await a).text == "A-ok"  # A's stale non-probe success
+    with pytest.raises(ProviderUnavailable):
+        await router.generate(ctx, _request())  # E denied: D still the only probe
+    assert provider.calls == 3  # A, B, D — E never reached the provider
+    provider.d_release.set()
+    assert (await d).text == "D-ok"
+    assert router.snapshot().routes[0].circuit == "closed"
+
+
+class _DeadProbeProvider:
+    name = "dp"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def generate(self, request):
+        self.calls += 1
+        if self.calls == 1:
+            raise ProviderUnavailable("open", provider=self.name)  # opens (threshold=1)
+        raise RuntimeError("unexpected non-provider error")  # probe dies without a ProviderError
+
+    async def stream(self, request):
+        yield GenerationChunk(text="x", done=True)
+
+
+async def test_dead_probe_does_not_wedge_breaker():
+    # I2 (finally): a probe attempt that dies with a non-ProviderError must clear
+    # _probing so the breaker isn't wedged half-open forever.
+    clock = {"t": 0.0}
+    provider = _DeadProbeProvider()
+    router = _router(
+        [RouteChoice("dp", "m")], {"dp": provider},
+        max_attempts=1, failure_threshold=1, cooldown_s=10.0, now=lambda: clock["t"],
+    )
+    ctx = root_context(InProcessEventBus())
+    with pytest.raises(ProviderUnavailable):
+        await router.generate(ctx, _request())  # call 1 opens the breaker
+    clock["t"] = 11.0  # -> half_open
+    with pytest.raises(RuntimeError):
+        await router.generate(ctx, _request())  # call 2: probe dies with RuntimeError
+    with pytest.raises(RuntimeError):
+        await router.generate(ctx, _request())  # call 3: admitted again (not wedged)
+    assert provider.calls == 3

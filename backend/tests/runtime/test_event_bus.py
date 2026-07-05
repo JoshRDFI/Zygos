@@ -42,3 +42,18 @@ async def test_raising_subscriber_is_isolated():
 
 async def test_zero_subscribers_is_a_noop():
     await InProcessEventBus().emit(_event())  # must not raise
+
+
+import logging
+
+
+async def test_raising_subscriber_is_logged(caplog):
+    bus = InProcessEventBus()
+
+    async def boom(_: Event) -> None:
+        raise RuntimeError("subscriber failure")
+
+    bus.subscribe(boom)
+    with caplog.at_level(logging.ERROR, logger="zygos.events"):
+        await bus.emit(_event())
+    assert any(r.name == "zygos.events" and r.levelno >= logging.ERROR for r in caplog.records)
