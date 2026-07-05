@@ -7,6 +7,7 @@ review-blocking smell.
 Stability: Experimental.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,6 +17,8 @@ from zygos.config.loader import load_config
 from zygos.config.schema import ZygosConfig
 from zygos.plugins.resolver import PluginRegistry
 from zygos.providers.base import DEFAULT_BASE_URLS, Provider, ProviderSettings
+from zygos.runtime.context import ExecutionContext, root_context
+from zygos.runtime.events import EventBus, InProcessEventBus, Subscriber
 from zygos.services.model import DefaultModelService, ModelService
 from zygos.services.router import ProviderRouter, RouteChoice
 
@@ -26,6 +29,10 @@ class RuntimeAssembly:
     plugins: PluginRegistry
     model_service: ModelService
     http_client: httpx.AsyncClient
+    event_bus: EventBus
+
+    def new_context(self, *, session_id: str | None = None) -> ExecutionContext:
+        return root_context(self.event_bus, session_id=session_id)
 
     async def aclose(self) -> None:
         await self.http_client.aclose()
@@ -39,10 +46,16 @@ def _provider_settings(config: ZygosConfig, name: str) -> ProviderSettings:
     return ProviderSettings(base_url=base_url, api_key=credential.api_key if credential else None)
 
 
-def build_runtime(config_path: Path | None = None) -> RuntimeAssembly:
+def build_runtime(
+    config_path: Path | None = None, *, subscribers: Sequence[Subscriber] = ()
+) -> RuntimeAssembly:
     config = load_config(config_path)
     registry = PluginRegistry(config.plugins)
     client = httpx.AsyncClient()
+
+    bus = InProcessEventBus()
+    for handler in subscribers:
+        bus.subscribe(handler)
 
     routes = [
         RouteChoice(provider=route.provider, model=route.model)
@@ -72,4 +85,5 @@ def build_runtime(config_path: Path | None = None) -> RuntimeAssembly:
         plugins=registry,
         model_service=DefaultModelService(router),
         http_client=client,
+        event_bus=bus,
     )

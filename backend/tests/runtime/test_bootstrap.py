@@ -67,9 +67,39 @@ async def test_swap_primary_to_fake_via_config_alone(tmp_path: Path):
     assembly = build_runtime(file)
     try:
         request = GenerationRequest(messages=(Message(role="user", content="ping"),))
-        result = await assembly.model_service.generate(request)
+        result = await assembly.model_service.generate(assembly.new_context(), request)
         assert result.provider == "fake"
         assert result.model == "demo"
         assert result.text  # non-empty, produced with zero network and zero keys
     finally:
         await assembly.aclose()
+
+
+from zygos.runtime.events import Event, InProcessEventBus  # noqa: E402
+
+
+async def test_drop_all_subscribers_invariant(tmp_path: Path):
+    file = tmp_path / "config.yaml"
+    file.write_text(
+        "providers:\n  primary:\n    provider: fake\n    model: demo\n",
+        encoding="utf-8",
+    )
+    seen: list[Event] = []
+
+    async def sub(event: Event) -> None:
+        seen.append(event)
+
+    with_sub = build_runtime(file, subscribers=[sub])
+    without = build_runtime(file)
+    try:
+        request = GenerationRequest(messages=(Message(role="user", content="ping"),))
+        r1 = await with_sub.model_service.generate(with_sub.new_context(), request)
+        r2 = await without.model_service.generate(without.new_context(), request)
+        # Dropping every subscriber changes nothing observable (RFC-0002 invariant).
+        assert (r1.text, r1.model, r1.provider) == (r2.text, r2.model, r2.provider)
+        # The attached subscriber did observe the run.
+        assert any(e.type == "route.claimed" for e in seen)
+        assert isinstance(with_sub.event_bus, InProcessEventBus)
+    finally:
+        await with_sub.aclose()
+        await without.aclose()

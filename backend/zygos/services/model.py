@@ -10,6 +10,7 @@ import re
 from typing import AsyncIterator, Literal, Protocol
 
 from zygos.providers.types import GenerationChunk, GenerationRequest, GenerationResult
+from zygos.runtime.context import ExecutionContext
 from zygos.services.router import ProviderRouter, RouteChoice
 
 TaskClassification = Literal["simple", "standard", "complex_reasoning", "code"]
@@ -33,9 +34,9 @@ class ModelService(Protocol):
 
     def select_model(self, classification: TaskClassification | None = None) -> RouteChoice: ...
 
-    async def generate(self, request: GenerationRequest) -> GenerationResult: ...
+    async def generate(self, ctx: ExecutionContext, request: GenerationRequest) -> GenerationResult: ...
 
-    def stream(self, request: GenerationRequest) -> AsyncIterator[GenerationChunk]: ...
+    def stream(self, ctx: ExecutionContext, request: GenerationRequest) -> AsyncIterator[GenerationChunk]: ...
 
 
 class DefaultModelService:
@@ -49,8 +50,8 @@ class DefaultModelService:
         # M2: classification does not alter routing yet (M3 hook).
         return self._router.first_eligible()
 
-    async def generate(self, request: GenerationRequest) -> GenerationResult:
-        return await self._router.generate(request)
+    async def generate(self, ctx: ExecutionContext, request: GenerationRequest) -> GenerationResult:
+        return await self._router.generate(ctx, request)
 
-    def stream(self, request: GenerationRequest) -> AsyncIterator[GenerationChunk]:
-        return self._router.stream(request)
+    def stream(self, ctx: ExecutionContext, request: GenerationRequest) -> AsyncIterator[GenerationChunk]:
+        return self._router.stream(ctx, request)

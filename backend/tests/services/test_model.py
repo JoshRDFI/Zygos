@@ -1,7 +1,13 @@
 from zygos.providers.fake import FakeProvider
 from zygos.providers.types import GenerationRequest, Message
+from zygos.runtime.context import root_context
+from zygos.runtime.events import InProcessEventBus
 from zygos.services.model import DefaultModelService, classify_task
 from zygos.services.router import ProviderRouter, RouteChoice
+
+
+def _ctx():
+    return root_context(InProcessEventBus())
 
 
 def test_classify_task_heuristics():
@@ -33,8 +39,8 @@ def test_select_model_returns_first_eligible_route():
 async def test_generate_and_stream_delegate_to_router():
     service = _service(text="alpha beta")
     request = GenerationRequest(messages=(Message(role="user", content="hi"),))
-    result = await service.generate(request)
+    result = await service.generate(_ctx(), request)
     assert result.text == "alpha beta"
     assert result.model == "m1"  # router filled the model
-    chunks = [c async for c in service.stream(request)]
+    chunks = [c async for c in service.stream(_ctx(), request)]
     assert chunks[-1].done is True
