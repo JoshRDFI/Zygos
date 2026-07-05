@@ -15,12 +15,20 @@ from typing import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from zygos.errors import ProviderError, ProviderUnavailable
 from zygos.providers.base import Provider
 from zygos.providers.types import GenerationChunk, GenerationRequest, GenerationResult
+from zygos.runtime.context import ExecutionContext
+from zygos.runtime.events import CircuitClosed, CircuitOpened, RouteClaimed
 
 
 @dataclass(frozen=True)
 class RouteChoice:
     provider: str
     model: str
+
+
+@dataclass(frozen=True)
+class RouteClaim:
+    route: RouteChoice
+    probe: bool
 
 
 @dataclass(frozen=True)
@@ -155,43 +163,93 @@ class ProviderRouter:
             raise ProviderUnavailable("No eligible provider routes", provider="router")
         return eligible[0]
 
-    async def generate(self, request: GenerationRequest) -> GenerationResult:
+    def _try_claim(self, route: RouteChoice) -> RouteClaim | None:
+        """Atomically decide admission AND record it. Synchronous — no await."""
+        limiter = self._limiters[route.provider]
+        breaker = self._breakers[route]
+        if not limiter.allows():
+            return None
+        admit, probe = breaker.admit()
+        if not admit:
+            return None
+        limiter.record()
+        return RouteClaim(route=route, probe=probe)
+
+    async def generate(self, ctx: ExecutionContext, request: GenerationRequest) -> GenerationResult:
         last_error: ProviderError | None = None
-        for route in self._eligible():
+        for route in self._routes:
             provider = self._providers[route.provider]
             routed = request.model_copy(update={"model": route.model})
+            breaker = self._breakers[route]
             for attempt in range(1, self._max_attempts + 1):
-                # Each attempt (including retries) consumes a rate-limit window
-                # because each represents a real provider request.
-                self._limiters[route.provider].record()
+                claim = self._try_claim(route)
+                if claim is None:
+                    break  # route not admitting (rate-limited or open); next route
+                await ctx.emit(
+                    RouteClaimed(provider=route.provider, model=route.model, probe=claim.probe),
+                    source="router",
+                )
+                state_before = breaker.state
                 try:
-                    result = await provider.generate(routed)
+                    result = await provider.generate(routed)  # the only await in the attempt
                 except ProviderError as error:
                     last_error = error
-                    self._breakers[route].record_failure(error.code)
+                    breaker.record_failure(error.code, probe=claim.probe)
+                    if breaker.state == "open" and state_before != "open":
+                        await ctx.emit(
+                            CircuitOpened(
+                                provider=route.provider, model=route.model, last_error_code=error.code
+                            ),
+                            source="router",
+                        )
                     if not error.retryable or attempt == self._max_attempts:
-                        break  # next route
+                        break
                     await self._sleep(self._backoff_ms * (self._backoff_multiplier ** (attempt - 1)) / 1000.0)
                     continue
-                self._breakers[route].record_success()
+                breaker.record_success(probe=claim.probe)
+                if breaker.state == "closed" and state_before != "closed":
+                    await ctx.emit(
+                        CircuitClosed(provider=route.provider, model=route.model),
+                        source="router",
+                    )
                 return result
         raise last_error or ProviderUnavailable("No eligible provider routes", provider="router")
 
-    async def stream(self, request: GenerationRequest) -> AsyncIterator[GenerationChunk]:
+    async def stream(self, ctx: ExecutionContext, request: GenerationRequest) -> AsyncIterator[GenerationChunk]:
         last_error: ProviderError | None = None
-        for route in self._eligible():
+        for route in self._routes:
             provider = self._providers[route.provider]
             routed = request.model_copy(update={"model": route.model})
-            self._limiters[route.provider].record()
+            breaker = self._breakers[route]
+            claim = self._try_claim(route)
+            if claim is None:
+                continue
+            await ctx.emit(
+                RouteClaimed(provider=route.provider, model=route.model, probe=claim.probe),
+                source="router",
+            )
+            state_before = breaker.state
             started = False
             try:
                 async for chunk in provider.stream(routed):
                     started = True
                     yield chunk
-                self._breakers[route].record_success()
+                breaker.record_success(probe=claim.probe)
+                if breaker.state == "closed" and state_before != "closed":
+                    await ctx.emit(
+                        CircuitClosed(provider=route.provider, model=route.model),
+                        source="router",
+                    )
                 return
             except ProviderError as error:
-                self._breakers[route].record_failure(error.code)
+                breaker.record_failure(error.code, probe=claim.probe)
+                if breaker.state == "open" and state_before != "open":
+                    await ctx.emit(
+                        CircuitOpened(
+                            provider=route.provider, model=route.model, last_error_code=error.code
+                        ),
+                        source="router",
+                    )
                 if started or not error.retryable:
                     raise
                 last_error = error
