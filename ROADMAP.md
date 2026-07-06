@@ -15,7 +15,7 @@ decision requires an accepted RFC before implementation begins.
 |---|---|---|
 | M1 Config foundation | Schema, loader, plugins, composition root, guard, CI | ✅ Complete (2026-07-03) |
 | M2 Providers + ModelService | Ollama/OpenAI/Anthropic/vLLM plugins, router, RouterState | Next |
-| M3 RDT reasoning engine | Prelude/recurrent/coda pipeline, attention routing, ReasoningState | Planned |
+| M3 RDT reasoning engine | Prelude/recurrent/coda pipeline, real adaptive compute (iteration/temperature/token/model by complexity+confidence), snapshotable ReasoningState | In progress |
 | M4 Layered memory (SQLite WAL + FTS5) | Working, episodic, semantic, and procedural memory; compaction | Planned |
 | M5 Tools (4-phase contract) | Executor, permissions, streaming, fallback; cleanup guaranteed | Planned |
 | M6 Learning → SkillService (manual approval only) | Proposals, A/B testing (sandboxed), human-approval gate | Planned |
