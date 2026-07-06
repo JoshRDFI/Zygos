@@ -1,5 +1,6 @@
 """Suite loading + validation. Pure; fails fast. Stability: Experimental."""
 
+from collections import Counter
 from pathlib import Path
 
 import yaml
@@ -30,7 +31,11 @@ class Suite(BaseModel):
 
 def load_suite(path: str | Path) -> Suite:
     try:
-        raw = yaml.safe_load(Path(path).read_text())
+        text = Path(path).read_text()
+    except OSError as exc:
+        raise SuiteError(f"cannot read suite file {path}: {exc}") from exc
+    try:
+        raw = yaml.safe_load(text)
     except yaml.YAMLError as exc:
         raise SuiteError(f"malformed YAML in {path}: {exc}") from exc
     if not isinstance(raw, dict) or "suite" not in raw or "tasks" not in raw:
@@ -40,7 +45,7 @@ def load_suite(path: str | Path) -> Suite:
     except (ValidationError, TypeError) as exc:
         raise SuiteError(f"invalid task in {path}: {exc}") from exc
     ids = [t.id for t in tasks]
-    dupes = {i for i in ids if ids.count(i) > 1}
+    dupes = sorted(i for i, c in Counter(ids).items() if c > 1)
     if dupes:
-        raise SuiteError(f"duplicate task ids in {path}: {sorted(dupes)}")
+        raise SuiteError(f"duplicate task ids in {path}: {dupes}")
     return Suite(name=str(raw["suite"]), tasks=tasks)

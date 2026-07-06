@@ -59,6 +59,31 @@ def test_rejects_unknown_category(tmp_path):
         load_suite(path)
 
 
+def test_rejects_missing_tasks_key(tmp_path):
+    path = tmp_path / "suite.yaml"
+    path.write_text("suite: demo\n")
+    with pytest.raises(SuiteError):
+        load_suite(path)
+
+
+def test_rejects_missing_scorer(tmp_path):
+    path = _write(tmp_path, """
+        suite: demo
+        tasks:
+          - id: a
+            category: code
+            split: val
+            input: "x"
+    """)
+    with pytest.raises(SuiteError):
+        load_suite(path)
+
+
+def test_rejects_missing_file(tmp_path):
+    with pytest.raises(SuiteError):
+        load_suite(tmp_path / "does-not-exist.yaml")
+
+
 def test_rejects_malformed_yaml(tmp_path):
     path = tmp_path / "suite.yaml"
     path.write_text("suite: [unterminated")
