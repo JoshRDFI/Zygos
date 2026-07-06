@@ -1,3 +1,7 @@
+import asyncio
+
+import pytest
+
 from zygos.config.schema import ReasoningConfig
 from zygos.providers.types import GenerationChunk, GenerationResult
 from zygos.reasoning.service import DefaultReasoningService
@@ -121,3 +125,39 @@ async def test_cancellation_skips_coda_and_returns_best_so_far():
     assert result.text  # best-so-far (prelude summary); never raised
     # coda was skipped on cancellation
     assert not any("Synthesize the final answer" in r.messages[0].content for r in provider.requests)
+
+
+async def test_run_rejects_concurrent_run():
+    import asyncio
+
+    from zygos.config.schema import ReasoningConfig
+    from zygos.reasoning.service import DefaultReasoningService
+    from zygos.services.model import DefaultModelService
+    from zygos.services.router import ProviderRouter, RouteChoice
+
+    class _BlockingProvider:
+        name = "block"
+
+        def __init__(self) -> None:
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def generate(self, request):
+            self.entered.set()
+            await self.release.wait()
+            return GenerationResult(
+                text='{"summary": "s", "decomposition": []}', model=request.model, provider=self.name
+            )
+
+        async def stream(self, request):
+            yield GenerationChunk(text="x", done=True)
+
+    provider = _BlockingProvider()
+    router = ProviderRouter([RouteChoice("block", "m")], {"block": provider})
+    svc = DefaultReasoningService(DefaultModelService(router), ReasoningConfig(enabled=True, profile="shallow"))
+    run1 = asyncio.create_task(svc.run(root_context(InProcessEventBus()), ReasoningInput(prompt="a")))
+    await provider.entered.wait()  # run1 is in-flight, blocked in the prelude call
+    with pytest.raises(RuntimeError):
+        await svc.run(root_context(InProcessEventBus()), ReasoningInput(prompt="b"))
+    provider.release.set()
+    await run1  # run1 finishes cleanly; the guard is cleared
