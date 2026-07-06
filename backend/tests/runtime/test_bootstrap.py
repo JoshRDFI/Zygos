@@ -103,3 +103,21 @@ async def test_drop_all_subscribers_invariant(tmp_path: Path):
     finally:
         await with_sub.aclose()
         await without.aclose()
+
+
+async def test_bootstrap_exposes_reasoning_service_and_task_routes(tmp_path: Path):
+    file = tmp_path / "config.yaml"
+    file.write_text(
+        "providers:\n"
+        "  primary:\n    provider: fake\n    model: demo\n"
+        "  task_routes:\n    complex_reasoning:\n      provider: fake\n      model: heavy\n"
+        "reasoning:\n  enabled: true\n  profile: shallow\n",
+        encoding="utf-8",
+    )
+    assembly = build_runtime(file)
+    try:
+        from zygos.reasoning.service import DefaultReasoningService
+        assert isinstance(assembly.reasoning_service, DefaultReasoningService)
+        assert assembly.model_service.select_model("complex_reasoning").model == "heavy"
+    finally:
+        await assembly.aclose()

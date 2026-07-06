@@ -17,6 +17,7 @@ from zygos.config.loader import load_config
 from zygos.config.schema import ZygosConfig
 from zygos.plugins.resolver import PluginRegistry
 from zygos.providers.base import DEFAULT_BASE_URLS, Provider, ProviderSettings
+from zygos.reasoning.service import DefaultReasoningService, ReasoningService
 from zygos.runtime.context import ExecutionContext, root_context
 from zygos.runtime.events import EventBus, InProcessEventBus, Subscriber
 from zygos.services.model import DefaultModelService, ModelService
@@ -28,6 +29,7 @@ class RuntimeAssembly:
     config: ZygosConfig
     plugins: PluginRegistry
     model_service: ModelService
+    reasoning_service: ReasoningService
     http_client: httpx.AsyncClient
     event_bus: EventBus
 
@@ -80,10 +82,17 @@ def build_runtime(
         cooldown_s=config.providers.circuit_breaker.cooldown_s,
         max_requests_per_minute=config.providers.rate_limit.max_requests_per_minute,
     )
+    task_routes = {
+        classification: RouteChoice(provider=route.provider, model=route.model)
+        for classification, route in config.providers.task_routes.items()
+    }
+    model_service = DefaultModelService(router, task_routes=task_routes)
+    reasoning_service = DefaultReasoningService(model_service, config.reasoning)
     return RuntimeAssembly(
         config=config,
         plugins=registry,
-        model_service=DefaultModelService(router),
+        model_service=model_service,
+        reasoning_service=reasoning_service,
         http_client=client,
         event_bus=bus,
     )
