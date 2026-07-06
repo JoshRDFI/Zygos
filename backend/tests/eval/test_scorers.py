@@ -41,3 +41,49 @@ async def test_normalized_match_numeric_outside_tolerance_fails():
     t = _task(ScorerSpec(kind="normalized_match", expected="100", tolerance=0.5))
     r = await NormalizedMatchScorer().score(None, t, "The answer is 200.")
     assert not r.passed
+
+
+from zygos.eval.scorers import LlmJudgeScorer
+from zygos.providers.types import GenerationRequest, GenerationResult, Usage
+from zygos.runtime.context import root_context
+from zygos.runtime.events import InProcessEventBus
+
+
+class _StubModel:
+    def __init__(self, reply: str):
+        self._reply = reply
+        self.last_request: GenerationRequest | None = None
+
+    async def generate(self, ctx, request: GenerationRequest) -> GenerationResult:
+        self.last_request = request
+        return GenerationResult(text=self._reply, model=request.model, provider="fake")
+
+
+def _ctx():
+    return root_context(InProcessEventBus())
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_parses_score_and_uses_judge_model():
+    model = _StubModel("0.9")
+    scorer = LlmJudgeScorer(model, judge_model="judge-x", pass_threshold=0.6)
+    t = _task(ScorerSpec(kind="llm_judge", rubric="correct fizzbuzz"))
+    r = await scorer.score(_ctx(), t, "def fizzbuzz(): ...")
+    assert r.passed and r.score == pytest.approx(0.9)
+    assert model.last_request.model == "judge-x"
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_below_threshold_fails():
+    scorer = LlmJudgeScorer(_StubModel("0.3"), judge_model="judge-x", pass_threshold=0.6)
+    t = _task(ScorerSpec(kind="llm_judge", rubric="correct"))
+    r = await scorer.score(_ctx(), t, "wrong")
+    assert not r.passed and r.score == pytest.approx(0.3)
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_unparseable_reply_raises():
+    scorer = LlmJudgeScorer(_StubModel("I cannot decide"), judge_model="judge-x")
+    t = _task(ScorerSpec(kind="llm_judge", rubric="correct"))
+    with pytest.raises(ValueError):
+        await scorer.score(_ctx(), t, "x")
