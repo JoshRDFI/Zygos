@@ -42,7 +42,7 @@ async def test_reasoning_failure_is_captured_not_fatal():
     runner = EvalRunner(_FakeReasoning(exc=RuntimeError("provider down")),
                         match_scorers(), _make_ctx)
     [rec] = await runner.run([_task()])
-    assert rec.error is not None and "provider down" in rec.error
+    assert rec.error is not None and "reasoning:" in rec.error and "provider down" in rec.error
     assert rec.score is None and rec.passed is None
 
 
@@ -52,3 +52,27 @@ async def test_scorer_failure_is_captured():
     runner = EvalRunner(_FakeReasoning(text="4"), {}, _make_ctx)
     [rec] = await runner.run([_task()])
     assert rec.error is not None and "scorer" in rec.error and rec.score is None
+
+
+class _ScriptedReasoning:
+    """Returns/raises per call, in order — lets one task fail and the next succeed."""
+    def __init__(self, outcomes):
+        self._outcomes = list(outcomes)
+
+    async def run(self, ctx, input):
+        item = self._outcomes.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+@pytest.mark.asyncio
+async def test_one_failing_task_does_not_abort_suite():
+    ok = ReasoningResult(text="4", loops_used=1, final_confidence=0.5,
+                         halted_early=True, model="fake-model")
+    reasoning = _ScriptedReasoning([RuntimeError("boom"), ok])
+    runner = EvalRunner(reasoning, match_scorers(), _make_ctx)
+    recs = await runner.run([_task(), _task()])
+    assert len(recs) == 2
+    assert recs[0].error is not None and recs[0].score is None
+    assert recs[1].error is None and recs[1].passed is True
