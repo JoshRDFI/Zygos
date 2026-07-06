@@ -46,3 +46,15 @@ def test_parse_judge_extracts_number():
     assert parse_judge('{"confidence": 0.82}') == 0.82
     assert parse_judge("confidence: 0.5") == 0.5
     assert parse_judge("no number here") == 0.0
+
+
+def test_extract_json_recovers_dict_from_top_level_array():
+    summary, decomp = parse_prelude('[{"summary": "S", "decomposition": ["a"]}]')
+    assert summary == "S"
+    assert decomp == ("a",)
+
+
+def test_parse_prelude_missing_summary_key_is_empty_not_raw_json():
+    summary, decomp = parse_prelude('{"decomposition": ["a", "b"]}')
+    assert summary == ""
+    assert decomp == ("a", "b")

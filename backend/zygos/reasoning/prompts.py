@@ -47,7 +47,9 @@ def build_judge(prompt: str, summary: str) -> str:
 def _extract_json(text: str) -> dict | None:
     try:
         parsed = json.loads(text)
-        return parsed if isinstance(parsed, dict) else None
+        if isinstance(parsed, dict):
+            return parsed
+        # non-dict top-level JSON (e.g. an array) — fall through to the brace-slice
     except (json.JSONDecodeError, ValueError):
         pass
     start, end = text.find("{"), text.rfind("}")
@@ -64,7 +66,7 @@ def parse_prelude(text: str) -> tuple[str, tuple[str, ...]]:
     obj = _extract_json(text)
     if obj is None:
         return text.strip(), ()
-    summary = str(obj.get("summary", "")).strip() or text.strip()
+    summary = str(obj.get("summary", "")).strip()
     decomposition = tuple(str(s) for s in obj.get("decomposition", []) if str(s).strip())
     return summary, decomposition
 

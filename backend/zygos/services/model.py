@@ -1,7 +1,6 @@
 """ModelService — the RFC-0001 §2 model contract over the provider router.
 
-classify_task is a deliberate heuristic stub in M2; the RDT milestone (M3)
-deepens it and makes routing consume it.
+classify_task is a heuristic classifier; select_model consumes it via task_routes (M3).
 
 Stability: Experimental.
 """

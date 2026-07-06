@@ -161,3 +161,16 @@ async def test_run_rejects_concurrent_run():
         await svc.run(root_context(InProcessEventBus()), ReasoningInput(prompt="b"))
     provider.release.set()
     await run1  # run1 finishes cleanly; the guard is cleared
+
+
+async def test_recurrent_request_carries_adaptive_token_budget():
+    from zygos.reasoning import adaptive
+    from zygos.reasoning.profiles import resolve_profile
+
+    svc, provider = _service(profile="shallow")
+    await svc.run(root_context(InProcessEventBus()), ReasoningInput(prompt="why is it 42"))
+    profile = resolve_profile("shallow")
+    complexity = adaptive.task_complexity("why is it 42", ("step a", "step b"))
+    expected = adaptive.token_budget(profile, complexity)
+    recurrent = [r for r in provider.requests if "Refine" in r.messages[0].content]
+    assert recurrent and all(r.max_tokens == expected for r in recurrent)

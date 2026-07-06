@@ -95,7 +95,6 @@ def test_reasoning_defaults_off_balanced():
 
 
 def test_reasoning_rejects_unknown_profile():
-    import pytest
     with pytest.raises(Exception):
         ReasoningConfig(profile="turbo")
 

@@ -10,9 +10,9 @@ from typing import Protocol
 from zygos.config.schema import ReasoningConfig
 from zygos.providers.types import GenerationRequest, Message
 from zygos.reasoning import adaptive, confidence, prompts
-from zygos.reasoning.profiles import ResolvedProfile, resolve_profile
+from zygos.reasoning.profiles import resolve_profile
 from zygos.reasoning.types import (
-    AdaptiveDecision, ConfidenceBreakdown, IterationRecord, ReasoningInput,
+    AdaptiveDecision, IterationRecord, ReasoningInput,
     ReasoningResult, ReasoningState,
 )
 from zygos.runtime.context import ExecutionContext
@@ -78,6 +78,7 @@ class DefaultReasoningService:
             route = self._model.select_model(classification if profile.escalate else None)
             self._selected_model = route.model
             await ctx.emit(
+                # classification is the task classification, not necessarily the escalation reason (escalate may be off)
                 ModelSelected(provider=route.provider, model=route.model, classification=classification),
                 source="reasoning",
             )

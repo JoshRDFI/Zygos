@@ -33,7 +33,7 @@ def _service(text: str = "ok") -> DefaultModelService:
 def test_select_model_returns_first_eligible_route():
     choice = _service().select_model()
     assert (choice.provider, choice.model) == ("fake", "m1")
-    assert _service().select_model(classification="code").model == "m1"  # accepted, unused in M2
+    assert _service().select_model(classification="code").model == "m1"  # unconfigured classification falls through to first_eligible
 
 
 def test_select_model_uses_task_route_when_configured():

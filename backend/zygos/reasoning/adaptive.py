@@ -1,15 +1,12 @@
-"""Adaptive-compute decisions — the real replacement for v1's attention/MoE theater.
+"""Adaptive-compute decisions — the honest replacement for v1's routing theater.
 
 Every function is pure and returns a real knob (temperature, tokens) or a control
 decision that actually changes the reasoning loop. Stability: Experimental.
 """
 
-import re
-
 from zygos.reasoning.profiles import ResolvedProfile
 
 _MARKERS = ("why", "because", "compare", "tradeoff", "trade-off", "analyze", "multi", "step")
-_NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
 
 def _clamp(x: float) -> float:
