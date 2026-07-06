@@ -36,6 +36,14 @@ def test_select_model_returns_first_eligible_route():
     assert _service().select_model(classification="code").model == "m1"  # accepted, unused in M2
 
 
+def test_select_model_uses_task_route_when_configured():
+    router = ProviderRouter([RouteChoice("fake", "m1")], {"fake": FakeProvider()})
+    svc = DefaultModelService(router, task_routes={"complex_reasoning": RouteChoice("fake", "big")})
+    assert svc.select_model("complex_reasoning").model == "big"
+    assert svc.select_model("simple").model == "m1"  # unconfigured -> first_eligible
+    assert svc.select_model().model == "m1"           # no classification -> first_eligible
+
+
 async def test_generate_and_stream_delegate_to_router():
     service = _service(text="alpha beta")
     request = GenerationRequest(messages=(Message(role="user", content="hi"),))

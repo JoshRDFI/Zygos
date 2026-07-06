@@ -7,7 +7,7 @@ Stability: Experimental.
 """
 
 import re
-from typing import AsyncIterator, Literal, Protocol
+from typing import AsyncIterator, Literal, Mapping, Protocol
 
 from zygos.providers.types import GenerationChunk, GenerationRequest, GenerationResult
 from zygos.runtime.context import ExecutionContext
@@ -40,14 +40,16 @@ class ModelService(Protocol):
 
 
 class DefaultModelService:
-    def __init__(self, router: ProviderRouter) -> None:
+    def __init__(self, router: ProviderRouter, task_routes: Mapping[str, RouteChoice] | None = None) -> None:
         self._router = router
+        self._task_routes = dict(task_routes) if task_routes else {}
 
     def classify_task(self, prompt: str) -> TaskClassification:
         return classify_task(prompt)
 
     def select_model(self, classification: TaskClassification | None = None) -> RouteChoice:
-        # M2: classification does not alter routing yet (M3 hook).
+        if classification is not None and classification in self._task_routes:
+            return self._task_routes[classification]
         return self._router.first_eligible()
 
     async def generate(self, ctx: ExecutionContext, request: GenerationRequest) -> GenerationResult:
