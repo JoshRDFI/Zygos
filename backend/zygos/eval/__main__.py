@@ -54,16 +54,16 @@ def main(argv: list[str] | None = None) -> int:
     from zygos.runtime.bootstrap import build_runtime  # local import: only real runs pay for it
 
     assembly = build_runtime(args.config)
-    config: ZygosConfig = assembly.config
-    if not config.reasoning.enabled:
-        print("error: reasoning is disabled; set reasoning.enabled=true in config", file=sys.stderr)
-        return 2
-    err = check_provider_configured(config)
-    if err is not None:
-        print(f"error: {err}", file=sys.stderr)
-        return 2
-    judge_model = args.judge_model or config.providers.primary.model
     try:
+        config: ZygosConfig = assembly.config
+        if not config.reasoning.enabled:
+            print("error: reasoning is disabled; set reasoning.enabled=true in config", file=sys.stderr)
+            return 2
+        err = check_provider_configured(config)
+        if err is not None:
+            print(f"error: {err}", file=sys.stderr)
+            return 2
+        judge_model = args.judge_model or config.providers.primary.model
         report = asyncio.run(run_eval(
             args.suite, split=args.split, category=args.category,
             assembly=assembly, judge_model=judge_model,

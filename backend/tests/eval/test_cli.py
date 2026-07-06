@@ -66,3 +66,29 @@ def test_check_provider_configured_ok_for_local():
                 provider = "ollama"
             credentials = {}
     assert check_provider_configured(C) is None
+
+
+def test_main_closes_assembly_on_precondition_failure(tmp_path, monkeypatch):
+    import zygos.runtime.bootstrap as bootstrap
+    from zygos.eval.__main__ import main
+
+    closed = {"aclose": False}
+
+    class _Cfg:
+        class reasoning:
+            enabled = False
+        class providers:
+            class primary:
+                provider = "ollama"
+                model = "m"
+            credentials = {}
+
+    class _Assembly:
+        config = _Cfg
+        async def aclose(self):
+            closed["aclose"] = True
+
+    monkeypatch.setattr(bootstrap, "build_runtime", lambda config_path=None: _Assembly())
+    rc = main([str(tmp_path / "s.yaml")])
+    assert rc == 2
+    assert closed["aclose"] is True
