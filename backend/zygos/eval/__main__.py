@@ -22,7 +22,7 @@ def build_scorers(model: ModelService, judge_model: str) -> dict[str, Scorer]:
     return scorers
 
 
-def check_provider_configured(config) -> str | None:
+def check_provider_configured(config: ZygosConfig) -> str | None:
     provider = config.providers.primary.provider
     if provider in _LOCAL_PROVIDERS:
         return None

@@ -30,3 +30,10 @@ def test_runrecord_allows_null_score_for_errored_task():
 
 def test_score_result_defaults():
     assert ScoreResult(score=1.0, passed=True).detail == ""
+
+
+def test_task_is_immutable():
+    task = Task(id="t1", category="code", split="val", input="hi",
+                scorer=ScorerSpec(kind="exact_match", expected="hi"))
+    with pytest.raises(ValidationError):
+        task.split = "train"

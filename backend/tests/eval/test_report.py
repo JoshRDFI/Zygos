@@ -48,3 +48,11 @@ def test_by_scorer_aggregation():
     report = build_report("demo", records)
     assert report.by_scorer["exact_match"].pass_rate == 1.0
     assert report.by_scorer["llm_judge"].pass_rate == 0.0
+
+
+def test_all_errored_group_is_zero_not_divide_error():
+    records = [_rec(task_id="a", score=None, passed=None, error="boom")]
+    report = build_report("demo", records)
+    assert report.by_split["val"].n == 0
+    assert report.by_split["val"].mean_score == 0.0
+    assert report.by_split["val"].pass_rate == 0.0

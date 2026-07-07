@@ -1,7 +1,10 @@
 import pytest
 
-from zygos.eval.scorers import ExactMatchScorer, NormalizedMatchScorer
+from zygos.eval.scorers import ExactMatchScorer, LlmJudgeScorer, NormalizedMatchScorer
 from zygos.eval.types import ScorerSpec, Task
+from zygos.providers.types import GenerationRequest, GenerationResult
+from zygos.runtime.context import root_context
+from zygos.runtime.events import InProcessEventBus
 
 
 def _task(spec: ScorerSpec) -> Task:
@@ -50,12 +53,6 @@ async def test_normalized_match_parses_clean_numeric_exactly():
     assert r.passed
 
 
-from zygos.eval.scorers import LlmJudgeScorer
-from zygos.providers.types import GenerationRequest, GenerationResult, Usage
-from zygos.runtime.context import root_context
-from zygos.runtime.events import InProcessEventBus
-
-
 class _StubModel:
     def __init__(self, reply: str):
         self._reply = reply
@@ -94,3 +91,11 @@ async def test_llm_judge_unparseable_reply_raises():
     t = _task(ScorerSpec(kind="llm_judge", rubric="correct"))
     with pytest.raises(ValueError):
         await scorer.score(_ctx(), t, "x")
+
+
+@pytest.mark.asyncio
+async def test_llm_judge_clamps_out_of_range_score():
+    scorer = LlmJudgeScorer(_StubModel("1.7"), judge_model="judge-x", pass_threshold=0.6)
+    t = _task(ScorerSpec(kind="llm_judge", rubric="correct"))
+    r = await scorer.score(_ctx(), t, "x")
+    assert r.score == 1.0 and r.passed
