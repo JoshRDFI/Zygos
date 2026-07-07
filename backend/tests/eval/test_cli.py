@@ -130,3 +130,11 @@ def test_main_closes_assembly_on_precondition_failure(tmp_path, monkeypatch):
     rc = main([str(tmp_path / "s.yaml")])
     assert rc == 2
     assert closed["aclose"] is True
+
+
+def test_build_scorers_includes_code_exec():
+    from zygos.eval.__main__ import build_scorers
+    from zygos.eval.scorers import CodeExecScorer
+
+    scorers = build_scorers(None, "judge-x")
+    assert isinstance(scorers["code_exec"], CodeExecScorer)

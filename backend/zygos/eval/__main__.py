@@ -9,7 +9,7 @@ from pathlib import Path
 from zygos.config.schema import ZygosConfig
 from zygos.eval.report import EvalReport, build_report, render_table
 from zygos.eval.runner import EvalRunner
-from zygos.eval.scorers import LlmJudgeScorer, Scorer, match_scorers
+from zygos.eval.scorers import CodeExecScorer, LlmJudgeScorer, Scorer, match_scorers
 from zygos.eval.suite import load_suite
 from zygos.services.model import ModelService
 
@@ -19,6 +19,7 @@ _LOCAL_PROVIDERS = {"ollama", "vllm", "fake"}
 def build_scorers(model: ModelService, judge_model: str) -> dict[str, Scorer]:
     scorers = match_scorers()
     scorers["llm_judge"] = LlmJudgeScorer(model, judge_model=judge_model)
+    scorers["code_exec"] = CodeExecScorer()
     return scorers
 
 
