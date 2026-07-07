@@ -7,11 +7,17 @@ from zygos.providers.types import GenerationChunk, GenerationRequest, Generation
 def test_request_is_immutable_and_strict():
     request = GenerationRequest(messages=(Message(role="user", content="hi"),))
     assert request.model == ""
-    assert request.max_tokens == 1024
+    assert request.max_tokens is None  # ADR-0006: default = no caller cap (provider policy applies)
     with pytest.raises(ValidationError):
         request.model = "x"  # frozen
     with pytest.raises(ValidationError):
         GenerationRequest(messages=(), bogus_field=1)
+
+
+def test_max_tokens_optional_and_explicit_preserved():
+    msgs = (Message(role="user", content="hi"),)
+    assert GenerationRequest(messages=msgs).max_tokens is None
+    assert GenerationRequest(messages=msgs, max_tokens=256).max_tokens == 256
 
 
 def test_router_fills_model_via_model_copy():

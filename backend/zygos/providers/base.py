@@ -26,13 +26,21 @@ DEFAULT_BASE_URLS: dict[str, str] = {
     "fake": "http://fake.invalid",
 }
 
+# ADR-0006: generous default cap for cloud providers when a request carries no
+# explicit max_tokens. Model token appetite rises over time, so this is a floor
+# to revisit (a config hook is a tracked follow-up), never a starving constant.
+DEFAULT_CLOUD_MAX_TOKENS = 4096
+
 
 class ProviderSettings(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     base_url: str
     api_key: str | None = None
-    timeout_s: float = 60.0
+    # ADR-0006: with token caps lifted for local inference, the request timeout is
+    # the backstop against a runaway/looping generation — generous enough for long
+    # thinking, finite enough to kill a wedged call.
+    timeout_s: float = 300.0
 
 
 @runtime_checkable

@@ -3,7 +3,7 @@ import json
 import httpx
 
 from zygos.providers.anthropic import AnthropicProvider
-from zygos.providers.base import ProviderSettings
+from zygos.providers.base import DEFAULT_CLOUD_MAX_TOKENS, ProviderSettings
 from zygos.providers.types import GenerationRequest, Message
 
 from .conftest import contract_request, make_client, run_error_contract
@@ -127,6 +127,17 @@ async def test_missing_api_key_omits_auth_header():
     provider = AnthropicProvider(settings=keyless_settings, client=make_client(handler))
     result = await provider.generate(contract_request())
     assert result.text == "response"
+
+
+async def test_none_max_tokens_uses_cloud_default():
+    # ADR-0006: anthropic requires max_tokens; None falls back to the generous cloud default.
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)["max_tokens"] == DEFAULT_CLOUD_MAX_TOKENS
+        return httpx.Response(
+            200, json={"content": [{"type": "text", "text": "pong"}], "usage": {}}
+        )
+
+    await _make(make_client(handler)).generate(contract_request())
 
 
 async def test_error_contract():

@@ -163,12 +163,10 @@ async def test_run_rejects_concurrent_run():
     await run1  # run1 finishes cleanly; the guard is cleared
 
 
-async def test_judge_request_is_not_token_starved():
-    # The fence-judge sub-call must not be starved: a thinking judge model spends
-    # a tiny budget inside its reasoning and returns empty content. Judge requests
-    # carry a generous (adaptive) budget like the other stages.
-    # This recurrent summary scores just inside the fence band on iteration 1,
-    # so the judge is consulted (and a judge request is recorded).
+async def test_judge_request_is_uncapped():
+    # ADR-0006: the fence-judge sub-call carries no token cap (a starved thinking judge
+    # spends its budget inside <think> and returns empty). This recurrent summary scores
+    # just inside the fence band on iteration 1, so the judge is consulted.
     svc, provider = _service(
         recurrent="prelude summary about the topic step a step b therefore the result",
         judge=0.9, profile="balanced",
@@ -176,17 +174,12 @@ async def test_judge_request_is_not_token_starved():
     await svc.run(root_context(InProcessEventBus()), ReasoningInput(prompt="hard one"))
     judge_reqs = [r for r in provider.requests if "Rate how complete" in r.messages[0].content]
     assert judge_reqs, "judge stage should have fired in this scenario"
-    assert all(r.max_tokens >= 256 for r in judge_reqs)
+    assert all(r.max_tokens is None for r in judge_reqs)
 
 
-async def test_recurrent_request_carries_adaptive_token_budget():
-    from zygos.reasoning import adaptive
-    from zygos.reasoning.profiles import resolve_profile
-
+async def test_stage_requests_pass_no_token_cap():
+    # ADR-0006: the RDT stages delegate token allocation to the model; no per-task
+    # cap is computed or sent (harness knobs are temperature, iteration count, escalation).
     svc, provider = _service(profile="shallow")
     await svc.run(root_context(InProcessEventBus()), ReasoningInput(prompt="why is it 42"))
-    profile = resolve_profile("shallow")
-    complexity = adaptive.task_complexity("why is it 42", ("step a", "step b"))
-    expected = adaptive.token_budget(profile, complexity)
-    recurrent = [r for r in provider.requests if "Refine" in r.messages[0].content]
-    assert recurrent and all(r.max_tokens == expected for r in recurrent)
+    assert provider.requests and all(r.max_tokens is None for r in provider.requests)

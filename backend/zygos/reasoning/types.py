@@ -27,7 +27,7 @@ class AdaptiveDecision(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     temperature: float
-    max_tokens: int
+    max_tokens: int | None  # ADR-0006: None = no cap requested (token allocation left to the model)
     model: str
     action: Literal["continue", "early_exit", "backtrack", "max_iters"]
 

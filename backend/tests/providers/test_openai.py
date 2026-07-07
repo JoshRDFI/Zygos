@@ -2,8 +2,9 @@ import json
 
 import httpx
 
-from zygos.providers.base import ProviderSettings
+from zygos.providers.base import DEFAULT_CLOUD_MAX_TOKENS, ProviderSettings
 from zygos.providers.openai import OpenAIProvider
+from zygos.providers.types import GenerationRequest, Message
 
 from .conftest import contract_request, make_client, run_error_contract
 
@@ -50,6 +51,24 @@ async def test_stream_parses_sse():
     chunks = [c async for c in _make(make_client(handler)).stream(contract_request())]
     assert [c.text for c in chunks[:-1]] == ["po", "ng"]
     assert chunks[-1].done is True
+
+
+async def test_none_max_tokens_uses_cloud_default():
+    # ADR-0006: a cloud provider caps generously when no caller cap is given.
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)["max_tokens"] == DEFAULT_CLOUD_MAX_TOKENS
+        return httpx.Response(200, json={"choices": [{"message": {"content": "pong"}}], "usage": {}})
+
+    await _make(make_client(handler)).generate(contract_request())
+
+
+async def test_explicit_max_tokens_preserved():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)["max_tokens"] == 128
+        return httpx.Response(200, json={"choices": [{"message": {"content": "pong"}}], "usage": {}})
+
+    req = GenerationRequest(model="m", messages=(Message(role="user", content="hi"),), max_tokens=128)
+    await _make(make_client(handler)).generate(req)
 
 
 async def test_error_contract():

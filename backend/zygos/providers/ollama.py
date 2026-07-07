@@ -21,11 +21,16 @@ class OllamaProvider:
         self._client = client
 
     def _body(self, request: GenerationRequest, stream: bool) -> dict:
+        options: dict = {"temperature": request.temperature}
+        # ADR-0006: local inference is uncapped unless the caller sets an explicit
+        # cap. Omitting num_predict lets the model generate to its natural stop.
+        if request.max_tokens is not None:
+            options["num_predict"] = request.max_tokens
         return {
             "model": request.model,
             "messages": [{"role": m.role, "content": m.content} for m in request.messages],
             "stream": stream,
-            "options": {"temperature": request.temperature, "num_predict": request.max_tokens},
+            "options": options,
         }
 
     async def generate(self, request: GenerationRequest) -> GenerationResult:

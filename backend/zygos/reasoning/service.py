@@ -55,7 +55,7 @@ class DefaultReasoningService:
             selected_model=self._selected_model,
         )
 
-    async def _call(self, ctx: ExecutionContext, prompt: str, *, model: str, temperature: float, max_tokens: int) -> str:
+    async def _call(self, ctx: ExecutionContext, prompt: str, *, model: str, temperature: float, max_tokens: int | None = None) -> str:
         request = GenerationRequest(
             model=model, messages=(Message(role="user", content=prompt),),
             temperature=temperature, max_tokens=max_tokens,
@@ -86,7 +86,6 @@ class DefaultReasoningService:
             # Prelude (skipped if already cancelled — the router raises rather than
             # admitting a request once ctx.cancelled is set, so we must not call it).
             self._stage = "prelude"
-            complexity = adaptive.task_complexity(input.prompt, ())
             if ctx.cancelled:
                 self._cancelled = True
                 summary = "(cancelled before prelude completed)"
@@ -94,10 +93,8 @@ class DefaultReasoningService:
                 prelude_text = await self._call(
                     ctx.child("prelude"), prompts.build_prelude(input.prompt, input.context),
                     model=route.model, temperature=profile.temperature,
-                    max_tokens=adaptive.token_budget(profile, complexity),
                 )
                 summary, self._decomposition = prompts.parse_prelude(prelude_text)
-                complexity = adaptive.task_complexity(input.prompt, self._decomposition)
 
             # Recurrent loop
             self._stage = "recurrent"
@@ -114,11 +111,10 @@ class DefaultReasoningService:
                     break
                 stalled = prior_aggregate is not None and prior_aggregate < profile.floor
                 temperature = adaptive.temperature_for(profile, stalled)
-                max_tokens = adaptive.token_budget(profile, complexity)
                 text = await self._call(
                     ctx.child(f"recurrent-{iteration}"),
                     prompts.build_recurrent(input.prompt, self._decomposition, prior_summary, iteration),
-                    model=route.model, temperature=temperature, max_tokens=max_tokens,
+                    model=route.model, temperature=temperature,
                 )
                 current = prompts.parse_summary(text)
                 breakdown = confidence.score(
@@ -132,11 +128,10 @@ class DefaultReasoningService:
                     judge_used = True
                     judged = prompts.parse_judge(
                         await self._call(
-                            # Reuse the iteration's adaptive budget: a small cap starves a
-                            # thinking judge model (it spends the budget inside its reasoning
-                            # and returns empty content -> parse_judge reads 0.0).
+                            # ADR-0006: no token cap — a starved thinking judge returns empty
+                            # content and parse_judge would silently read 0.0.
                             ctx.child(f"judge-{iteration}"), prompts.build_judge(input.prompt, current),
-                            model=route.model, temperature=0.0, max_tokens=max_tokens,
+                            model=route.model, temperature=0.0,
                         )
                     )
                     judge_exit = judged >= breakdown.threshold
@@ -161,7 +156,7 @@ class DefaultReasoningService:
                 self._iterations.append(IterationRecord(
                     index=iteration, summary=current, confidence=breakdown, judge_used=judge_used,
                     decision=AdaptiveDecision(
-                        temperature=temperature, max_tokens=max_tokens, model=route.model, action=action,
+                        temperature=temperature, max_tokens=None, model=route.model, action=action,
                     ),
                     revised_from=revised_from,
                 ))
@@ -189,7 +184,6 @@ class DefaultReasoningService:
                 final = await self._call(
                     ctx.child("coda"), prompts.build_coda(input.prompt, best_summary),
                     model=route.model, temperature=profile.temperature,
-                    max_tokens=adaptive.token_budget(profile, complexity),
                 )
             self._final = final
             self._stage = "cancelled" if self._cancelled else "done"

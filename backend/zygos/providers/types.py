@@ -21,7 +21,9 @@ class GenerationRequest(BaseModel):
     # May be empty on construction; the router fills it from the chosen route.
     model: str = ""
     messages: tuple[Message, ...]
-    max_tokens: int = 1024
+    # None = no caller-specified cap; the provider applies its class policy (ADR-0006:
+    # local uncapped, cloud a generous default). An explicit int is always honored.
+    max_tokens: int | None = None
     temperature: float = 0.7
 
 

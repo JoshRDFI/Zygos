@@ -12,3 +12,6 @@ from zygos.providers.openai import OpenAIProvider
 
 class VllmProvider(OpenAIProvider):
     name = "vllm"
+    # ADR-0006: local backend -> uncapped by default (omit max_tokens when the caller
+    # gives none), unlike the cloud OpenAI default.
+    default_max_tokens = None

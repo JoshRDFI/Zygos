@@ -32,5 +32,14 @@ async def test_generate_is_keyless_and_local():
     assert result.provider == "vllm"
 
 
+async def test_local_vllm_omits_max_tokens_when_none():
+    # ADR-0006: vLLM is local -> uncapped by default (no max_tokens sent).
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "max_tokens" not in json.loads(request.content)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}], "usage": {}})
+
+    await _make(make_client(handler)).generate(contract_request())
+
+
 async def test_error_contract():
     await run_error_contract(_make)

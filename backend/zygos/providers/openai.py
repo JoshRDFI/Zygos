@@ -9,13 +9,21 @@ from typing import AsyncIterator
 import httpx
 
 from zygos.errors import ProviderProtocolError
-from zygos.providers.base import ProviderSettings, ensure_ok, translate_transport_error
+from zygos.providers.base import (
+    DEFAULT_CLOUD_MAX_TOKENS,
+    ProviderSettings,
+    ensure_ok,
+    translate_transport_error,
+)
 from zygos.providers.types import GenerationChunk, GenerationRequest, GenerationResult, Usage
 
 
 class OpenAIProvider:
     name = "openai"
     chat_path = "/chat/completions"
+    # ADR-0006: cloud default cap when the request carries none. Subclasses for local
+    # backends (vLLM) override to None so local inference stays uncapped.
+    default_max_tokens: int | None = DEFAULT_CLOUD_MAX_TOKENS
 
     def __init__(self, settings: ProviderSettings, client: httpx.AsyncClient) -> None:
         self._settings = settings
@@ -27,13 +35,16 @@ class OpenAIProvider:
         return {}
 
     def _body(self, request: GenerationRequest, stream: bool) -> dict:
-        return {
+        body: dict = {
             "model": request.model,
             "messages": [{"role": m.role, "content": m.content} for m in request.messages],
-            "max_tokens": request.max_tokens,
             "temperature": request.temperature,
             "stream": stream,
         }
+        cap = request.max_tokens if request.max_tokens is not None else self.default_max_tokens
+        if cap is not None:
+            body["max_tokens"] = cap
+        return body
 
     async def generate(self, request: GenerationRequest) -> GenerationResult:
         try:

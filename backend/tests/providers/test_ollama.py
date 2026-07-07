@@ -4,6 +4,7 @@ import httpx
 
 from zygos.providers.base import ProviderSettings
 from zygos.providers.ollama import OllamaProvider
+from zygos.providers.types import GenerationRequest, Message
 
 from .conftest import contract_request, make_client, run_error_contract
 
@@ -20,7 +21,7 @@ async def test_generate_parses_ollama_response():
         body = json.loads(request.content)
         assert body["model"] == "test-model"
         assert body["stream"] is False
-        assert body["options"]["num_predict"] == 1024
+        assert "num_predict" not in body["options"]  # ADR-0006: local uncapped by default
         return httpx.Response(
             200,
             json={
@@ -36,6 +37,15 @@ async def test_generate_parses_ollama_response():
     assert result.provider == "ollama"
     assert result.usage.input_tokens == 7
     assert result.usage.output_tokens == 3
+
+
+async def test_generate_sets_num_predict_when_max_tokens_given():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)["options"]["num_predict"] == 256
+        return httpx.Response(200, json={"message": {"content": "ok"}, "done": True})
+
+    req = GenerationRequest(model="m", messages=(Message(role="user", content="hi"),), max_tokens=256)
+    await _make(make_client(handler)).generate(req)
 
 
 async def test_stream_parses_ndjson_lines():

@@ -9,7 +9,12 @@ from typing import AsyncIterator
 import httpx
 
 from zygos.errors import ProviderProtocolError
-from zygos.providers.base import ProviderSettings, ensure_ok, translate_transport_error
+from zygos.providers.base import (
+    DEFAULT_CLOUD_MAX_TOKENS,
+    ProviderSettings,
+    ensure_ok,
+    translate_transport_error,
+)
 from zygos.providers.types import GenerationChunk, GenerationRequest, GenerationResult, Usage
 
 _API_VERSION = "2023-06-01"
@@ -30,9 +35,12 @@ class AnthropicProvider:
 
     def _body(self, request: GenerationRequest, stream: bool) -> dict:
         system_parts = [m.content for m in request.messages if m.role == "system"]
+        # ADR-0006: anthropic requires max_tokens; fall back to the generous cloud
+        # default when the caller gives none.
+        max_tokens = request.max_tokens if request.max_tokens is not None else DEFAULT_CLOUD_MAX_TOKENS
         body: dict = {
             "model": request.model,
-            "max_tokens": request.max_tokens,
+            "max_tokens": max_tokens,
             "temperature": request.temperature,
             "messages": [
                 {"role": m.role, "content": m.content} for m in request.messages if m.role != "system"
