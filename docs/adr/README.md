@@ -29,3 +29,4 @@ ADRs are numbered sequentially using the format `ADR-NNNN`, zero-padded to four 
 | [ADR-0003](ADR-0003-config-declared-plugins.md) | Config-Declared Plugins | Accepted |
 | [ADR-0004](ADR-0004-multiplexed-websocket.md) | One Multiplexed WebSocket per Session | Accepted |
 | [ADR-0005](ADR-0005-apache-2-license.md) | Apache-2.0 License | Accepted |
+| [ADR-0006](ADR-0006-provider-class-token-limits.md) | Provider-Class-Aware Token Limits | Accepted |
