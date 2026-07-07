@@ -163,6 +163,22 @@ async def test_run_rejects_concurrent_run():
     await run1  # run1 finishes cleanly; the guard is cleared
 
 
+async def test_judge_request_is_not_token_starved():
+    # The fence-judge sub-call must not be starved: a thinking judge model spends
+    # a tiny budget inside its reasoning and returns empty content. Judge requests
+    # carry a generous (adaptive) budget like the other stages.
+    # This recurrent summary scores just inside the fence band on iteration 1,
+    # so the judge is consulted (and a judge request is recorded).
+    svc, provider = _service(
+        recurrent="prelude summary about the topic step a step b therefore the result",
+        judge=0.9, profile="balanced",
+    )
+    await svc.run(root_context(InProcessEventBus()), ReasoningInput(prompt="hard one"))
+    judge_reqs = [r for r in provider.requests if "Rate how complete" in r.messages[0].content]
+    assert judge_reqs, "judge stage should have fired in this scenario"
+    assert all(r.max_tokens >= 256 for r in judge_reqs)
+
+
 async def test_recurrent_request_carries_adaptive_token_budget():
     from zygos.reasoning import adaptive
     from zygos.reasoning.profiles import resolve_profile

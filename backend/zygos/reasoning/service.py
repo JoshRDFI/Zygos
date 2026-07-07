@@ -132,8 +132,11 @@ class DefaultReasoningService:
                     judge_used = True
                     judged = prompts.parse_judge(
                         await self._call(
+                            # Reuse the iteration's adaptive budget: a small cap starves a
+                            # thinking judge model (it spends the budget inside its reasoning
+                            # and returns empty content -> parse_judge reads 0.0).
                             ctx.child(f"judge-{iteration}"), prompts.build_judge(input.prompt, current),
-                            model=route.model, temperature=0.0, max_tokens=64,
+                            model=route.model, temperature=0.0, max_tokens=max_tokens,
                         )
                     )
                     judge_exit = judged >= breakdown.threshold
