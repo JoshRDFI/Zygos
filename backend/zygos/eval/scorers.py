@@ -21,6 +21,15 @@ def _normalize(text: str) -> str:
     return " ".join(_PUNCT.sub("", text).lower().split())
 
 
+def _parse_number(text: str) -> float | None:
+    """Whole-string float first (clean 'number only' output), else first number found."""
+    try:
+        return float(text.strip())
+    except ValueError:
+        m = _NUM.search(text)
+        return float(m.group()) if m else None
+
+
 class ExactMatchScorer:
     async def score(self, ctx: ExecutionContext, task: Task, output: str) -> ScoreResult:
         expected = (task.scorer.expected or "").strip()
@@ -35,10 +44,9 @@ class NormalizedMatchScorer:
         tol = task.scorer.tolerance
         if tol is not None:
             want = _NUM.search(expected)
-            got = _NUM.search(output)
-            if want and got and abs(float(want.group()) - float(got.group())) <= tol:
-                return ScoreResult(score=1.0, passed=True,
-                                   detail=f"numeric within tol={tol}")
+            got = _parse_number(output)
+            if want is not None and got is not None and abs(float(want.group()) - got) <= tol:
+                return ScoreResult(score=1.0, passed=True, detail=f"numeric within tol={tol}")
             return ScoreResult(score=0.0, passed=False, detail=f"numeric outside tol={tol}")
         ok = _normalize(expected) == _normalize(output)
         return ScoreResult(score=1.0 if ok else 0.0, passed=ok, detail="normalized_match")

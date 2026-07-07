@@ -43,6 +43,13 @@ async def test_normalized_match_numeric_outside_tolerance_fails():
     assert not r.passed
 
 
+@pytest.mark.asyncio
+async def test_normalized_match_parses_clean_numeric_exactly():
+    t = _task(ScorerSpec(kind="normalized_match", expected="1157.63", tolerance=0.01))
+    r = await NormalizedMatchScorer().score(None, t, "1157.63")
+    assert r.passed
+
+
 from zygos.eval.scorers import LlmJudgeScorer
 from zygos.providers.types import GenerationRequest, GenerationResult, Usage
 from zygos.runtime.context import root_context
