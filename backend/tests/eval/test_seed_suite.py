@@ -24,3 +24,12 @@ def test_every_match_task_declares_expected():
             assert t.scorer.expected, f"{t.id} missing expected"
         if t.scorer.kind == "llm_judge":
             assert t.scorer.rubric, f"{t.id} missing rubric"
+
+
+def test_all_code_tasks_use_code_exec():
+    suite = load_suite(SEED)
+    code_tasks = [t for t in suite.tasks if t.category == "code"]
+    assert code_tasks
+    for t in code_tasks:
+        assert t.scorer.kind == "code_exec", t.id
+        assert t.scorer.checks, t.id

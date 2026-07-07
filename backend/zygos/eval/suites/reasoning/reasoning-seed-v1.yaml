@@ -201,18 +201,28 @@ tasks:
   - id: code-fizzbuzz
     category: code
     split: train
-    input: "Write a Python function fizzbuzz(n) returning 'fizz'/'buzz'/'fizzbuzz'/str(n) for 1..n."
+    input: >
+      Write a Python function fizzbuzz(n) that returns a list whose i-th element
+      (for i from 1 to n) is 'fizzbuzz' if i is divisible by 15, else 'fizz' if
+      divisible by 3, else 'buzz' if divisible by 5, else str(i).
     scorer:
-      kind: llm_judge
-      rubric: "Correct FizzBuzz: multiples of 3 -> fizz, 5 -> buzz, 15 -> fizzbuzz, else the number; iterates 1..n."
+      kind: code_exec
+      checks:
+        - "assert fizzbuzz(5) == ['1', '2', 'fizz', '4', 'buzz']"
+        - "assert fizzbuzz(15)[14] == 'fizzbuzz'"
+        - "assert fizzbuzz(15)[2] == 'fizz' and fizzbuzz(15)[4] == 'buzz'"
 
   - id: code-reverse-words
     category: code
     split: val
-    input: "Write a Python one-liner that reverses the word order of a sentence string s."
+    input: >
+      Write a Python function reverse_words(s) that returns the string s with the
+      order of its space-separated words reversed.
     scorer:
-      kind: llm_judge
-      rubric: "Returns the words of s in reverse order, space-joined; single expression."
+      kind: code_exec
+      checks:
+        - "assert reverse_words('the quick brown fox') == 'fox brown quick the'"
+        - "assert reverse_words('hello') == 'hello'"
 
   - id: code-is-palindrome
     category: code
@@ -222,11 +232,11 @@ tasks:
       string s reads the same forwards and backwards, ignoring case and
       spaces, and False otherwise.
     scorer:
-      kind: llm_judge
-      rubric: >
-        Normalizes s by removing spaces and lowercasing (or equivalent),
-        then compares it to its reverse; returns a bool matching that
-        comparison for all inputs, not just a hardcoded case.
+      kind: code_exec
+      checks:
+        - "assert is_palindrome('A man a plan a canal Panama') is True"
+        - "assert is_palindrome('hello') is False"
+        - "assert is_palindrome('') is True"
 
   - id: code-sum-even
     category: code
@@ -235,10 +245,12 @@ tasks:
       Write a Python function sum_even(nums) that returns the sum of the
       even numbers in the list nums.
     scorer:
-      kind: llm_judge
-      rubric: >
-        Filters nums to even values only (n % 2 == 0) and returns their sum;
-        returns 0 for an empty list or a list with no even numbers.
+      kind: code_exec
+      checks:
+        - "assert sum_even([1, 2, 3, 4]) == 6"
+        - "assert sum_even([2, 4, 6]) == 12"
+        - "assert sum_even([1, 3, 5]) == 0"
+        - "assert sum_even([]) == 0"
 
   - id: code-binary-search
     category: code
@@ -247,11 +259,12 @@ tasks:
       Write a Python function binary_search(arr, target) that returns the
       index of target in the sorted list arr, or -1 if target is not present.
     scorer:
-      kind: llm_judge
-      rubric: >
-        Implements O(log n) binary search over a sorted array using a
-        low/high midpoint loop (or equivalent recursion), returning the
-        correct index on a match and -1 when target is absent.
+      kind: code_exec
+      checks:
+        - "assert binary_search([1, 3, 5, 7, 9], 5) == 2"
+        - "assert binary_search([1, 3, 5, 7, 9], 4) == -1"
+        - "assert binary_search([], 1) == -1"
+        - "assert binary_search([2], 2) == 0"
 
   - id: code-fibonacci
     category: code
@@ -260,11 +273,11 @@ tasks:
       Write a Python function fib(n) that returns the n-th Fibonacci number,
       with fib(0) = 0 and fib(1) = 1.
     scorer:
-      kind: llm_judge
-      rubric: >
-        Correct Fibonacci recurrence (fib(n) = fib(n-1) + fib(n-2)) with base
-        cases fib(0)=0 and fib(1)=1; produces correct values for at least
-        n=0..10 (0,1,1,2,3,5,8,13,21,34,55).
+      kind: code_exec
+      checks:
+        - "assert fib(0) == 0 and fib(1) == 1"
+        - "assert fib(10) == 55"
+        - "assert fib(7) == 13"
 
   - id: code-count-vowels
     category: code
@@ -273,8 +286,9 @@ tasks:
       Write a Python function count_vowels(s) that returns the number of
       vowels (a, e, i, o, u, case-insensitive) in the string s.
     scorer:
-      kind: llm_judge
-      rubric: >
-        Counts characters in s that are a/e/i/o/u in either case; ignores
-        consonants, digits, and punctuation; returns 0 for a string with no
-        vowels.
+      kind: code_exec
+      checks:
+        - "assert count_vowels('hello') == 2"
+        - "assert count_vowels('AEIOU') == 5"
+        - "assert count_vowels('xyz') == 0"
+        - "assert count_vowels('') == 0"
