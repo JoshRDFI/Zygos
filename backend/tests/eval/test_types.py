@@ -23,8 +23,8 @@ def test_task_rejects_unknown_category_and_split():
 
 
 def test_runrecord_allows_null_score_for_errored_task():
-    rec = RunRecord(task_id="t1", category="code", split="val", output="",
-                    score=None, passed=None, error="boom")
+    rec = RunRecord(task_id="t1", category="code", split="val", scorer_kind="exact_match",
+                    output="", score=None, passed=None, error="boom")
     assert rec.score is None and rec.error == "boom"
 
 

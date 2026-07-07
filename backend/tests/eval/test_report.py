@@ -3,8 +3,8 @@ from zygos.eval.types import RunRecord
 
 
 def _rec(**kw):
-    base = dict(task_id="t", category="simple", split="val", output="o",
-                score=1.0, passed=True)
+    base = dict(task_id="t", category="simple", split="val", scorer_kind="exact_match",
+                output="o", score=1.0, passed=True)
     base.update(kw)
     return RunRecord(**base)
 
@@ -38,3 +38,13 @@ def test_render_table_is_nonempty_string():
     report = build_report("demo", [_rec()])
     text = render_table(report)
     assert "demo" in text and "val" in text
+
+
+def test_by_scorer_aggregation():
+    records = [
+        _rec(task_id="a", scorer_kind="exact_match", score=1.0, passed=True),
+        _rec(task_id="b", scorer_kind="llm_judge", score=0.0, passed=False),
+    ]
+    report = build_report("demo", records)
+    assert report.by_scorer["exact_match"].pass_rate == 1.0
+    assert report.by_scorer["llm_judge"].pass_rate == 0.0

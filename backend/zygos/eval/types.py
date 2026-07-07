@@ -42,6 +42,7 @@ class RunRecord(BaseModel):
     task_id: str
     category: Category
     split: Split
+    scorer_kind: str
     output: str
     score: float | None
     passed: bool | None

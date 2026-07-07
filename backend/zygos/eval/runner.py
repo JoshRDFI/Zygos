@@ -28,7 +28,8 @@ class EvalRunner:
         return records
 
     async def _run_one(self, task: Task) -> RunRecord:
-        base = dict(task_id=task.id, category=task.category, split=task.split)
+        base = dict(task_id=task.id, category=task.category, split=task.split,
+                    scorer_kind=task.scorer.kind)
         ctx = self._make_context()
         started = time.perf_counter()
         try:

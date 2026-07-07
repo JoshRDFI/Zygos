@@ -27,14 +27,15 @@ def build_report(suite: str, records: Sequence[RunRecord]) -> EvalReport:
         records=tuple(records),
         by_split=_group(records, lambda r: r.split),
         by_category=_group(records, lambda r: r.category),
-        by_scorer={},  # scorer kind not carried on RunRecord; reserved
+        by_scorer=_group(records, lambda r: r.scorer_kind),
         errors=sum(1 for r in records if r.score is None),
     )
 
 
 def render_table(report: EvalReport) -> str:
     lines = [f"suite: {report.suite}  (errors: {report.errors})", ""]
-    for title, group in (("by split", report.by_split), ("by category", report.by_category)):
+    for title, group in (("by split", report.by_split), ("by category", report.by_category),
+                         ("by scorer", report.by_scorer)):
         lines.append(title)
         for name, s in sorted(group.items()):
             lines.append(
