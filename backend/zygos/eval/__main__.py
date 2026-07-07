@@ -54,22 +54,35 @@ def main(argv: list[str] | None = None) -> int:
     from zygos.runtime.bootstrap import build_runtime  # local import: only real runs pay for it
 
     assembly = build_runtime(args.config)
-    try:
-        config: ZygosConfig = assembly.config
-        if not config.reasoning.enabled:
-            print("error: reasoning is disabled; set reasoning.enabled=true in config", file=sys.stderr)
-            return 2
-        err = check_provider_configured(config)
-        if err is not None:
-            print(f"error: {err}", file=sys.stderr)
-            return 2
-        judge_model = args.judge_model or config.providers.primary.model
-        report = asyncio.run(run_eval(
-            args.suite, split=args.split, category=args.category,
-            assembly=assembly, judge_model=judge_model,
-        ))
-    finally:
+    config: ZygosConfig = assembly.config
+
+    # Precondition failures: nothing has touched the event loop / http pool yet,
+    # so a standalone aclose() is safe.
+    if not config.reasoning.enabled:
+        print("error: reasoning is disabled; set reasoning.enabled=true in config", file=sys.stderr)
         asyncio.run(assembly.aclose())
+        return 2
+    err = check_provider_configured(config)
+    if err is not None:
+        print(f"error: {err}", file=sys.stderr)
+        asyncio.run(assembly.aclose())
+        return 2
+
+    judge_model = args.judge_model or config.providers.primary.model
+
+    async def _run_and_close() -> EvalReport:
+        # run_eval and aclose MUST share one event loop: the run opens an httpx
+        # connection pool bound to this loop; closing it in a second asyncio.run()
+        # raises 'Event loop is closed'.
+        try:
+            return await run_eval(
+                args.suite, split=args.split, category=args.category,
+                assembly=assembly, judge_model=judge_model,
+            )
+        finally:
+            await assembly.aclose()
+
+    report = asyncio.run(_run_and_close())
 
     print(render_table(report))
     if args.json is not None:

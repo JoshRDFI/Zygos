@@ -68,6 +68,44 @@ def test_check_provider_configured_ok_for_local():
     assert check_provider_configured(C) is None
 
 
+def test_main_runs_eval_and_closes_in_one_event_loop(tmp_path, monkeypatch):
+    """Regression: a real run opens an httpx pool bound to the eval's event loop.
+    If aclose() runs in a *second* asyncio.run(), closing that pool raises
+    'Event loop is closed'. run_eval and aclose must share one loop."""
+    import asyncio
+    import zygos.runtime.bootstrap as bootstrap
+    import zygos.eval.__main__ as cli
+    from zygos.eval.report import build_report
+
+    loops = {}
+
+    class _Cfg:
+        class reasoning:
+            enabled = True
+        class providers:
+            class primary:
+                provider = "ollama"
+                model = "qwen3:8b"
+            credentials = {}
+
+    class _Assembly:
+        config = _Cfg
+        async def aclose(self):
+            loops["close"] = asyncio.get_running_loop()
+
+    async def _fake_run_eval(*args, **kwargs):
+        loops["run"] = asyncio.get_running_loop()
+        return build_report("demo", [])
+
+    monkeypatch.setattr(bootstrap, "build_runtime", lambda config_path=None: _Assembly())
+    monkeypatch.setattr(cli, "run_eval", _fake_run_eval)
+
+    rc = cli.main([str(tmp_path / "s.yaml")])
+
+    assert rc == 0
+    assert loops["run"] is loops["close"], "run_eval and aclose must run in the same event loop"
+
+
 def test_main_closes_assembly_on_precondition_failure(tmp_path, monkeypatch):
     import zygos.runtime.bootstrap as bootstrap
     from zygos.eval.__main__ import main
