@@ -37,3 +37,16 @@ def test_task_is_immutable():
                 scorer=ScorerSpec(kind="exact_match", expected="hi"))
     with pytest.raises(ValidationError):
         task.split = "train"
+
+
+def test_code_exec_requires_checks():
+    with pytest.raises(ValidationError):
+        ScorerSpec(kind="code_exec")
+    with pytest.raises(ValidationError):
+        ScorerSpec(kind="code_exec", checks=())
+
+
+def test_code_exec_spec_holds_checks_and_timeout():
+    spec = ScorerSpec(kind="code_exec", checks=("assert f() == 1",), timeout_s=3.0)
+    assert spec.checks == ("assert f() == 1",)
+    assert spec.timeout_s == 3.0
