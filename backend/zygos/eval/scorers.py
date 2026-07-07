@@ -3,6 +3,7 @@
 import re
 from typing import Protocol
 
+from zygos.eval.codeexec import extract_code, run_checks
 from zygos.eval.types import ScoreResult, Task
 from zygos.providers.types import GenerationRequest, Message
 from zygos.runtime.context import ExecutionContext
@@ -88,3 +89,16 @@ class LlmJudgeScorer:
         value = max(0.0, min(1.0, float(match.group())))
         return ScoreResult(score=value, passed=value >= self._threshold,
                            detail=f"llm_judge={value:.2f} model={self._judge_model}")
+
+
+class CodeExecScorer:
+    async def score(self, ctx: ExecutionContext, task: Task, output: str) -> ScoreResult:
+        checks = task.scorer.checks or ()
+        outcome = await run_checks(extract_code(output), checks, task.scorer.timeout_s)
+        total = outcome.total or 1
+        score = outcome.passed / total
+        passed = outcome.total > 0 and outcome.passed == outcome.total
+        detail = f"code_exec {outcome.passed}/{outcome.total}"
+        if outcome.error:
+            detail += f" ({outcome.error})"
+        return ScoreResult(score=score, passed=passed, detail=detail)

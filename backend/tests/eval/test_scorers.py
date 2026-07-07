@@ -1,6 +1,6 @@
 import pytest
 
-from zygos.eval.scorers import ExactMatchScorer, LlmJudgeScorer, NormalizedMatchScorer
+from zygos.eval.scorers import CodeExecScorer, ExactMatchScorer, LlmJudgeScorer, NormalizedMatchScorer
 from zygos.eval.types import ScorerSpec, Task
 from zygos.providers.types import GenerationRequest, GenerationResult
 from zygos.runtime.context import root_context
@@ -111,3 +111,24 @@ async def test_llm_judge_clamps_out_of_range_score():
     t = _task(ScorerSpec(kind="llm_judge", rubric="correct"))
     r = await scorer.score(_ctx(), t, "x")
     assert r.score == 1.0 and r.passed
+
+
+@pytest.mark.asyncio
+async def test_code_exec_scorer_all_pass():
+    t = _task(ScorerSpec(kind="code_exec", checks=("assert add(1, 2) == 3",)))
+    r = await CodeExecScorer().score(_ctx(), t, "def add(a, b):\n    return a + b")
+    assert r.passed and r.score == 1.0
+
+
+@pytest.mark.asyncio
+async def test_code_exec_scorer_extracts_fenced_code():
+    t = _task(ScorerSpec(kind="code_exec", checks=("assert add(1, 2) == 3",)))
+    r = await CodeExecScorer().score(_ctx(), t, "Sure:\n```python\ndef add(a, b):\n    return a + b\n```")
+    assert r.passed
+
+
+@pytest.mark.asyncio
+async def test_code_exec_scorer_partial_not_passed():
+    t = _task(ScorerSpec(kind="code_exec", checks=("assert f(2) == 4", "assert f(3) == 6")))
+    r = await CodeExecScorer().score(_ctx(), t, "def f(x):\n    return 4 if x == 2 else 0")
+    assert not r.passed and r.score == 0.5
