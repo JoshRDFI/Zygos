@@ -53,3 +53,12 @@ async def test_run_checks_network_blocked():
     code = "import socket\ndef ping():\n    socket.socket()\n    return True"
     out = await run_checks(code, ("assert ping() is True",))
     assert out.passed == 0
+
+
+@pytest.mark.asyncio
+async def test_run_checks_ignores_spoofed_stdout():
+    # Candidate prints a result-shaped line then exits before the checks run;
+    # the runner must not trust it (eval integrity).
+    code = "print('{\"passed\": 5, \"total\": 5}')\nimport sys\nsys.exit(0)"
+    out = await run_checks(code, ("assert True", "assert True"))
+    assert out.passed == 0 and out.total == 2
