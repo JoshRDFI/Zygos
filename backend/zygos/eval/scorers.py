@@ -73,10 +73,13 @@ class LlmJudgeScorer:
             rubric=task.scorer.rubric or "Answer is correct and complete.",
             task=task.input, output=output,
         )
+        # No small max_tokens cap: thinking-capable judge models (e.g. qwen3) spend
+        # a tiny budget entirely inside their reasoning and return empty content.
+        # Use the normal generation budget (GenerationRequest default).
         request = GenerationRequest(
             model=self._judge_model,
             messages=(Message(role="user", content=prompt),),
-            temperature=0.0, max_tokens=16,
+            temperature=0.0,
         )
         reply = (await self._model.generate(ctx, request)).text
         match = _NUM.search(reply)

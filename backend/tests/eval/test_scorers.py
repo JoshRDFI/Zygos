@@ -78,6 +78,19 @@ async def test_llm_judge_parses_score_and_uses_judge_model():
 
 
 @pytest.mark.asyncio
+async def test_llm_judge_does_not_starve_thinking_models():
+    # A tiny max_tokens starves thinking-capable judge models (e.g. qwen3): the
+    # budget is spent inside the <think> block and the visible content comes back
+    # empty -> no parseable score. The judge must request a normal generation
+    # budget, not a starved one.
+    model = _StubModel("0.9")
+    scorer = LlmJudgeScorer(model, judge_model="judge-x")
+    t = _task(ScorerSpec(kind="llm_judge", rubric="correct"))
+    await scorer.score(_ctx(), t, "answer")
+    assert model.last_request.max_tokens >= 256
+
+
+@pytest.mark.asyncio
 async def test_llm_judge_below_threshold_fails():
     scorer = LlmJudgeScorer(_StubModel("0.3"), judge_model="judge-x", pass_threshold=0.6)
     t = _task(ScorerSpec(kind="llm_judge", rubric="correct"))
