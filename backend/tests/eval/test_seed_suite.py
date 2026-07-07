@@ -7,7 +7,7 @@ SEED = Path(__file__).resolve().parents[2] / "zygos/eval/suites/reasoning/reason
 
 def test_seed_suite_loads_and_is_well_formed():
     suite = load_suite(SEED)
-    assert 24 <= len(suite.tasks) <= 40
+    assert 24 <= len(suite.tasks) <= 36
     categories = {t.category for t in suite.tasks}
     assert categories == {"simple", "standard", "complex_reasoning", "code"}
     splits = {t.split for t in suite.tasks}
