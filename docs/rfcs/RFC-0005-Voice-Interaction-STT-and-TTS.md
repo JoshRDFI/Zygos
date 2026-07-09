@@ -1,6 +1,6 @@
 # RFC-0005: Voice Interaction — Local Speech-to-Text and Text-to-Speech
 
-- **Status:** Draft
+- **Status:** Review (2026-07-09)
 - **Author:** Zygos maintainers
 - **Created:** 2026-07-09
 - **Governs:** the concrete voice **engines** behind the `speech_to_text` and
