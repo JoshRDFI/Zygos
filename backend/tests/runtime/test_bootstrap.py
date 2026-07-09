@@ -1,8 +1,10 @@
+import asyncio
 import dataclasses
 from pathlib import Path
 
 from zygos.plugins.resolver import PluginRegistry
 from zygos.runtime.bootstrap import RuntimeAssembly, build_runtime
+from zygos.runtime.capabilities import Capability
 
 
 def test_build_runtime_with_defaults():
@@ -121,3 +123,52 @@ async def test_bootstrap_exposes_reasoning_service_and_task_routes(tmp_path: Pat
         assert assembly.model_service.select_model("complex_reasoning").model == "heavy"
     finally:
         await assembly.aclose()
+
+
+def test_build_runtime_registers_provider_capabilities():
+    runtime = build_runtime()  # default config: single ollama primary route
+    try:
+        resolved = runtime.capability_registry.resolve(Capability.LOCAL_INFERENCE)
+        assert [b.provider for b in resolved] == ["ollama"]
+        assert runtime.lifecycle_stage == "register_capabilities"
+    finally:
+        asyncio.run(runtime.aclose())
+
+
+def test_only_routed_providers_are_bound():
+    # AC4: config decides which plugins load; unrouted providers get no binding
+    # even though they are declared in config.plugins.
+    runtime = build_runtime()
+    try:
+        providers = [b.provider for b in runtime.capability_registry.resolve(Capability.LOCAL_INFERENCE)]
+        assert providers == ["ollama"]  # openai/anthropic/vllm/fake declared but unrouted
+    finally:
+        asyncio.run(runtime.aclose())
+
+
+def test_config_cannot_invent_undeclared_capability():
+    # AC4: nothing registers a capability a provider does not declare.
+    runtime = build_runtime()
+    try:
+        assert runtime.capability_registry.resolve(Capability.VISION) == ()
+        assert Capability.VISION not in runtime.capability_registry.snapshot().bindings
+    finally:
+        asyncio.run(runtime.aclose())
+
+
+def test_capability_priority_follows_route_order(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "providers:\n"
+        "  primary: {provider: ollama, model: qwen3:8b}\n"
+        "  fallbacks:\n"
+        "    - {provider: openai, model: gpt-4o}\n"
+        "  credentials:\n"
+        "    openai: {api_key: test-key}\n"
+    )
+    runtime = build_runtime(config)
+    try:
+        resolved = runtime.capability_registry.resolve(Capability.LOCAL_INFERENCE)
+        assert [b.provider for b in resolved] == ["ollama", "openai"]
+    finally:
+        asyncio.run(runtime.aclose())
