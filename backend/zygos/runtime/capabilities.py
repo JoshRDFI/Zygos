@@ -81,3 +81,22 @@ class CapabilityRegistry:
         self._bindings.setdefault(capability, []).append(
             Binding(capability=capability, provider=name, priority=priority)
         )
+
+    def resolve(self, capability: Capability) -> tuple[Binding, ...]:
+        ranked = sorted(self._bindings.get(capability, ()), key=lambda b: b.priority)
+        return tuple(b for b in ranked if self._health_of(b.provider))
+
+    def snapshot(self) -> CapabilitySnapshot:
+        return CapabilitySnapshot(
+            bindings={
+                capability: tuple(
+                    CapabilityBinding(
+                        provider=b.provider,
+                        priority=b.priority,
+                        healthy=self._health_of(b.provider),
+                    )
+                    for b in sorted(bindings, key=lambda b: b.priority)
+                )
+                for capability, bindings in self._bindings.items()
+            }
+        )
