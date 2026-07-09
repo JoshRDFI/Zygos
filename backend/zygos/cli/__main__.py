@@ -13,6 +13,7 @@ import asyncio
 import sys
 from pathlib import Path
 
+from zygos.cli.doctor import DoctorReport, run_doctor
 from zygos.errors import ConfigError
 from zygos.runtime.bootstrap import build_runtime
 from zygos.runtime.manifest import Manifest, runtime_manifest
@@ -23,6 +24,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", type=Path, default=None, help="Path to a config YAML")
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser("inspect", help="Render the runtime manifest")
+    doctor = subcommands.add_parser("doctor", help="Validate the wired runtime")
+    doctor.add_argument("--probe", action="store_true", help="Actively ping the primary route")
     return parser
 
 
@@ -50,12 +53,25 @@ def render_manifest(manifest: Manifest) -> str:
     return "\n".join(lines)
 
 
+def render_doctor(report: DoctorReport) -> str:
+    lines = ["zygos doctor:"]
+    for check in report.checks:
+        mark = "ok  " if check.ok else "FAIL"
+        lines.append(f"  [{mark}] {check.name}: {check.detail}")
+    lines.append("healthy" if report.ok else "PROBLEMS FOUND")
+    return "\n".join(lines)
+
+
 async def _amain(args: argparse.Namespace) -> int:
     runtime = build_runtime(args.config)
     try:
         if args.command == "inspect":
             print(render_manifest(runtime_manifest(runtime)))
             return 0
+        if args.command == "doctor":
+            report = await run_doctor(runtime, probe=args.probe)
+            print(render_doctor(report))
+            return 0 if report.ok else 1
         return 2
     finally:
         await runtime.aclose()

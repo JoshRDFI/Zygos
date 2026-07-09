@@ -67,3 +67,24 @@ def _validate_credentials(config: ZygosConfig) -> None:
                 route.provider,
                 env_key,
             )
+
+
+def primary_route_credentialed(config: ZygosConfig) -> bool:
+    """True if the primary route is usable: keyless, or a required key is present.
+
+    Stricter than load-time validation, which skips routes with no credential
+    block; a keyed primary with no credentials at all is NOT credentialed here.
+    """
+    route = config.providers.primary
+    credential = config.providers.credentials.get(route.provider)
+    if credential is not None and not credential.enabled:
+        return False
+    require_key = (
+        credential.require_api_key
+        if credential is not None and credential.require_api_key is not None
+        else route.provider in _KEYED_PROVIDERS
+    )
+    if not require_key:
+        return True
+    env_key = f"{route.provider.upper()}_API_KEY"
+    return bool((credential and credential.api_key) or os.environ.get(env_key))
