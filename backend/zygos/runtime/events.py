@@ -59,8 +59,30 @@ class ModelSelected(EventPayload):
     classification: str
 
 
+class CapabilityResolved(EventPayload):
+    type: Literal["capability.resolved"] = "capability.resolved"
+    capability: str
+    provider: str
+
+
+class CapabilityRenegotiated(EventPayload):
+    type: Literal["capability.renegotiated"] = "capability.renegotiated"
+    capability: str
+    from_provider: str
+    to_provider: str
+
+
 AnyPayload = Annotated[
-    Union[RouteClaimed, CircuitOpened, CircuitClosed, RequestStarted, RequestFinished, ModelSelected],
+    Union[
+        RouteClaimed,
+        CircuitOpened,
+        CircuitClosed,
+        RequestStarted,
+        RequestFinished,
+        ModelSelected,
+        CapabilityResolved,
+        CapabilityRenegotiated,
+    ],
     Field(discriminator="type"),
 ]
 

@@ -1,7 +1,16 @@
 import pytest
 from pydantic import ValidationError
 
-from zygos.runtime.events import CircuitClosed, Event, ModelSelected, RequestFinished, RequestStarted, RouteClaimed
+from zygos.runtime.events import (
+    CapabilityRenegotiated,
+    CapabilityResolved,
+    CircuitClosed,
+    Event,
+    ModelSelected,
+    RequestFinished,
+    RequestStarted,
+    RouteClaimed,
+)
 
 
 def _sample_event() -> Event:
@@ -52,3 +61,30 @@ def test_event_accepts_turn_payload():
         source="reasoning", payload=RequestStarted(prompt_chars=5),
     )
     assert e.type == "request.started"
+
+
+def test_capability_resolved_payload_validates():
+    payload = CapabilityResolved(capability="local_inference", provider="ollama")
+    assert payload.type == "capability.resolved"
+
+
+def test_capability_renegotiated_payload_validates():
+    payload = CapabilityRenegotiated(
+        capability="local_inference", from_provider="ollama", to_provider="openai"
+    )
+    assert payload.type == "capability.renegotiated"
+
+
+def test_capability_payload_forbids_extra_fields():
+    with pytest.raises(ValidationError):
+        CapabilityResolved(capability="x", provider="y", bogus=1)
+
+
+def test_event_carries_capability_payload_via_discriminated_union():
+    event = Event(
+        run_id="r",
+        span_id="s",
+        source="registry",
+        payload=CapabilityResolved(capability="local_inference", provider="ollama"),
+    )
+    assert event.type == "capability.resolved"
