@@ -16,10 +16,12 @@ from zygos.providers.base import (
     translate_transport_error,
 )
 from zygos.providers.types import GenerationChunk, GenerationRequest, GenerationResult, Usage
+from zygos.runtime.capabilities import Capability
 
 
 class OpenAIProvider:
     name = "openai"
+    capabilities: frozenset[Capability] = frozenset({Capability.LOCAL_INFERENCE})
     chat_path = "/chat/completions"
     # ADR-0006: cloud default cap when the request carries none. Subclasses for local
     # backends (vLLM) override to None so local inference stays uncapped.

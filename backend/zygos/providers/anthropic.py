@@ -16,12 +16,14 @@ from zygos.providers.base import (
     translate_transport_error,
 )
 from zygos.providers.types import GenerationChunk, GenerationRequest, GenerationResult, Usage
+from zygos.runtime.capabilities import Capability
 
 _API_VERSION = "2023-06-01"
 
 
 class AnthropicProvider:
     name = "anthropic"
+    capabilities: frozenset[Capability] = frozenset({Capability.LOCAL_INFERENCE})
 
     def __init__(self, settings: ProviderSettings, client: httpx.AsyncClient) -> None:
         self._settings = settings

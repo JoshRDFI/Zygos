@@ -8,10 +8,12 @@ Stability: Experimental. See RFC-0001 section on provider stability.
 """
 
 from zygos.providers.openai import OpenAIProvider
+from zygos.runtime.capabilities import Capability
 
 
 class VllmProvider(OpenAIProvider):
     name = "vllm"
+    capabilities: frozenset[Capability] = frozenset({Capability.LOCAL_INFERENCE})
     # ADR-0006: local backend -> uncapped by default (omit max_tokens when the caller
     # gives none), unlike the cloud OpenAI default.
     default_max_tokens = None

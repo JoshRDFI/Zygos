@@ -11,10 +11,12 @@ import httpx
 from zygos.errors import ProviderProtocolError
 from zygos.providers.base import ProviderSettings, ensure_ok, translate_transport_error
 from zygos.providers.types import GenerationChunk, GenerationRequest, GenerationResult, Usage
+from zygos.runtime.capabilities import Capability
 
 
 class OllamaProvider:
     name = "ollama"
+    capabilities: frozenset[Capability] = frozenset({Capability.LOCAL_INFERENCE})
 
     def __init__(self, settings: ProviderSettings, client: httpx.AsyncClient) -> None:
         self._settings = settings

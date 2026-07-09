@@ -9,10 +9,12 @@ import httpx
 
 from zygos.providers.base import ProviderSettings
 from zygos.providers.types import GenerationChunk, GenerationRequest, GenerationResult, Usage
+from zygos.runtime.capabilities import Capability
 
 
 class FakeProvider:
     name = "fake"
+    capabilities: frozenset[Capability] = frozenset({Capability.LOCAL_INFERENCE})
 
     def __init__(
         self,
