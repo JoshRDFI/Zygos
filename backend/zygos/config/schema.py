@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from zygos.runtime.capabilities import Capability
+
 
 def _default_plugins() -> dict[str, dict[str, str]]:
     return {
@@ -103,3 +105,7 @@ class ZygosConfig(BaseModel):
     reasoning: ReasoningConfig = Field(default_factory=ReasoningConfig)
     # plugin kind -> plugin name -> "module.path:ClassName" (RFC-0001 §3)
     plugins: dict[str, dict[str, str]] = Field(default_factory=_default_plugins)
+    # Capabilities a deployment requires; `zygos doctor` fails if any is unbound
+    # (RFC-0003 §6). Default empty: the default doctor gate is primary-route
+    # credentials, not capability coverage.
+    required_capabilities: list[Capability] = Field(default_factory=list)

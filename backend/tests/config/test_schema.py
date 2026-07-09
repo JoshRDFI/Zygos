@@ -106,3 +106,19 @@ def test_task_routes_default_empty_and_typed():
         {"providers": {"task_routes": {"complex_reasoning": {"provider": "ollama", "model": "big"}}}}
     )
     assert cfg2.providers.task_routes["complex_reasoning"].model == "big"
+
+
+def test_required_capabilities_defaults_empty():
+    assert ZygosConfig().required_capabilities == []
+
+
+def test_required_capabilities_coerces_valid_capability():
+    from zygos.runtime.capabilities import Capability
+
+    config = ZygosConfig(required_capabilities=["local_inference"])
+    assert config.required_capabilities == [Capability.LOCAL_INFERENCE]
+
+
+def test_required_capabilities_rejects_unknown():
+    with pytest.raises(ValidationError):
+        ZygosConfig(required_capabilities=["teleportation"])
