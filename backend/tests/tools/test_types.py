@@ -83,12 +83,24 @@ def test_toolcontext_is_frozen():
 # M5 C2 Task 2 tests below
 from typing import Any
 
-from zygos.tools.types import RetryPolicy, ToolChunk, ToolResult
+from zygos.tools.types import RetryPolicy, ToolChunk
 
 
 def test_retry_policy_defaults_single_attempt():
     r = RetryPolicy()
     assert (r.attempts, r.backoff_ms, r.multiplier) == (1, 250, 2.0)
+
+
+def test_retry_policy_rejects_non_positive_attempts():
+    import pytest
+    from pydantic import ValidationError
+
+    from zygos.tools.types import RetryPolicy
+
+    with pytest.raises(ValidationError):
+        RetryPolicy(attempts=0)
+    with pytest.raises(ValidationError):
+        RetryPolicy(attempts=-1)
 
 
 def test_tool_meta_resilience_field_defaults():

@@ -124,6 +124,13 @@ class ToolService:
     async def _run_with_fallback(
         self, tool: Tool, call: ToolCall, ctx: ExecutionContext, depth: int
     ) -> ToolResult:
+        """Run `tool`, recursing one level into its fallback on failure.
+
+        NOTE: the fallback tool is intentionally NOT re-gated through the permission
+        check — the primary's gate covers the call (spec §7, maintainer-approved). A
+        fallback configured with `permission="deny"`/`"ask"` is a config smell that
+        would surface in review, not something this layer defends against.
+        """
         result = await execute_tool(tool, call, ctx, sleep=self._sleep)
         if result.ok or depth == 1 or not tool.meta.fallback:
             return result

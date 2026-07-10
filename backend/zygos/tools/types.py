@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Literal, Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from zygos.runtime.context import ExecutionContext
 from zygos.runtime.events import EventPayload
@@ -20,7 +20,7 @@ PermissionDecision = Literal["allow", "deny", "ask"]
 class RetryPolicy(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    attempts: int = 1          # 1 == no retry
+    attempts: int = Field(default=1, ge=1)   # 1 == no retry; must be >= 1 (a stream must always yield a terminal chunk)
     backoff_ms: int = 250      # matches router default
     multiplier: float = 2.0    # exponential, matches router
 

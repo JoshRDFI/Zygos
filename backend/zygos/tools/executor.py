@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import Awaitable, Callable
+from typing import Any, AsyncIterator, Awaitable, Callable
 
 from pydantic import ValidationError
 
@@ -113,7 +113,7 @@ async def execute_tool(
     return result  # unreachable: the loop always returns (attempts >= 1)
 
 
-async def _stream_with_timeout(agen, timeout: float):
+async def _stream_with_timeout(agen, timeout: float) -> AsyncIterator[Any]:
     """Yield from `agen` under a wall-clock total-stream deadline. Raises asyncio.TimeoutError."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
@@ -135,7 +135,7 @@ async def execute_tool_stream(
     ctx: ExecutionContext,
     *,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-):
+) -> AsyncIterator[ToolChunk]:
     name = tool.meta.name
     call_id = call.call_id or uuid.uuid4().hex
     tctx = ToolContext(exec=ctx.child(span_id=call_id), tool=name, call_id=call_id)

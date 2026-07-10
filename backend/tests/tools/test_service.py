@@ -66,8 +66,6 @@ def test_snapshot_is_pure():
     assert [m.name for m in svc.snapshot().registered] == ["echo"]
 
 
-import asyncio
-
 from zygos.tools import ToolChunk
 from zygos.tools.permissions import AllowingResolver, DenyingResolver, PermissionPolicy, Rule
 
