@@ -1,5 +1,7 @@
 """M5 C1 Task 4 — core executor: four cleanup paths + error mapping."""
 
+import asyncio
+
 import pytest
 from pydantic import BaseModel
 
@@ -8,6 +10,8 @@ from zygos.runtime.context import root_context
 from zygos.runtime.events import InProcessEventBus
 from zygos.tools.executor import execute_tool
 from zygos.tools.types import BaseTool, ToolCall, ToolContext, ToolMeta
+
+
 
 
 class _In(BaseModel):
@@ -130,3 +134,37 @@ async def test_call_id_echoed_when_provided():
     tool = SpyTool()
     res = await execute_tool(tool, ToolCall(tool="spy", args={"x": 1}, call_id="fixed-id"), _ctx())
     assert res.call_id == "fixed-id"
+
+
+class SlowTool(BaseTool):
+    """execute sleeps past the tool's timeout_s."""
+
+    meta = ToolMeta(name="slow", description="d", input_model=_In, output_model=_Out,
+                    timeout_s=0.01)
+
+    def __init__(self):
+        self.calls: list[str] = []
+
+    async def execute(self, input: _In, ctx: ToolContext):
+        self.calls.append("execute")
+        await asyncio.sleep(1.0)   # far exceeds 0.01s timeout
+        return _Out(y=input.x)
+
+    def cleanup(self, ctx: ToolContext) -> None:
+        self.calls.append("cleanup")
+
+
+@pytest.mark.asyncio
+async def test_timeout_maps_to_tool_timeout_and_cleanup_ran():
+    tool = SlowTool()
+    res = await execute_tool(tool, ToolCall(tool="slow", args={"x": 1}), _ctx())
+    assert res.ok is False and res.error_code == "tool_timeout"
+    assert "cleanup" in tool.calls
+
+
+@pytest.mark.asyncio
+async def test_default_timeout_applies_when_meta_timeout_none():
+    # A fast tool with timeout_s=None must still succeed (default 60s path, not 0).
+    tool = SpyTool()  # meta has no timeout_s -> None
+    res = await execute_tool(tool, ToolCall(tool="spy", args={"x": 3}), _ctx())
+    assert res.ok is True and res.output == _Out(y=3)
