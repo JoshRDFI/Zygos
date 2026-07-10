@@ -52,10 +52,23 @@ class ProviderProtocolError(ProviderError):
 
 
 class ToolError(ZygosError):
-    """A tool operation failed. Base for the tool-error taxonomy."""
+    """A tool operation failed. Base for the tool-error taxonomy.
+
+    `retryable` drives the executor's retry loop (mirrors ProviderError.retryable).
+    """
 
     code = "tool_error"
+    retryable: bool = False
 
 
 class ToolNotFound(ToolError):
     code = "tool_not_found"
+
+
+class ToolTimeout(ToolError):
+    code = "tool_timeout"
+    retryable = True
+
+
+class ToolPermissionDenied(ToolError):
+    code = "tool_permission_denied"
