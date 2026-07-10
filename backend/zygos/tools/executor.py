@@ -1,14 +1,16 @@
 """Four-phase tool executor: per-attempt timeout + guaranteed cleanup (M5 C2).
 
 Extends the C1 single-attempt core. `_one_attempt` is the C1 guarded block plus an
-`asyncio.wait_for` timeout around `execute` (the only awaitable phase). The retry loop and
-cancellation land in the next task. Stability: Experimental.
+`asyncio.wait_for` timeout around `execute` (the only awaitable phase). `execute_tool` wraps
+`_one_attempt` in a retry loop over `tool.meta.retry.attempts` with injected backoff sleep, and
+checks `ctx.cancelled` at each attempt boundary. Stability: Experimental.
 """
 
 from __future__ import annotations
 
 import asyncio
 import uuid
+from typing import Awaitable, Callable
 
 from pydantic import ValidationError
 
@@ -74,7 +76,13 @@ async def _one_attempt(
     return result, is_ok, retryable
 
 
-async def execute_tool(tool: Tool, call: ToolCall, ctx: ExecutionContext) -> ToolResult:
+async def execute_tool(
+    tool: Tool,
+    call: ToolCall,
+    ctx: ExecutionContext,
+    *,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> ToolResult:
     name = tool.meta.name
     call_id = call.call_id or uuid.uuid4().hex
     tctx = ToolContext(exec=ctx.child(span_id=call_id), tool=name, call_id=call_id)
@@ -88,5 +96,18 @@ async def execute_tool(tool: Tool, call: ToolCall, ctx: ExecutionContext) -> Too
         )
 
     timeout = tool.meta.timeout_s if tool.meta.timeout_s is not None else DEFAULT_TIMEOUT_S
-    result, _is_ok, _retryable = await _one_attempt(tool, input_obj, tctx, timeout)
-    return result
+    retry = tool.meta.retry
+    result: ToolResult = ToolResult.failed(
+        tool=name, call_id=call_id, error_code="tool_error", error_message="no attempt ran"
+    )
+    for attempt in range(1, retry.attempts + 1):
+        if ctx.cancelled:
+            return ToolResult.failed(
+                tool=name, call_id=call_id, error_code="tool_cancelled",
+                error_message="cancelled",
+            )
+        result, is_ok, retryable = await _one_attempt(tool, input_obj, tctx, timeout)
+        if is_ok or not retryable or attempt == retry.attempts:
+            return result
+        await sleep(retry.backoff_ms * (retry.multiplier ** (attempt - 1)) / 1000.0)
+    return result  # unreachable: the loop always returns (attempts >= 1)

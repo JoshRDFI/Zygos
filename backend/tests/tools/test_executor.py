@@ -168,3 +168,82 @@ async def test_default_timeout_applies_when_meta_timeout_none():
     tool = SpyTool()  # meta has no timeout_s -> None
     res = await execute_tool(tool, ToolCall(tool="spy", args={"x": 3}), _ctx())
     assert res.ok is True and res.output == _Out(y=3)
+
+
+from zygos.errors import ToolError
+from zygos.tools.types import RetryPolicy
+
+
+class _Retry(ToolError):
+    code = "x_retry"
+    retryable = True
+
+
+class FlakyTool(BaseTool):
+    """Raises a retryable error `fail_times` times, then succeeds."""
+
+    def __init__(self, *, fail_times: int, attempts: int):
+        self.meta = ToolMeta(name="flaky", description="d", input_model=_In, output_model=_Out,
+                             retry=RetryPolicy(attempts=attempts, backoff_ms=250, multiplier=2.0))
+        self._fail_times = fail_times
+        self.execute_calls = 0
+        self.cleanup_calls = 0
+
+    async def execute(self, input: _In, ctx: ToolContext):
+        self.execute_calls += 1
+        if self.execute_calls <= self._fail_times:
+            raise _Retry("transient")
+        return _Out(y=input.x)
+
+    def cleanup(self, ctx: ToolContext) -> None:
+        self.cleanup_calls += 1
+
+
+def _fake_sleep():
+    calls: list[float] = []
+
+    async def sleep(s: float) -> None:
+        calls.append(s)
+
+    return sleep, calls
+
+
+@pytest.mark.asyncio
+async def test_retry_succeeds_after_transient_failures_with_backoff():
+    tool = FlakyTool(fail_times=2, attempts=3)
+    sleep, slept = _fake_sleep()
+    res = await execute_tool(tool, ToolCall(tool="flaky", args={"x": 9}), _ctx(), sleep=sleep)
+    assert res.ok is True and res.output == _Out(y=9)
+    assert tool.execute_calls == 3
+    assert tool.cleanup_calls == 3          # cleanup ran every attempt
+    assert slept == [0.25, 0.5]             # 250ms, then 250*2ms — exponential backoff
+
+
+@pytest.mark.asyncio
+async def test_retry_exhausted_returns_last_failure():
+    tool = FlakyTool(fail_times=5, attempts=2)
+    sleep, slept = _fake_sleep()
+    res = await execute_tool(tool, ToolCall(tool="flaky", args={"x": 1}), _ctx(), sleep=sleep)
+    assert res.ok is False and res.error_code == "x_retry"
+    assert tool.execute_calls == 2 and slept == [0.25]
+
+
+@pytest.mark.asyncio
+async def test_non_retryable_error_not_retried():
+    tool = SpyTool(fail_execute=True)   # RuntimeError -> tool_execution_failed (not retryable)
+    tool.meta = ToolMeta(name="spy", description="d", input_model=_In, output_model=_Out,
+                         retry=RetryPolicy(attempts=3))
+    sleep, slept = _fake_sleep()
+    res = await execute_tool(tool, ToolCall(tool="spy", args={"x": 1}), _ctx(), sleep=sleep)
+    assert res.ok is False and res.error_code == "tool_execution_failed"
+    assert slept == []                   # never retried
+
+
+@pytest.mark.asyncio
+async def test_cancelled_returns_tool_cancelled_without_running():
+    tool = SpyTool()
+    ctx = _ctx()
+    ctx._cancel.trip()                   # trip the parent cancel token
+    res = await execute_tool(tool, ToolCall(tool="spy", args={"x": 1}), ctx)
+    assert res.ok is False and res.error_code == "tool_cancelled"
+    assert tool.calls == []              # no phase ran
