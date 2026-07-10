@@ -1,10 +1,20 @@
 """Tool framework (M5). Stability: Experimental."""
 
-from zygos.tools.executor import execute_tool
+from zygos.tools.executor import execute_tool, execute_tool_stream
+from zygos.tools.permissions import (
+    AllowingResolver,
+    DenyingResolver,
+    PermissionPolicy,
+    PermissionRequest,
+    PermissionResolver,
+    Rule,
+)
 from zygos.tools.registry import ToolRegistry
 from zygos.tools.service import ToolService, ToolServiceSnapshot
 from zygos.tools.types import (
     BaseTool,
+    PermissionDecision,
+    RetryPolicy,
     Tool,
     ToolCall,
     ToolChunk,
@@ -15,7 +25,15 @@ from zygos.tools.types import (
 )
 
 __all__ = [
+    "AllowingResolver",
     "BaseTool",
+    "DenyingResolver",
+    "PermissionDecision",
+    "PermissionPolicy",
+    "PermissionRequest",
+    "PermissionResolver",
+    "RetryPolicy",
+    "Rule",
     "Tool",
     "ToolCall",
     "ToolChunk",
@@ -27,4 +45,5 @@ __all__ = [
     "ToolServiceSnapshot",
     "VerifyResult",
     "execute_tool",
+    "execute_tool_stream",
 ]
