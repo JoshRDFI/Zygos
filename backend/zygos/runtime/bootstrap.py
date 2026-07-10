@@ -7,6 +7,8 @@ review-blocking smell.
 Stability: Experimental.
 """
 
+import time
+import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +17,9 @@ import httpx
 
 from zygos.config.loader import load_config
 from zygos.config.schema import ZygosConfig
+from zygos.memory.retrieve import Fts5RelevanceIndex, MemoryRetriever, RetrievalWeights
+from zygos.memory.service import DefaultMemoryService, MemoryService
+from zygos.memory.store import MemoryStore
 from zygos.plugins.resolver import PluginRegistry
 from zygos.providers.base import DEFAULT_BASE_URLS, Provider, ProviderSettings
 from zygos.reasoning.service import DefaultReasoningService, ReasoningService
@@ -33,16 +38,20 @@ class RuntimeAssembly:
     plugins: PluginRegistry
     model_service: ModelService
     reasoning_service: ReasoningService
+    memory_service: MemoryService | None
     http_client: httpx.AsyncClient
     event_bus: EventBus
     capability_registry: CapabilityRegistry
     providers: Mapping[str, Provider]
     lifecycle_stage: str
+    _memory_store: MemoryStore | None
 
     def new_context(self, *, session_id: str | None = None) -> ExecutionContext:
         return root_context(self.event_bus, session_id=session_id)
 
     async def aclose(self) -> None:
+        if self._memory_store is not None:
+            self._memory_store.close()
         await self.http_client.aclose()
 
 
@@ -114,14 +123,40 @@ def build_runtime(
     }
     model_service = DefaultModelService(router, task_routes=task_routes)
     reasoning_service = DefaultReasoningService(model_service, config.reasoning)
+
+    memory_service: MemoryService | None = None
+    memory_store: MemoryStore | None = None
+    if config.memory.enabled:
+        memory_store = MemoryStore(config.memory.db_path)
+        relevance_index = Fts5RelevanceIndex(memory_store.connection)
+        retriever = MemoryRetriever(
+            memory_store, relevance_index, clock=time.time,
+            weights=RetrievalWeights(
+                relevance=config.memory.retrieval_weights.relevance,
+                recency=config.memory.retrieval_weights.recency,
+                importance=config.memory.retrieval_weights.importance,
+            ),
+            half_life_s=config.memory.recency_half_life_s,
+        )
+        memory_service = DefaultMemoryService(
+            store=memory_store, retriever=retriever, index=relevance_index,
+            model_service=model_service, clock=time.time, new_id=lambda: uuid.uuid4().hex,
+            token_budget=config.memory.token_budget,
+            batch_size=config.memory.consolidation_batch_size,
+        )
+        # `resume()` is intentionally NOT awaited here — build_runtime is a sync
+        # composition root; the async consumer (M8) drains it at startup.
+
     return RuntimeAssembly(
         config=config,
         plugins=plugin_registry,
         model_service=model_service,
         reasoning_service=reasoning_service,
+        memory_service=memory_service,
         http_client=client,
         event_bus=bus,
         capability_registry=registry,
         providers=providers,
         lifecycle_stage=REGISTER_CAPABILITIES_STAGE,
+        _memory_store=memory_store,
     )

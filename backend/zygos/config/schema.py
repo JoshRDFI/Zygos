@@ -97,12 +97,32 @@ class ReasoningConfig(BaseModel):
     profile: Literal["shallow", "balanced", "deep"] = "balanced"
 
 
+class RetrievalWeightsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    relevance: float = Field(default=0.5, ge=0)
+    recency: float = Field(default=0.2, ge=0)
+    importance: float = Field(default=0.3, ge=0)
+
+
+class MemoryConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    db_path: str = ".zygos/memory.db"
+    token_budget: int = Field(default=2000, ge=1)
+    consolidation_batch_size: int = Field(default=20, ge=1)
+    recency_half_life_s: float = Field(default=86400.0, gt=0)
+    retrieval_weights: RetrievalWeightsConfig = Field(default_factory=RetrievalWeightsConfig)
+
+
 class ZygosConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     learning: LearningConfig = Field(default_factory=LearningConfig)
     reasoning: ReasoningConfig = Field(default_factory=ReasoningConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
     # plugin kind -> plugin name -> "module.path:ClassName" (RFC-0001 §3)
     plugins: dict[str, dict[str, str]] = Field(default_factory=_default_plugins)
     # Capabilities a deployment requires; `zygos doctor` fails if any is unbound
