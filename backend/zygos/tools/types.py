@@ -6,9 +6,9 @@ Stability: Experimental.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from zygos.runtime.context import ExecutionContext
 from zygos.runtime.events import EventPayload
@@ -83,3 +83,40 @@ class ToolContext:
 
     async def emit(self, payload: EventPayload, *, source: str) -> None:
         await self.exec.emit(payload, source=source)
+
+
+@runtime_checkable
+class Tool(Protocol):
+    """Four-phase tool contract (ARCHITECTURE §Tool Contract).
+
+    Only `execute` is mandatory; `prepare`/`verify`/`cleanup` default via BaseTool.
+    `prepare`/`verify`/`cleanup` are synchronous; `execute` is async.
+    """
+
+    meta: ToolMeta
+
+    def prepare(self, ctx: ToolContext) -> None: ...
+    async def execute(self, input: BaseModel, ctx: ToolContext) -> Any: ...
+    def verify(self, output: Any, ctx: ToolContext) -> VerifyResult: ...
+    def cleanup(self, ctx: ToolContext) -> None: ...
+
+
+class BaseTool:
+    """Convenience base supplying default phases so trivial tools write only meta+execute."""
+
+    meta: ToolMeta
+
+    def prepare(self, ctx: ToolContext) -> None:
+        return None
+
+    def verify(self, output: Any, ctx: ToolContext) -> VerifyResult:
+        if self.meta.output_model is None:
+            return VerifyResult(passed=True)
+        try:
+            self.meta.output_model.model_validate(output)
+        except ValidationError as exc:
+            return VerifyResult(passed=False, reason=str(exc))
+        return VerifyResult(passed=True)
+
+    def cleanup(self, ctx: ToolContext) -> None:
+        return None
