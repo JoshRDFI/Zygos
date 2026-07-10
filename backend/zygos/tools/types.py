@@ -6,12 +6,23 @@ Stability: Experimental.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, AsyncIterator, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from zygos.runtime.context import ExecutionContext
 from zygos.runtime.events import EventPayload
+
+
+PermissionDecision = Literal["allow", "deny", "ask"]
+
+
+class RetryPolicy(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    attempts: int = 1          # 1 == no retry
+    backoff_ms: int = 250      # matches router default
+    multiplier: float = 2.0    # exponential, matches router
 
 
 class ToolMeta(BaseModel):
@@ -21,6 +32,10 @@ class ToolMeta(BaseModel):
     description: str
     input_model: type[BaseModel]
     output_model: type[BaseModel] | None = None
+    retry: RetryPolicy = RetryPolicy()
+    timeout_s: float | None = None
+    permission: PermissionDecision = "allow"
+    fallback: str | None = None
 
 
 class ToolCall(BaseModel):
@@ -65,6 +80,14 @@ class ToolResult(BaseModel):
         )
 
 
+class ToolChunk(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", arbitrary_types_allowed=True)
+
+    kind: Literal["content", "result"]
+    content: Any | None = None       # set when kind == "content"
+    result: ToolResult | None = None   # terminal; always the last chunk of a stream
+
+
 @dataclass(frozen=True)
 class ToolContext:
     """Per-call context derived from ExecutionContext. Holds NO service refs (RFC-0002).
@@ -99,6 +122,7 @@ class Tool(Protocol):
     async def execute(self, input: BaseModel, ctx: ToolContext) -> Any: ...
     def verify(self, output: Any, ctx: ToolContext) -> VerifyResult: ...
     def cleanup(self, ctx: ToolContext) -> None: ...
+    def execute_stream(self, input: BaseModel, ctx: ToolContext) -> AsyncIterator[Any]: ...
 
 
 class BaseTool:
@@ -120,3 +144,7 @@ class BaseTool:
 
     def cleanup(self, ctx: ToolContext) -> None:
         return None
+
+    async def execute_stream(self, input: BaseModel, ctx: ToolContext) -> AsyncIterator[Any]:
+        """Default: wrap `execute` as a single-value stream so every tool is streamable."""
+        yield await self.execute(input, ctx)
