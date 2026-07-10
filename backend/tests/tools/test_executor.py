@@ -7,7 +7,7 @@ from zygos.errors import ProviderError
 from zygos.runtime.context import root_context
 from zygos.runtime.events import InProcessEventBus
 from zygos.tools.executor import execute_tool
-from zygos.tools.types import BaseTool, ToolCall, ToolContext, ToolMeta, VerifyResult
+from zygos.tools.types import BaseTool, ToolCall, ToolContext, ToolMeta
 
 
 class _In(BaseModel):

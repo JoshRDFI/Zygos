@@ -1,7 +1,8 @@
 """M5 C1 Task 1 — error taxonomy + data models."""
 
+import dataclasses
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from zygos.errors import ToolError, ToolNotFound, ZygosError
 from zygos.runtime.context import root_context
@@ -64,3 +65,16 @@ def test_toolcontext_derives_from_execution_context():
     assert tctx.cancelled is False
     parent._cancel.trip()  # same CancelToken threads through child
     assert tctx.cancelled is True
+
+
+def test_value_model_is_frozen():
+    result = ToolResult.succeeded(tool="echo", call_id="c1", output={"y": 1})
+    with pytest.raises(ValidationError):
+        result.ok = False
+
+
+def test_toolcontext_is_frozen():
+    parent = root_context(InProcessEventBus())
+    tctx = ToolContext(exec=parent.child(span_id="c1"), tool="echo", call_id="c1")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        tctx.tool = "changed"
