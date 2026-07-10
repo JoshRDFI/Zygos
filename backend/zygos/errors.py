@@ -49,3 +49,13 @@ class ProviderUnavailable(ProviderError):
 class ProviderProtocolError(ProviderError):
     code = "provider_protocol_error"
     retryable = False
+
+
+class ToolError(ZygosError):
+    """A tool operation failed. Base for the tool-error taxonomy."""
+
+    code = "tool_error"
+
+
+class ToolNotFound(ToolError):
+    code = "tool_not_found"
