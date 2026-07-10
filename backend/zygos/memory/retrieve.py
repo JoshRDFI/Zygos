@@ -8,7 +8,11 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from typing import Protocol
+from dataclasses import dataclass
+from typing import Callable, Literal, Protocol
+
+from zygos.memory.store import MemoryStore
+from zygos.memory.types import MemoryRecord
 
 _TOKEN = re.compile(r"[A-Za-z0-9]+")
 
@@ -41,17 +45,12 @@ class Fts5RelevanceIndex:
             " ORDER BY rank LIMIT ?",
             (match, k),
         ).fetchall()
-        # Positional relevance: best-first, normalized so the top hit == 1.0.
+        # M4 stand-in: positional relevance (rank order), NOT BM25 magnitude —
+        # the embedding/hybrid increment replaces this. Normalized so the top hit == 1.0.
         return [(row[0], 1.0 / (1.0 + i)) for i, row in enumerate(rows)]
 
 
 # --- Multi-factor, token-budgeted retrieval assembly ---
-
-from dataclasses import dataclass
-from typing import Callable, Literal
-
-from zygos.memory.store import MemoryStore
-from zygos.memory.types import MemoryRecord
 
 Scope = Literal["inside", "cross", "all"]
 
@@ -64,6 +63,7 @@ class RetrievalWeights:
 
 
 def _estimate_tokens(text: str) -> int:
+    # M4 approximation: word count as a token proxy (no tokenizer dependency).
     return len(text.split())
 
 

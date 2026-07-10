@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 
 from zygos.memory.store import MemoryStore
@@ -72,4 +74,22 @@ def test_unconsolidated_episodic_respects_limit_and_order(tmp_path):
         store.add_record(_rec(f"e{i}", MemoryLayer.EPISODIC))
     batch = store.unconsolidated_episodic(limit=2)
     assert [r.id for r in batch] == ["e0", "e1"]  # insertion order
+    store.close()
+
+
+def test_consolidate_batch_rolls_back_on_failure(tmp_path):
+    store = MemoryStore(tmp_path / "m.db")
+    store.add_record(_rec("e1", MemoryLayer.EPISODIC))
+    store.add_record(_rec("e2", MemoryLayer.EPISODIC))
+    # Two semantic records with the SAME id -> the second insert raises IntegrityError
+    # mid-transaction, after the first was already inserted.
+    dup_a = _rec("dup", MemoryLayer.SEMANTIC, text="a")
+    dup_b = _rec("dup", MemoryLayer.SEMANTIC, text="b")
+    with pytest.raises(sqlite3.IntegrityError):
+        store.consolidate_batch(semantic=[dup_a, dup_b], source_ids=["e1", "e2"], at=42.0)
+    # Everything rolled back: sources still pending, cursor untouched, no semantic rows.
+    assert store.pending_consolidation_count() == 2
+    assert store.last_consolidated_at() is None
+    assert store.records_by_layer(MemoryLayer.SEMANTIC) == []
+    assert store.get_record("dup") is None
     store.close()

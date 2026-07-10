@@ -70,3 +70,11 @@ async def test_summarize_consolidates_into_semantic(tmp_path):
     assert svc.snapshot().semantic_count == 1
     assert svc.snapshot().pending_consolidation == 0
     store.close()
+
+
+def test_store_rejects_non_episodic_layer(tmp_path):
+    store, svc = _service(tmp_path)
+    ctx = _ctx()
+    with pytest.raises(ValueError):
+        svc.store(ctx, text="x", layer=MemoryLayer.SEMANTIC)
+    store.close()

@@ -64,6 +64,10 @@ class DefaultMemoryService:
 
     # --- Extract (cheap, synchronous, durable) ---
     def store(self, ctx, *, text, layer=MemoryLayer.EPISODIC, tool_error=False):
+        if layer is not MemoryLayer.EPISODIC:
+            raise ValueError(
+                f"MemoryService.store only writes EPISODIC memory in M4; layer={layer!r} is not yet supported"
+            )
         record = extract_episodic(
             trail_id=ctx.run_id, text=text, at=self._clock(),
             record_id=self._new_id(), tool_error=tool_error,
