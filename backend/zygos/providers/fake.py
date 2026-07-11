@@ -3,12 +3,15 @@
 Stability: Experimental.
 """
 
+import hashlib
 from typing import AsyncIterator
 
 import httpx
 
 from zygos.providers.base import ProviderSettings
-from zygos.providers.types import GenerationChunk, GenerationRequest, GenerationResult, Usage
+from zygos.providers.types import (
+    EmbedRequest, EmbedResult, GenerationChunk, GenerationRequest, GenerationResult, Usage,
+)
 from zygos.runtime.capabilities import Capability
 
 
@@ -49,3 +52,22 @@ class FakeProvider:
         for word in text.split():
             yield GenerationChunk(text=word)
         yield GenerationChunk(text="", done=True)
+
+
+class FakeEmbedder:
+    """Deterministic embedder for tests: same text -> same vector, fixed dim."""
+
+    name = "fake"
+    capabilities: frozenset[Capability] = frozenset({Capability.EMBEDDING})
+
+    def __init__(self, *, dim: int = 8, model: str = "fake-embed") -> None:
+        self._dim = dim
+        self._model = model
+
+    def _vector(self, text: str) -> tuple[float, ...]:
+        digest = hashlib.sha256(text.encode("utf-8")).digest()
+        return tuple(digest[i % len(digest)] / 255.0 for i in range(self._dim))
+
+    async def embed(self, request: EmbedRequest) -> EmbedResult:
+        vectors = tuple(self._vector(t) for t in request.texts)
+        return EmbedResult(vectors=vectors, model=self._model, dim=self._dim, usage=Usage())

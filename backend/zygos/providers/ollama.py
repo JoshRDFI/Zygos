@@ -10,13 +10,17 @@ import httpx
 
 from zygos.errors import ProviderProtocolError
 from zygos.providers.base import ProviderSettings, ensure_ok, translate_transport_error
-from zygos.providers.types import GenerationChunk, GenerationRequest, GenerationResult, Usage
+from zygos.providers.types import (
+    EmbedRequest, EmbedResult, GenerationChunk, GenerationRequest, GenerationResult, Usage,
+)
 from zygos.runtime.capabilities import Capability
 
 
 class OllamaProvider:
     name = "ollama"
-    capabilities: frozenset[Capability] = frozenset({Capability.LOCAL_INFERENCE})
+    capabilities: frozenset[Capability] = frozenset(
+        {Capability.LOCAL_INFERENCE, Capability.EMBEDDING}
+    )
 
     def __init__(self, settings: ProviderSettings, client: httpx.AsyncClient) -> None:
         self._settings = settings
@@ -58,6 +62,28 @@ class OllamaProvider:
                 input_tokens=payload.get("prompt_eval_count", 0),
                 output_tokens=payload.get("eval_count", 0),
             ),
+        )
+
+    async def embed(self, request: EmbedRequest) -> EmbedResult:
+        try:
+            response = await self._client.post(
+                f"{self._settings.base_url}/api/embed",
+                json={"model": request.model, "input": list(request.texts)},
+                timeout=self._settings.timeout_s,
+            )
+        except httpx.HTTPError as error:
+            raise translate_transport_error(self.name, error) from error
+        ensure_ok(self.name, response)
+        try:
+            payload = response.json()
+            vectors = tuple(tuple(float(x) for x in v) for v in payload["embeddings"])
+        except (ValueError, KeyError, TypeError) as error:
+            raise ProviderProtocolError(
+                f"ollama returned malformed embeddings body: {error}", provider=self.name
+            ) from error
+        dim = len(vectors[0]) if vectors else 0
+        return EmbedResult(
+            vectors=vectors, model=payload.get("model", request.model), dim=dim, usage=Usage()
         )
 
     async def stream(self, request: GenerationRequest) -> AsyncIterator[GenerationChunk]:

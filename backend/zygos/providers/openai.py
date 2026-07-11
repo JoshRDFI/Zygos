@@ -15,14 +15,17 @@ from zygos.providers.base import (
     ensure_ok,
     translate_transport_error,
 )
-from zygos.providers.types import GenerationChunk, GenerationRequest, GenerationResult, Usage
+from zygos.providers.types import (
+    EmbedRequest, EmbedResult, GenerationChunk, GenerationRequest, GenerationResult, Usage,
+)
 from zygos.runtime.capabilities import Capability
 
 
 class OpenAIProvider:
     name = "openai"
-    capabilities: frozenset[Capability] = frozenset({Capability.LOCAL_INFERENCE})
+    capabilities: frozenset[Capability] = frozenset({Capability.LOCAL_INFERENCE, Capability.EMBEDDING})
     chat_path = "/chat/completions"
+    embeddings_path = "/embeddings"
     # ADR-0006: cloud default cap when the request carries none. Subclasses for local
     # backends (vLLM) override to None so local inference stays uncapped.
     default_max_tokens: int | None = DEFAULT_CLOUD_MAX_TOKENS
@@ -73,6 +76,32 @@ class OpenAIProvider:
                 input_tokens=usage.get("prompt_tokens", 0),
                 output_tokens=usage.get("completion_tokens", 0),
             ),
+        )
+
+    async def embed(self, request: EmbedRequest) -> EmbedResult:
+        try:
+            response = await self._client.post(
+                f"{self._settings.base_url}{self.embeddings_path}",
+                json={"model": request.model, "input": list(request.texts)},
+                headers=self._headers(),
+                timeout=self._settings.timeout_s,
+            )
+        except httpx.HTTPError as error:
+            raise translate_transport_error(self.name, error) from error
+        ensure_ok(self.name, response)
+        try:
+            payload = response.json()
+            rows = sorted(payload["data"], key=lambda d: d["index"])
+            vectors = tuple(tuple(float(x) for x in row["embedding"]) for row in rows)
+        except (ValueError, KeyError, TypeError, IndexError) as error:
+            raise ProviderProtocolError(
+                f"{self.name} returned malformed embeddings body: {error}", provider=self.name
+            ) from error
+        dim = len(vectors[0]) if vectors else 0
+        usage = payload.get("usage") or {}
+        return EmbedResult(
+            vectors=vectors, model=payload.get("model", request.model), dim=dim,
+            usage=Usage(input_tokens=usage.get("prompt_tokens", 0)),
         )
 
     async def stream(self, request: GenerationRequest) -> AsyncIterator[GenerationChunk]:

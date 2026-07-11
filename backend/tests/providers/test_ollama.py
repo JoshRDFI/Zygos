@@ -66,3 +66,28 @@ async def test_stream_parses_ndjson_lines():
 
 async def test_error_contract():
     await run_error_contract(_make)
+
+
+async def test_embed_parses_ollama_batch():
+    import httpx
+    from zygos.providers.ollama import OllamaProvider
+    from zygos.providers.base import ProviderSettings
+    from zygos.providers.types import EmbedRequest
+    from zygos.runtime.capabilities import Capability
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+        assert request.url.path == "/api/embed"
+        payload = json.loads(request.content)
+        assert payload["model"] == "nomic-embed-text"
+        assert payload["input"] == ["a", "b"]
+        return httpx.Response(200, json={"model": "nomic-embed-text",
+                                         "embeddings": [[1.0, 0.0], [0.0, 1.0]]})
+
+    settings = ProviderSettings(base_url="http://localhost:11434")
+    provider = OllamaProvider(settings=settings,
+                              client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    result = await provider.embed(EmbedRequest(model="nomic-embed-text", texts=("a", "b")))
+    assert result.vectors == ((1.0, 0.0), (0.0, 1.0))
+    assert result.dim == 2
+    assert Capability.EMBEDDING in OllamaProvider.capabilities

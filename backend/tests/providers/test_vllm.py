@@ -43,3 +43,11 @@ async def test_local_vllm_omits_max_tokens_when_none():
 
 async def test_error_contract():
     await run_error_contract(_make)
+
+
+def test_vllm_declares_embedding_and_inherits_embed():
+    from zygos.providers.vllm import VllmProvider
+    from zygos.runtime.capabilities import Capability
+
+    assert Capability.EMBEDDING in VllmProvider.capabilities
+    assert VllmProvider.embed is not None  # inherited from OpenAIProvider

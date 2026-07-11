@@ -30,3 +30,15 @@ async def test_fake_streams_words_then_done():
     chunks = [chunk async for chunk in provider.stream(_request())]
     assert [c.text for c in chunks[:-1]] == ["alpha", "beta"]
     assert chunks[-1].done is True
+
+
+async def test_fake_embedder_is_deterministic():
+    from zygos.providers.fake import FakeEmbedder
+    from zygos.providers.types import EmbedRequest
+
+    emb = FakeEmbedder(dim=8)
+    a = await emb.embed(EmbedRequest(texts=("hello", "world")))
+    b = await emb.embed(EmbedRequest(texts=("hello", "world")))
+    assert a.vectors == b.vectors           # same input -> same vectors
+    assert a.dim == 8 and len(a.vectors[0]) == 8
+    assert a.vectors[0] != a.vectors[1]     # different text -> different vector

@@ -95,3 +95,34 @@ async def test_generate_omits_auth_header_without_api_key():
     result = await provider.generate(contract_request())
     assert result.text == "pong"
     assert result.provider == "openai"
+
+
+async def test_embed_parses_openai_embeddings():
+    import json
+    import httpx
+    from zygos.providers.openai import OpenAIProvider
+    from zygos.providers.base import ProviderSettings
+    from zygos.providers.types import EmbedRequest
+    from zygos.runtime.capabilities import Capability
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/embeddings"
+        assert request.headers["authorization"] == "Bearer sk-test"
+        payload = json.loads(request.content)
+        assert payload == {"model": "text-embedding-3-small", "input": ["a", "b"]}
+        return httpx.Response(200, json={
+            "model": "text-embedding-3-small",
+            "data": [{"index": 1, "embedding": [0.0, 1.0]},
+                     {"index": 0, "embedding": [1.0, 0.0]}],  # out of order on purpose
+            "usage": {"prompt_tokens": 3},
+        })
+
+    provider = OpenAIProvider(
+        settings=ProviderSettings(base_url="https://api.openai.com/v1", api_key="sk-test"),
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    result = await provider.embed(EmbedRequest(model="text-embedding-3-small", texts=("a", "b")))
+    assert result.vectors == ((1.0, 0.0), (0.0, 1.0))  # re-sorted by index
+    assert result.dim == 2
+    assert result.usage.input_tokens == 3
+    assert Capability.EMBEDDING in OpenAIProvider.capabilities
