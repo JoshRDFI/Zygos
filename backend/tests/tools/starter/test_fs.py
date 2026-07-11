@@ -105,6 +105,23 @@ async def test_write_file_traversal_rejected(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_write_file_symlink_escape_rejected(tmp_path):
+    outside = tmp_path.parent / "outside_write_target.txt"
+    outside.write_text("original")
+    (tmp_path / "link").symlink_to(outside)
+    tool = WriteFileTool(root=tmp_path)
+    for mode in ("overwrite", "append"):
+        res = await execute_tool(
+            tool,
+            ToolCall(tool="write_file", args={"path": "link", "content": "HACKED", "mode": mode}),
+            _ctx(),
+        )
+        assert res.ok is False
+        assert "symlink" in res.error_message or "escapes root" in res.error_message
+    assert outside.read_text() == "original"   # never written through the symlink
+
+
+@pytest.mark.asyncio
 async def test_write_file_oversize_rejected(tmp_path):
     tool = WriteFileTool(root=tmp_path, max_bytes=3)
     res = await execute_tool(

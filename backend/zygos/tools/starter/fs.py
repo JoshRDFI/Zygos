@@ -35,7 +35,10 @@ def _resolve_target(root: Path, rel: str) -> Path:
     _under_root(root, parent, rel)
     if not target.name:
         raise ToolError(f"not a file path: {rel!r}")
-    return parent / target.name
+    target = parent / target.name
+    if target.is_symlink():
+        raise ToolError(f"path escapes root (symlink): {rel!r}")
+    return target
 
 
 class ReadFileInput(BaseModel):
