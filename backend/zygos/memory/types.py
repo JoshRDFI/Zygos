@@ -53,3 +53,6 @@ class MemoryState(BaseModel):
     episodic_count: int
     semantic_count: int
     last_consolidated_at: float | None
+    embedded_count: int = 0
+    pending_embedding: int = 0
+    active_embedding_model: str | None = None

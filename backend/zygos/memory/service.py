@@ -16,6 +16,9 @@ from zygos.memory.extract import extract_episodic
 from zygos.memory.retrieve import MemoryRetriever, RelevanceIndex, Scope
 from zygos.memory.store import MemoryStore
 from zygos.memory.types import MemoryLayer, MemoryRecord, MemoryState
+from zygos.memory.vectors import pack
+from zygos.providers.embedding import Embedder
+from zygos.providers.types import EmbedRequest
 from zygos.runtime.context import ExecutionContext
 from zygos.services.model import ModelService
 
@@ -37,6 +40,8 @@ class MemoryService(Protocol):
 
     async def resume(self, ctx: ExecutionContext) -> int: ...
 
+    async def embed_backlog(self, ctx: ExecutionContext) -> int: ...
+
     def snapshot(self) -> MemoryState: ...
 
 
@@ -52,6 +57,9 @@ class DefaultMemoryService:
         new_id: Callable[[], str],
         token_budget: int,
         batch_size: int,
+        embedder: Embedder | None = None,
+        embedding_model: str = "",
+        embed_batch_size: int = 32,
     ) -> None:
         self._store = store
         self._retriever = retriever
@@ -61,6 +69,9 @@ class DefaultMemoryService:
         self._new_id = new_id
         self._budget = token_budget
         self._batch = batch_size
+        self._embedder = embedder
+        self._embedding_model = embedding_model
+        self._embed_batch = embed_batch_size
 
     # --- Extract (cheap, synchronous, durable) ---
     def store(self, ctx, *, text, layer=MemoryLayer.EPISODIC, tool_error=False):
@@ -104,13 +115,36 @@ class DefaultMemoryService:
             clock=self._clock, new_id=self._new_id, batch_size=self._batch, drain=drain,
         )
 
+    # --- Embed (deferred pass; mirrors consolidation, no lock across the await) ---
+    async def embed_backlog(self, ctx):
+        if self._embedder is None:
+            return 0
+        total = 0
+        while True:
+            batch = self._store.unembedded(self._embedding_model, self._embed_batch)
+            if not batch:
+                return total
+            result = await self._embedder.embed(
+                EmbedRequest(model=self._embedding_model,
+                             texts=tuple(r.content.text for r in batch))
+            )
+            # Tag with the configured active-model identity (== the string unembedded
+            # filters on), NOT result.model — a mismatch would re-select forever.
+            for rec, vec in zip(batch, result.vectors):
+                self._store.upsert_embedding(rec.id, self._embedding_model, result.dim, pack(vec))
+            total += len(batch)
+
     # --- Observability (pull-based) ---
     def snapshot(self):
         counts = self._store.counts()
+        model = self._embedding_model if self._embedder is not None else None
         return MemoryState(
             pending_consolidation=self._store.pending_consolidation_count(),
             working_count=counts["working"],
             episodic_count=counts["episodic"],
             semantic_count=counts["semantic"],
             last_consolidated_at=self._store.last_consolidated_at(),
+            embedded_count=self._store.embedded_count(model) if model else 0,
+            pending_embedding=self._store.pending_embedding_count(model) if model else 0,
+            active_embedding_model=model,
         )
