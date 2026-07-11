@@ -9,6 +9,7 @@ Stability: Experimental.
 
 import time
 import uuid
+import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,13 +18,20 @@ import httpx
 
 from zygos.config.loader import load_config
 from zygos.config.schema import ZygosConfig
-from zygos.memory.retrieve import Fts5RelevanceIndex, MemoryRetriever, RetrievalWeights
+from zygos.errors import ConfigError
+from zygos.memory.retrieve import (
+    Fts5RelevanceIndex, HybridRelevanceIndex, MemoryRetriever,
+    RelevanceIndex, RetrievalWeights, VectorRelevanceIndex,
+)
 from zygos.memory.service import DefaultMemoryService, MemoryService
 from zygos.memory.store import MemoryStore
+from zygos.memory.vector_search import VectorSearch
 from zygos.plugins.resolver import PluginRegistry
 from zygos.providers.base import DEFAULT_BASE_URLS, Provider, ProviderSettings
+from zygos.providers.embedding import Embedder
+from zygos.providers.embedding_local import DEFAULT_LOCAL_MODEL
 from zygos.reasoning.service import DefaultReasoningService, ReasoningService
-from zygos.runtime.capabilities import CapabilityRegistry
+from zygos.runtime.capabilities import Capability, CapabilityRegistry
 from zygos.runtime.context import ExecutionContext, root_context
 from zygos.runtime.events import EventBus, InProcessEventBus, Subscriber
 from zygos.services.model import DefaultModelService, ModelService
@@ -70,6 +78,60 @@ def _provider_healthy(router: ProviderRouter, provider_name: str) -> bool:
         for status in router.snapshot().routes
         if status.provider == provider_name
     )
+
+
+_EMBED_DEFAULT_MODEL: Mapping[str, str] = {"ollama": "nomic-embed-text"}
+
+
+def _build_embedder(config, client, plugin_registry) -> tuple[Embedder | None, str]:
+    """Construct the configured embedder, DECOUPLED from the chat route (RFC-0006 §6).
+    Returns (embedder, model). Returns (None, model) when the local extra is missing
+    so the caller can degrade to FTS5."""
+    ec = config.memory.embedding
+    backend = ec.backend
+    if backend == "local":
+        model = ec.model or DEFAULT_LOCAL_MODEL
+        try:
+            from zygos.providers.embedding_local import LocalEmbedder
+            return LocalEmbedder(model=model), model
+        except ImportError:
+            return None, model
+    model = ec.model or _EMBED_DEFAULT_MODEL.get(backend, "")
+    if not model:
+        raise ConfigError(
+            f"embedding backend {backend!r} requires memory.embedding.model "
+            f"(no universal default for a cloud embedder)"
+        )
+    provider_cls = plugin_registry.resolve("providers", backend)
+    embedder = provider_cls(settings=_provider_settings(config, backend), client=client)
+    return embedder, model
+
+
+def _memory_index(mode, store, embedder, model) -> RelevanceIndex:
+    """Select the RelevanceIndex for the configured mode. A non-fts5 mode with no
+    resolved embedder degrades to FTS5 with ONE loud warning (RFC-0006 §5)."""
+    fts = Fts5RelevanceIndex(store.connection)
+    if mode == "fts5":
+        return fts
+    if embedder is None:
+        warnings.warn(
+            f"retrieval_mode={mode!r} requested but no embedder resolved; "
+            f"degrading to fts5 lexical retrieval",
+            stacklevel=2,
+        )
+        return fts
+    vector_search = VectorSearch(store, model=model)
+    if mode == "vector":
+        return VectorRelevanceIndex(embedder, vector_search, model=model)
+    return HybridRelevanceIndex(fts, vector_search, embedder, model=model)
+
+
+def _register_embedding(registry: CapabilityRegistry, embedder: Embedder) -> None:
+    """Register the resolved embedder's EMBEDDING binding for manifest/doctor,
+    deduped by name (it may already be registered via a chat-route)."""
+    existing = {b.provider for b in registry.snapshot().bindings.get(Capability.EMBEDDING, ())}
+    if embedder.name not in existing:
+        registry.register(Capability.EMBEDDING, embedder, priority=0)
 
 
 def build_runtime(
@@ -128,7 +190,15 @@ def build_runtime(
     memory_store: MemoryStore | None = None
     if config.memory.enabled:
         memory_store = MemoryStore(config.memory.db_path)
-        relevance_index = Fts5RelevanceIndex(memory_store.connection)
+        if config.memory.retrieval_mode != "fts5":
+            embedder, embedding_model = _build_embedder(config, client, plugin_registry)
+        else:
+            embedder, embedding_model = None, ""
+        relevance_index = _memory_index(
+            config.memory.retrieval_mode, memory_store, embedder, embedding_model
+        )
+        if embedder is not None:
+            _register_embedding(registry, embedder)
         retriever = MemoryRetriever(
             memory_store, relevance_index, clock=time.time,
             weights=RetrievalWeights(
@@ -143,6 +213,8 @@ def build_runtime(
             model_service=model_service, clock=time.time, new_id=lambda: uuid.uuid4().hex,
             token_budget=config.memory.token_budget,
             batch_size=config.memory.consolidation_batch_size,
+            embedder=embedder, embedding_model=embedding_model,
+            embed_batch_size=config.memory.embed_batch_size,
         )
         # `resume()` is intentionally NOT awaited here — build_runtime is a sync
         # composition root; the async consumer (M8) drains it at startup.
