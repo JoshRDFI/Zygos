@@ -93,3 +93,44 @@ def test_consolidate_batch_rolls_back_on_failure(tmp_path):
     assert store.records_by_layer(MemoryLayer.SEMANTIC) == []
     assert store.get_record("dup") is None
     store.close()
+
+
+def _rec_for_embedding(store, rid, text):
+    """Helper to create and add a record for embedding tests."""
+    r = MemoryRecord(id=rid, trail_id="t", layer=MemoryLayer.EPISODIC,
+                     content=MemoryContent(text=text), importance=0.5,
+                     created_at=0.0, last_accessed=0.0)
+    store.add_record(r)
+    return r
+
+
+def test_embedding_upsert_and_model_scoped_selection(tmp_path):
+    store = MemoryStore(tmp_path / "m.db")
+    _rec_for_embedding(store, "a", "alpha")
+    _rec_for_embedding(store, "b", "beta")
+
+    # Nothing embedded yet: both pending for model "m1".
+    assert store.pending_embedding_count("m1") == 2
+    assert store.embedded_count("m1") == 0
+    assert {r.id for r in store.unembedded("m1", 10)} == {"a", "b"}
+
+    store.upsert_embedding("a", "m1", 2, b"\x00\x00\x80?\x00\x00\x00\x00")  # 2 float32
+    assert store.embedded_count("m1") == 1
+    assert store.pending_embedding_count("m1") == 1
+    assert {r.id for r in store.unembedded("m1", 10)} == {"b"}
+
+    # A different active model treats "a" as unembedded (no cross-model reuse).
+    assert {r.id for r in store.unembedded("m2", 10)} == {"a", "b"}
+
+    # Re-embedding "a" under m1 overwrites (upsert), not duplicates.
+    store.upsert_embedding("a", "m1", 2, b"\x00\x00\x00\x00\x00\x00\x80?")
+    assert store.embedded_count("m1") == 1
+    store.close()
+
+
+def test_unembedded_respects_limit(tmp_path):
+    store = MemoryStore(tmp_path / "m.db")
+    for i in range(5):
+        _rec_for_embedding(store, f"r{i}", f"text {i}")
+    assert len(store.unembedded("m1", 2)) == 2
+    store.close()

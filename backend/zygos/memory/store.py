@@ -33,6 +33,12 @@ CREATE TABLE IF NOT EXISTS consolidation_state (
     last_consolidated_at REAL
 );
 INSERT OR IGNORE INTO consolidation_state(id, last_consolidated_at) VALUES (1, NULL);
+CREATE TABLE IF NOT EXISTS memory_embedding (
+    record_id TEXT PRIMARY KEY REFERENCES memory_record(id) ON DELETE CASCADE,
+    model     TEXT NOT NULL,
+    dim       INTEGER NOT NULL,
+    vector    BLOB NOT NULL
+);
 """
 
 
@@ -116,6 +122,37 @@ class MemoryStore:
             (limit,),
         ).fetchall()
         return [self._row_to_record(r) for r in rows]
+
+    def upsert_embedding(self, record_id: str, model: str, dim: int, vector: bytes) -> None:
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO memory_embedding(record_id, model, dim, vector)"
+                " VALUES (?,?,?,?)"
+                " ON CONFLICT(record_id) DO UPDATE SET"
+                " model=excluded.model, dim=excluded.dim, vector=excluded.vector",
+                (record_id, model, dim, vector),
+            )
+
+    def unembedded(self, model: str, limit: int) -> list[MemoryRecord]:
+        rows = self._conn.execute(
+            f"SELECT {self._COLS} FROM memory_record"
+            " WHERE id NOT IN (SELECT record_id FROM memory_embedding WHERE model=?)"
+            " ORDER BY rowid LIMIT ?",
+            (model, limit),
+        ).fetchall()
+        return [self._row_to_record(r) for r in rows]
+
+    def embedded_count(self, model: str) -> int:
+        return self._conn.execute(
+            "SELECT COUNT(*) FROM memory_embedding WHERE model=?", (model,)
+        ).fetchone()[0]
+
+    def pending_embedding_count(self, model: str) -> int:
+        return self._conn.execute(
+            "SELECT COUNT(*) FROM memory_record"
+            " WHERE id NOT IN (SELECT record_id FROM memory_embedding WHERE model=?)",
+            (model,),
+        ).fetchone()[0]
 
     def counts(self) -> dict[str, int]:
         result = {"working": 0, "episodic": 0, "semantic": 0}
