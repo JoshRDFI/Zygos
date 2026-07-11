@@ -49,7 +49,7 @@ def rrf_fuse(
 
 
 class RelevanceIndex(Protocol):
-    def query(self, text: str, *, k: int) -> list[tuple[str, float]]:
+    async def query(self, text: str, *, k: int) -> list[tuple[str, float]]:
         """Return [(record_id, relevance in (0,1])] best-first."""
         ...
 
@@ -58,7 +58,7 @@ class Fts5RelevanceIndex:
     def __init__(self, connection: sqlite3.Connection) -> None:
         self._conn = connection
 
-    def query(self, text: str, *, k: int) -> list[tuple[str, float]]:
+    async def query(self, text: str, *, k: int) -> list[tuple[str, float]]:
         match = fts_match_query(text)
         if not match:
             return []
@@ -116,10 +116,10 @@ class MemoryRetriever:
             return record.trail_id != trail_id
         return True
 
-    def retrieve(
+    async def retrieve(
         self, *, query: str, trail_id: str, budget: int, scope: Scope, k: int = 20
     ) -> list[MemoryRecord]:
-        hits = self._index.query(query, k=k)
+        hits = await self._index.query(query, k=k)
         scored: list[tuple[float, MemoryRecord]] = []
         for record_id, relevance in hits:
             record = self._store.get_record(record_id)

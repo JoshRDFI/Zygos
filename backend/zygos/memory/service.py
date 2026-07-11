@@ -28,11 +28,11 @@ class MemoryService(Protocol):
               layer: MemoryLayer = MemoryLayer.EPISODIC,
               tool_error: bool = False) -> MemoryRecord: ...
 
-    def retrieve(self, ctx: ExecutionContext, *, query: str,
-                 budget: int | None = None, scope: Scope = "all",
-                 k: int = 20) -> list[MemoryRecord]: ...
+    async def retrieve(self, ctx: ExecutionContext, *, query: str,
+                       budget: int | None = None, scope: Scope = "all",
+                       k: int = 20) -> list[MemoryRecord]: ...
 
-    def search(self, query: str, *, k: int = 10) -> list[MemoryRecord]: ...
+    async def search(self, query: str, *, k: int = 10) -> list[MemoryRecord]: ...
 
     async def summarize(self, ctx: ExecutionContext) -> int: ...
 
@@ -87,15 +87,15 @@ class DefaultMemoryService:
         return record
 
     # --- Retrieve + Apply ---
-    def retrieve(self, ctx, *, query, budget=None, scope="all", k=20):
-        return self._retriever.retrieve(
+    async def retrieve(self, ctx, *, query, budget=None, scope="all", k=20):
+        return await self._retriever.retrieve(
             query=query, trail_id=ctx.run_id,
             budget=budget if budget is not None else self._budget,
             scope=scope, k=k,
         )
 
-    def search(self, query, *, k=10):
-        hits = self._index.query(query, k=k)
+    async def search(self, query, *, k=10):
+        hits = await self._index.query(query, k=k)
         records = [self._store.get_record(rid) for rid, _ in hits]
         return [r for r in records if r is not None]
 

@@ -50,12 +50,13 @@ def test_store_writes_durable_episodic_and_snapshot(tmp_path):
     store.close()
 
 
-def test_retrieve_returns_matching_records(tmp_path):
+@pytest.mark.asyncio
+async def test_retrieve_returns_matching_records(tmp_path):
     store, svc = _service(tmp_path)
     ctx = _ctx()
     svc.store(ctx, text="database backup instructions")
     svc.store(ctx, text="unrelated content")
-    out = svc.retrieve(ctx, query="backup")
+    out = await svc.retrieve(ctx, query="backup")
     assert [r.content.text for r in out] == ["database backup instructions"]
     store.close()
 
