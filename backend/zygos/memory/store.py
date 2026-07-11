@@ -47,6 +47,7 @@ class MemoryStore:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(path))
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
 
@@ -141,6 +142,14 @@ class MemoryStore:
             (model, limit),
         ).fetchall()
         return [self._row_to_record(r) for r in rows]
+
+    def all_embeddings(self, model: str) -> list[tuple[str, bytes]]:
+        """(record_id, vector_blob) for every current-model embedding — the scan set."""
+        return list(
+            self._conn.execute(
+                "SELECT record_id, vector FROM memory_embedding WHERE model=?", (model,)
+            ).fetchall()
+        )
 
     def embedded_count(self, model: str) -> int:
         return self._conn.execute(
