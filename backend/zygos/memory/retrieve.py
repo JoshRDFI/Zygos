@@ -13,6 +13,9 @@ from typing import Callable, Literal, Protocol
 
 from zygos.memory.store import MemoryStore
 from zygos.memory.types import MemoryRecord
+from zygos.memory.vector_search import VectorSearch
+from zygos.providers.embedding import Embedder
+from zygos.providers.types import EmbedRequest
 
 _TOKEN = re.compile(r"[A-Za-z0-9]+")
 
@@ -70,6 +73,53 @@ class Fts5RelevanceIndex:
         # M4 stand-in: positional relevance (rank order), NOT BM25 magnitude —
         # the embedding/hybrid increment replaces this. Normalized so the top hit == 1.0.
         return [(row[0], 1.0 / (1.0 + i)) for i, row in enumerate(rows)]
+
+
+class VectorRelevanceIndex:
+    """Semantic-only relevance (RFC-0006 §5, `vector` mode — mainly for evaluation).
+    Embed failure yields [] for that call (eval mode; never raises)."""
+
+    def __init__(self, embedder: Embedder, vector_search: VectorSearch, *, model: str) -> None:
+        self._embedder = embedder
+        self._vs = vector_search
+        self._model = model
+
+    async def query(self, text: str, *, k: int) -> list[tuple[str, float]]:
+        try:
+            result = await self._embedder.embed(EmbedRequest(model=self._model, texts=(text,)))
+        except Exception:
+            return []
+        hits = self._vs.search(result.vectors[0], k=k)
+        if not hits:
+            return []
+        clamped = [(rid, max(0.0, s)) for rid, s in hits]
+        top = clamped[0][1]
+        if top <= 0.0:
+            return [(rid, 0.0) for rid, _ in clamped]
+        return [(rid, s / top) for rid, s in clamped]
+
+
+class HybridRelevanceIndex:
+    """RRF of the FTS5 lexical arm and the vector semantic arm (RFC-0006 §5).
+    A transient embed failure degrades to the lexical arm for that call — retrieval
+    is advisory and never raises into a turn."""
+
+    def __init__(
+        self, fts: RelevanceIndex, vector_search: VectorSearch, embedder: Embedder, *, model: str
+    ) -> None:
+        self._fts = fts
+        self._vs = vector_search
+        self._embedder = embedder
+        self._model = model
+
+    async def query(self, text: str, *, k: int) -> list[tuple[str, float]]:
+        lexical = await self._fts.query(text, k=k)
+        try:
+            result = await self._embedder.embed(EmbedRequest(model=self._model, texts=(text,)))
+        except Exception:
+            return lexical  # advisory: embed failure -> lexical arm only
+        semantic = self._vs.search(result.vectors[0], k=k)
+        return rrf_fuse(lexical, semantic, k=k)
 
 
 # --- Multi-factor, token-budgeted retrieval assembly ---
