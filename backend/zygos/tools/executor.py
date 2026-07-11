@@ -114,19 +114,28 @@ async def execute_tool(
 
 
 async def _stream_with_timeout(agen, timeout: float) -> AsyncIterator[Any]:
-    """Yield from `agen` under a wall-clock total-stream deadline. Raises asyncio.TimeoutError."""
+    """Yield from `agen` under a wall-clock total-stream deadline. Raises asyncio.TimeoutError.
+
+    Closes `agen` on any exit (return, timeout, or consumer aclose) so a suspended inner
+    tool generator's `finally` (e.g. a subprocess kill) runs promptly, not at GC.
+    """
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     aiter = agen.__aiter__()
-    while True:
-        remaining = deadline - loop.time()
-        if remaining <= 0:
-            raise asyncio.TimeoutError()
-        try:
-            value = await asyncio.wait_for(aiter.__anext__(), remaining)
-        except StopAsyncIteration:
-            return
-        yield value
+    try:
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise asyncio.TimeoutError()
+            try:
+                value = await asyncio.wait_for(aiter.__anext__(), remaining)
+            except StopAsyncIteration:
+                return
+            yield value
+    finally:
+        aclose = getattr(agen, "aclose", None)
+        if aclose is not None:
+            await aclose()
 
 
 async def execute_tool_stream(
