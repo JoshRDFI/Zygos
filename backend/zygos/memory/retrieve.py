@@ -26,6 +26,28 @@ def fts_match_query(text: str) -> str:
     return " OR ".join(f'"{t}"' for t in terms)
 
 
+def rrf_fuse(
+    lexical: list[tuple[str, float]],
+    semantic: list[tuple[str, float]],
+    *,
+    k: int,
+    K: int = 60,
+) -> list[tuple[str, float]]:
+    """Reciprocal Rank Fusion (RFC-0006 §5): fuse two ranked id lists by RANK, not
+    score. score(id) = Σ_arm 1/(K + rank_arm(id)); scale-agnostic, no per-corpus
+    tuning. Normalized so the top result is 1.0; best-first, capped at k.
+    """
+    scores: dict[str, float] = {}
+    for arm in (lexical, semantic):
+        for rank, (record_id, _score) in enumerate(arm):
+            scores[record_id] = scores.get(record_id, 0.0) + 1.0 / (K + rank)
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    if not ranked:
+        return []
+    top = ranked[0][1]
+    return [(record_id, s / top) for record_id, s in ranked[:k]]
+
+
 class RelevanceIndex(Protocol):
     def query(self, text: str, *, k: int) -> list[tuple[str, float]]:
         """Return [(record_id, relevance in (0,1])] best-first."""
