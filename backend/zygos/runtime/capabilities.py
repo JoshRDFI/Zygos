@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from zygos.providers.base import Provider
+from zygos.providers.embedding import Embedder
 
 
 class Capability(StrEnum):
@@ -24,6 +25,7 @@ class Capability(StrEnum):
     IMAGE_GENERATION = "image_generation"
     SCHEDULING = "scheduling"
     FILESYSTEM_ACCESS = "filesystem_access"
+    EMBEDDING = "embedding"
 
 
 # Each capability binds to the contract a satisfier must implement. Only
@@ -32,6 +34,7 @@ class Capability(StrEnum):
 # rejects any capability with no entry here.
 CAPABILITY_CONTRACTS: Mapping[Capability, type] = {
     Capability.LOCAL_INFERENCE: Provider,
+    Capability.EMBEDDING: Embedder,
 }
 
 

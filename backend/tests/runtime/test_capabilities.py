@@ -14,11 +14,16 @@ def test_capability_enum_is_the_closed_rfc0003_set():
         "image_generation",
         "scheduling",
         "filesystem_access",
+        "embedding",
     }
 
 
 def test_only_local_inference_is_contracted():
-    assert CAPABILITY_CONTRACTS == {Capability.LOCAL_INFERENCE: Provider}
+    from zygos.providers.embedding import Embedder
+    assert CAPABILITY_CONTRACTS == {
+        Capability.LOCAL_INFERENCE: Provider,
+        Capability.EMBEDDING: Embedder,
+    }
 
 
 def test_all_providers_declare_local_inference():
