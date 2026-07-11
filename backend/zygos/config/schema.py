@@ -105,6 +105,16 @@ class RetrievalWeightsConfig(BaseModel):
     importance: float = Field(default=0.3, ge=0)
 
 
+class EmbeddingConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Selects the embedding backend, DECOUPLED from the chat route (RFC-0006 §6).
+    backend: Literal["local", "ollama", "openai", "vllm"] = "local"
+    # "" -> per-backend default where one exists (local->bge-small, ollama->nomic-embed-text);
+    # openai/vllm have no universal default and require an explicit model (enforced at bootstrap).
+    model: str = ""
+
+
 class MemoryConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -114,6 +124,9 @@ class MemoryConfig(BaseModel):
     consolidation_batch_size: int = Field(default=20, ge=1)
     recency_half_life_s: float = Field(default=86400.0, gt=0)
     retrieval_weights: RetrievalWeightsConfig = Field(default_factory=RetrievalWeightsConfig)
+    retrieval_mode: Literal["fts5", "vector", "hybrid"] = "fts5"
+    embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
+    embed_batch_size: int = Field(default=32, ge=1)
 
 
 class ZygosConfig(BaseModel):

@@ -41,3 +41,18 @@ def test_bootstrap_omits_memory_service_when_disabled(tmp_path: Path):
         assert assembly.memory_service is None
     finally:
         asyncio.run(assembly.aclose())
+
+
+def test_memory_embedding_defaults():
+    cfg = MemoryConfig()
+    assert cfg.retrieval_mode == "fts5"
+    assert cfg.embedding.backend == "local"
+    assert cfg.embedding.model == ""
+    assert cfg.embed_batch_size == 32
+
+
+def test_retrieval_mode_rejects_unknown():
+    import pytest
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        MemoryConfig(retrieval_mode="semantic")  # not one of fts5|vector|hybrid
