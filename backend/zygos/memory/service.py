@@ -128,6 +128,11 @@ class DefaultMemoryService:
                 EmbedRequest(model=self._embedding_model,
                              texts=tuple(r.content.text for r in batch))
             )
+            if len(result.vectors) != len(batch):
+                raise ValueError(
+                    f"embedder {self._embedder.name!r} returned {len(result.vectors)} "
+                    f"vectors for {len(batch)} texts"
+                )
             # Tag with the configured active-model identity (== the string unembedded
             # filters on), NOT result.model — a mismatch would re-select forever.
             for rec, vec in zip(batch, result.vectors):

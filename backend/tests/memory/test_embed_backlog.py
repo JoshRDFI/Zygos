@@ -4,6 +4,7 @@ from zygos.memory.retrieve import Fts5RelevanceIndex, MemoryRetriever, Retrieval
 from zygos.memory.service import DefaultMemoryService
 from zygos.memory.store import MemoryStore
 from zygos.providers.fake import FakeEmbedder
+from zygos.providers.types import EmbedResult, Usage
 from zygos.runtime.context import root_context
 from zygos.runtime.events import InProcessEventBus
 
@@ -75,3 +76,22 @@ def test_snapshot_reports_embedding_counts(tmp_path):
     assert state.active_embedding_model == "m1"
     assert state.pending_embedding == 1
     assert state.embedded_count == 0
+
+
+class ShortEmbedder:
+    """Returns FEWER vectors than requested — a contract violation the guard catches."""
+    name = "short"
+
+    async def embed(self, request):
+        return EmbedResult(vectors=((0.0, 0.0),), model="short", dim=2, usage=Usage())  # 1 vec
+
+
+async def test_embed_backlog_rejects_vector_count_mismatch(tmp_path):
+    # Two unembedded records but the embedder returns one vector -> raise, don't spin.
+    store, svc = _service(tmp_path, embedder=ShortEmbedder(), model="short")
+    ctx = _ctx()
+    svc.store(ctx, text="one")
+    svc.store(ctx, text="two")   # embed_batch_size=2 -> a 2-text batch, embedder returns 1 vector
+    with pytest.raises(ValueError, match="vectors"):
+        await svc.embed_backlog(ctx)
+    store.close()
