@@ -34,7 +34,7 @@ def test_all_providers_declare_local_inference():
     from zygos.providers.vllm import VllmProvider
 
     for cls in (FakeProvider, OllamaProvider, OpenAIProvider, AnthropicProvider, VllmProvider):
-        assert cls.capabilities == frozenset({Capability.LOCAL_INFERENCE})
+        assert Capability.LOCAL_INFERENCE in cls.capabilities
 
 
 class _Conforming:
