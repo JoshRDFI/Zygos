@@ -24,6 +24,7 @@ decision requires an accepted RFC before implementation begins.
 | RFC-0002: Runtime Event Bus and ExecutionContext | Design RFC — implemented in M3 (Cycle 1) | ✅ Implemented (2026-07-05) |
 | RFC-0003: Capability Registry, Runtime Manifest, and Inspection | Design RFC — implemented in M3 (Cycle 3); render surfaces GET /runtime → M8, zygos trace → TraceService | ✅ Implemented (2026-07-09) |
 | RFC-0004: Secret Storage and Key Entry | Design RFC — amends RFC-0001 §8; not an M3 gate | ✅ Accepted (2026-07-04) |
+| RFC-0006: Embedding Contract and Hybrid Memory Retrieval | Design RFC — adds the `Embedder` contract + `EMBEDDING` capability (amends RFC-0003 closed set); does not amend RFC-0001; builds as its own cycle before M8 | ✅ Accepted (2026-07-11) |
 | React UI | React + Tailwind + Vite frontend; WebSocket streaming | Planned (own RFC) |
 | Voice interaction (STT + TTS) | Local-first transcription and synthesis over the WS audio channel; **required before 2.0 is called complete** | Planned (own RFC) |
 | Scheduler & autonomy | SchedulerService with human-in-the-loop guards | Planned |

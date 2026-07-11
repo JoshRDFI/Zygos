@@ -1,6 +1,6 @@
 # RFC-0006: Embedding Contract and Hybrid Memory Retrieval
 
-- **Status:** Draft (2026-07-11)
+- **Status:** Accepted (2026-07-11)
 - **Author:** Zygos maintainers
 - **Created:** 2026-07-11
 - **Governs:** the `Embedder` service contract, the `EMBEDDING` capability, how
