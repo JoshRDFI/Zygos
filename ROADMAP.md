@@ -16,14 +16,15 @@ decision requires an accepted RFC before implementation begins.
 | M1 Config foundation | Schema, loader, plugins, composition root, guard, CI | ✅ Complete (2026-07-03) |
 | M2 Providers + ModelService | Ollama/OpenAI/Anthropic/vLLM plugins, router, RouterState | ✅ Complete (2026-07-04) |
 | M3 RDT reasoning engine | Prelude/recurrent/coda pipeline, real adaptive compute (iteration/temperature/token/model by complexity+confidence), snapshotable ReasoningState | ✅ Complete (2026-07-06) — ran as three cycles: RFC-0002 foundation, RDT engine, RFC-0003 registry |
-| M4 Layered memory (SQLite WAL + FTS5) | Working, episodic, semantic, and procedural memory; compaction | Planned |
-| M5 Tools (4-phase contract) | Executor, permissions, streaming, fallback; cleanup guaranteed | Planned |
+| M4 Layered memory (SQLite WAL + FTS5) | Working, episodic, and semantic memory; deferred consolidation; multi-factor retrieval (procedural memory = named seam → M6/SkillService) | ✅ Complete (2026-07-10) |
+| M5 Tools (4-phase contract) | Executor, permissions, streaming, fallback; cleanup guaranteed | ✅ Complete (2026-07-11) — ran as three cycles: contract + core executor, permissions/streaming/retry/timeout/fallback, starter tool suite |
 | M6 Learning → SkillService (manual approval only) | Proposals, A/B testing (sandboxed), human-approval gate | Planned |
 | M7 Workflows (interviewer first) | Workflow plugins starting with the interviewer pattern | Planned |
 | M8 FastAPI adapter + WebSocket protocol | REST + multiplexed WS; typed frames for chat, tools, trace, audio | Planned |
 | RFC-0002: Runtime Event Bus and ExecutionContext | Design RFC — implemented in M3 (Cycle 1) | ✅ Implemented (2026-07-05) |
 | RFC-0003: Capability Registry, Runtime Manifest, and Inspection | Design RFC — implemented in M3 (Cycle 3); render surfaces GET /runtime → M8, zygos trace → TraceService | ✅ Implemented (2026-07-09) |
 | RFC-0004: Secret Storage and Key Entry | Design RFC — amends RFC-0001 §8; not an M3 gate | ✅ Accepted (2026-07-04) |
+| RFC-0005: Voice Interaction — Local STT and TTS | Design RFC — governs voice engines behind the RFC-0003 capabilities; audio WS channels built in M8, engines after; a 2.0-complete gate | 🔎 Review (2026-07-09) |
 | RFC-0006: Embedding Contract and Hybrid Memory Retrieval | Design RFC — adds the `Embedder` contract + `EMBEDDING` capability (amends RFC-0003 closed set); does not amend RFC-0001; builds as its own cycle before M8 | ✅ Accepted (2026-07-11) |
 | React UI | React + Tailwind + Vite frontend; WebSocket streaming | Planned (own RFC) |
 | Voice interaction (STT + TTS) | Local-first transcription and synthesis over the WS audio channel; **required before 2.0 is called complete** | Planned (own RFC) |
