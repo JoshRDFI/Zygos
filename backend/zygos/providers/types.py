@@ -48,3 +48,21 @@ class GenerationChunk(BaseModel):
 
     text: str
     done: bool = False
+
+
+class EmbedRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    # Model identity for provider-backed embedders (parallels GenerationRequest.model).
+    # embed_backlog fills it from the configured embedding_model.
+    model: str = ""
+    texts: tuple[str, ...]
+
+
+class EmbedResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    vectors: tuple[tuple[float, ...], ...]  # aligned 1:1 with request.texts
+    model: str
+    dim: int
+    usage: Usage = Usage()
