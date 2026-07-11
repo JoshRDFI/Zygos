@@ -72,3 +72,10 @@ class ToolTimeout(ToolError):
 
 class ToolPermissionDenied(ToolError):
     code = "tool_permission_denied"
+
+
+class ToolTransient(ToolError):
+    """A transient tool failure (e.g. a network transport fault). Retryable."""
+
+    code = "tool_transient"
+    retryable = True
