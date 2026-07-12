@@ -1,14 +1,16 @@
 # backend/tests/api/test_websocket.py
+import asyncio
 import dataclasses
 import json
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
-from zygos.api.session import SessionRegistry
+from zygos.api.frames import CHAT, Frame
+from zygos.api.session import Session, SessionRegistry
 from zygos.api.turn import TurnDeps
-from zygos.api.websocket import router as ws_router
+from zygos.api.websocket import _writer, router as ws_router
 from zygos.api.routes_sessions import router as sessions_router
 from zygos.config.schema import ReasoningConfig
 from zygos.providers.fake import FakeProvider
@@ -72,9 +74,10 @@ def test_full_turn_round_trip():
 def test_unknown_session_id_is_closed():
     app = _app()
     client = TestClient(app)
-    with pytest.raises(Exception):
+    with pytest.raises(WebSocketDisconnect) as exc_info:
         with client.websocket_connect("/ws/session/does-not-exist") as ws:
             ws.receive_text()
+    assert exc_info.value.code == 4404
 
 
 def test_ping_pong():
@@ -95,6 +98,52 @@ def test_malformed_frame_returns_control_error():
         ws.send_text("this is not json")
         reply = json.loads(ws.receive_text())
     assert reply["channel"] == "control" and reply["type"] == "error"
+
+
+class _FailingWebSocket:
+    """Fake websocket whose send_text always fails, simulating a mid-turn drop."""
+
+    def __init__(self, exc):
+        self._exc = exc
+        self.calls = 0
+
+    async def send_text(self, data):
+        self.calls += 1
+        raise self._exc
+
+
+def _session():
+    bus = InProcessEventBus()
+    return Session("s", root_context(bus, session_id="s"), created_at=0.0)
+
+
+def test_writer_returns_cleanly_on_websocket_disconnect():
+    session = _session()
+    session.enqueue(Frame(channel=CHAT, type="token", payload={"text": "hi"}))
+    fake_ws = _FailingWebSocket(WebSocketDisconnect(code=1000))
+    asyncio.run(_writer(fake_ws, session))  # must return, not raise
+    assert fake_ws.calls == 1
+
+
+def test_writer_returns_cleanly_on_generic_send_error():
+    session = _session()
+    session.enqueue(Frame(channel=CHAT, type="token", payload={"text": "hi"}))
+    fake_ws = _FailingWebSocket(RuntimeError("connection reset"))
+    asyncio.run(_writer(fake_ws, session))  # must return, not raise
+    assert fake_ws.calls == 1
+
+
+def test_writer_propagates_cancellation():
+    async def run():
+        session = _session()
+        fake_ws = _FailingWebSocket(RuntimeError("unused"))
+        task = asyncio.create_task(_writer(fake_ws, session))
+        await asyncio.sleep(0)  # let it start waiting on the empty queue
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(run())
 
 
 def test_connected_flag_true_during_session():
