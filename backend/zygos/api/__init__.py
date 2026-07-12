@@ -3,3 +3,7 @@
 A top-level composition/adapter: depends on the runtime services; no service
 depends on it. Stability: Experimental.
 """
+
+from zygos.api.app import create_app
+
+__all__ = ["create_app"]
