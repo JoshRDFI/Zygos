@@ -77,5 +77,6 @@ Every RFC must end with an **Architectural Impact** section that answers, at min
 | [RFC-0005](RFC-0005-Voice-Interaction-STT-and-TTS.md) | Voice Interaction — Local STT and TTS | Review — §4 WS protocol reconciled to RFC-0007's envelope |
 | [RFC-0006](RFC-0006-Embedding-Contract-and-Hybrid-Memory-Retrieval.md) | Embedding Contract and Hybrid Memory Retrieval | Accepted — amends RFC-0003 closed capability set; does not amend RFC-0001; build precedes M8 |
 | [RFC-0007](RFC-0007-Session-Protocol-and-Turn-Loop.md) | Session Protocol and Turn Loop (FastAPI/WebSocket Adapter) | Accepted (2026-07-11) — Milestone 8; reconciles RFC-0005 §4 channel naming; completes RFC-0003 `GET /runtime` |
+| [RFC-0008](RFC-0008-Tool-Calling-Protocol-and-Tool-Authoring.md) | Tool-Calling Protocol and Tool Authoring | Draft — native function-calling normalized at the provider seam; amends RFC-0001 §2/§7 |
 
 > **Note on RFC-0001:** This RFC predates the Summary and Architectural Impact sections. Its Architectural Fitness Test table served that role and remains the authoritative impact record for that decision.
