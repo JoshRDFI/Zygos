@@ -10,7 +10,7 @@ Stability: Experimental.
 import time
 import uuid
 import warnings
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,6 +49,7 @@ class RuntimeAssembly:
     plugins: PluginRegistry
     model_service: ModelService
     reasoning_service: ReasoningService
+    reasoning_factory: Callable[[], ReasoningService]
     memory_service: MemoryService | None
     http_client: httpx.AsyncClient
     event_bus: EventBus
@@ -198,6 +199,9 @@ def build_runtime(
     model_service = DefaultModelService(router, task_routes=task_routes)
     reasoning_service = DefaultReasoningService(model_service, config.reasoning)
 
+    def reasoning_factory() -> ReasoningService:
+        return DefaultReasoningService(model_service, config.reasoning)
+
     memory_service: MemoryService | None = None
     memory_store: MemoryStore | None = None
     if config.memory.enabled:
@@ -236,6 +240,7 @@ def build_runtime(
         plugins=plugin_registry,
         model_service=model_service,
         reasoning_service=reasoning_service,
+        reasoning_factory=reasoning_factory,
         memory_service=memory_service,
         http_client=client,
         event_bus=bus,

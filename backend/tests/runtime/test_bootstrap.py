@@ -214,3 +214,17 @@ def test_dataclasses_replace_preserves_router_and_services():
     finally:
         import asyncio
         asyncio.run(runtime.aclose())
+
+
+def test_reasoning_factory_builds_fresh_instances():
+    from zygos.runtime.bootstrap import build_runtime
+
+    runtime = build_runtime()
+    try:
+        a = runtime.reasoning_factory()
+        b = runtime.reasoning_factory()
+        assert a is not b  # fresh per call
+        assert type(a) is type(runtime.reasoning_service)
+    finally:
+        import asyncio
+        asyncio.run(runtime.aclose())
