@@ -35,9 +35,12 @@ from zygos.runtime.capabilities import Capability, CapabilityRegistry
 from zygos.runtime.context import ExecutionContext, root_context
 from zygos.runtime.events import EventBus, InProcessEventBus, Subscriber
 from zygos.services.model import DefaultModelService, ModelService
-from zygos.services.router import ProviderRouter, RouteChoice
+from zygos.services.router import ProviderRouter, RouterSnapshot, RouteChoice
 
 REGISTER_CAPABILITIES_STAGE = "register_capabilities"
+LOAD_SKILLS_STAGE = "load_skills"
+LOAD_MEMORY_STAGE = "load_memory"
+ACCEPT_REQUESTS_STAGE = "accept_requests"
 
 
 @dataclass(frozen=True)
@@ -51,11 +54,16 @@ class RuntimeAssembly:
     event_bus: EventBus
     capability_registry: CapabilityRegistry
     providers: Mapping[str, Provider]
+    _router: ProviderRouter
     lifecycle_stage: str
     _memory_store: MemoryStore | None
 
     def new_context(self, *, session_id: str | None = None) -> ExecutionContext:
         return root_context(self.event_bus, session_id=session_id)
+
+    def router_snapshot(self) -> RouterSnapshot:
+        """Live per-route circuit snapshot (RFC-0007 §8 health surface)."""
+        return self._router.snapshot()
 
     async def aclose(self) -> None:
         if self._memory_store is not None:
@@ -233,6 +241,7 @@ def build_runtime(
         event_bus=bus,
         capability_registry=registry,
         providers=providers,
+        _router=router,
         lifecycle_stage=REGISTER_CAPABILITIES_STAGE,
         _memory_store=memory_store,
     )

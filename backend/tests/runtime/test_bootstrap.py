@@ -172,3 +172,45 @@ def test_capability_priority_follows_route_order(tmp_path):
         assert [b.provider for b in resolved] == ["ollama", "openai"]
     finally:
         asyncio.run(runtime.aclose())
+
+
+import dataclasses
+
+from zygos.runtime.bootstrap import (
+    ACCEPT_REQUESTS_STAGE,
+    LOAD_MEMORY_STAGE,
+    LOAD_SKILLS_STAGE,
+    build_runtime,
+)
+from zygos.services.router import RouterSnapshot
+
+
+def test_lifecycle_stage_constants_are_snake_case():
+    assert LOAD_SKILLS_STAGE == "load_skills"
+    assert LOAD_MEMORY_STAGE == "load_memory"
+    assert ACCEPT_REQUESTS_STAGE == "accept_requests"
+
+
+def test_router_snapshot_accessor_returns_live_snapshot():
+    runtime = build_runtime()  # default ollama primary
+    try:
+        snap = runtime.router_snapshot()
+        assert isinstance(snap, RouterSnapshot)
+        providers = [r.provider for r in snap.routes]
+        assert "ollama" in providers
+    finally:
+        import asyncio
+        asyncio.run(runtime.aclose())
+
+
+def test_dataclasses_replace_preserves_router_and_services():
+    runtime = build_runtime()
+    try:
+        advanced = dataclasses.replace(runtime, lifecycle_stage=ACCEPT_REQUESTS_STAGE)
+        assert advanced.lifecycle_stage == "accept_requests"
+        # same shared instances (shallow copy), and the accessor still works
+        assert advanced.model_service is runtime.model_service
+        assert isinstance(advanced.router_snapshot(), RouterSnapshot)
+    finally:
+        import asyncio
+        asyncio.run(runtime.aclose())
