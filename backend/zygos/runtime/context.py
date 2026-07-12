@@ -53,8 +53,10 @@ class ExecutionContext:
             )
         )
 
-    def child(self, span_id: str) -> "ExecutionContext":
-        return replace(self, span_id=span_id, parent_span_id=self.span_id)
+    def child(self, span_id: str, *, cancel: "CancelToken | None" = None) -> "ExecutionContext":
+        if cancel is None:
+            return replace(self, span_id=span_id, parent_span_id=self.span_id)
+        return replace(self, span_id=span_id, parent_span_id=self.span_id, _cancel=cancel)
 
     @property
     def cancelled(self) -> bool:

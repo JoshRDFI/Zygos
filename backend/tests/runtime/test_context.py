@@ -70,3 +70,34 @@ async def test_cancel_token_wait_returns_after_trip():
     assert not waiter.done()
     ctx._cancel.trip()
     await asyncio.wait_for(waiter, timeout=1.0)  # returns promptly once tripped
+
+
+def test_child_inherits_parent_cancel_by_default():
+    from zygos.runtime.context import CancelToken
+
+    root = root_context(InProcessEventBus())
+    child = root.child("span-1")
+    root._cancel.trip()
+    assert child.cancelled is True  # shared token
+
+
+def test_child_with_fresh_cancel_is_independent():
+    from zygos.runtime.context import CancelToken
+
+    root = root_context(InProcessEventBus())
+    fresh = CancelToken()
+    child = root.child("span-1", cancel=fresh)
+    root._cancel.trip()
+    assert child.cancelled is False  # not affected by parent
+    fresh.trip()
+    assert child.cancelled is True
+
+
+def test_child_with_fresh_cancel_keeps_run_id():
+    from zygos.runtime.context import CancelToken
+
+    root = root_context(InProcessEventBus(), session_id="s1")
+    child = root.child("turn-1", cancel=CancelToken())
+    assert child.run_id == root.run_id
+    assert child.session_id == "s1"
+    assert child.parent_span_id == root.span_id
