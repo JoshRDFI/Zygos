@@ -140,23 +140,32 @@ are snapshotable state per RFC-0002, surfaced through RFC-0003 health.
   backpressure rather than growing unbounded buffers. `cancel` drops queued
   audio immediately (barge-in path).
 
-### 4. Browser↔runtime WebSocket protocol (specified here, built in M8)
+### 4. Browser↔runtime WebSocket protocol (envelope specified by RFC-0007, built in M8)
 
-Extends RFC-0001 §7's channel-tagged binary frames:
+Uses the wire protocol frozen by
+[RFC-0007](RFC-0007-Session-Protocol-and-Turn-Loop.md): one multiplexed
+per-session WebSocket, a `{channel, type, payload}` JSON envelope over the
+`chat`/`tools`/`trace`/`control` channels, and **1-byte-tagged binary frames** on
+the `audio.in`/`audio.out` channels. RFC-0007 owns the envelope and channel set;
+this section specifies only the **voice-specific payloads**.
 
-- **Channels:** `audio.in` (mic → runtime), `audio.out` (TTS → browser), plus the
-  existing `control`, `text`, and `trace` channels.
-- **Handshake:** negotiates codec (**PCM baseline; Opus optional** to cut droplet
-  bandwidth) and sample rate.
-- **Control frames:** `turn.start`, `turn.end`, `partial` (interim transcript),
-  `final` (committed transcript), `tts.begin`, `tts.chunk`, `tts.end`, `duck`,
-  and `cancel`.
+- **Audio channels:** `audio.in` (mic → runtime) and `audio.out` (TTS → browser)
+  carry binary PCM/Opus frames. RFC-0007 reserves these channels; the voice build
+  fills them in.
+- **Handshake:** the RFC-0007 `control` handshake negotiates codec (**PCM baseline;
+  Opus optional** to cut droplet bandwidth) and sample rate.
+- **Transcript frames (`chat`):** interim STT results arrive as `chat` `partial`
+  frames and the committed transcript as a `chat` `final` frame, driving the same
+  `chat` turn (`turn.start`/`turn.end`) a typed message would.
+- **Playback-control frames:** `tts.begin`, `tts.chunk`, `tts.end`, and `duck`
+  coordinate `audio.out` playback — voice-specific types this RFC adds.
 - **Speech-gated uplink:** `audio.in` frames are sent **only while browser VAD
   detects speech**; the runtime never receives silence.
 - **Barge-in:** handled locally in the browser as a reflex (duck playback the
-  instant mic energy sustains) **and** signalled up with `cancel`, so the runtime
-  aborts in-flight TTS synthesis via the `ExecutionContext` cancellation signal
-  (RFC-0002) and the sidecar drops its queued audio.
+  instant mic energy sustains) **and** signalled up with the RFC-0007 `control`
+  `cancel` frame, so the runtime aborts in-flight TTS synthesis via the
+  `ExecutionContext` cancellation signal (RFC-0002) and the sidecar drops its
+  queued audio.
 
 ### 5. Turn-taking and modes (browser-side)
 

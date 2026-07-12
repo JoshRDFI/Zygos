@@ -1,6 +1,6 @@
 # RFC-0007: Session Protocol and Turn Loop (FastAPI/WebSocket Adapter)
 
-- **Status:** Draft
+- **Status:** Accepted (2026-07-11)
 - **Author:** Zygos maintainers
 - **Created:** 2026-07-11
 - **Governs:** the HTTP/WebSocket wire protocol between a browser (or any client)
@@ -262,6 +262,14 @@ denies any pending permission prompt.
   per-tool permission/timeout overrides — config declares what activates, nothing
   auto-activates (ADR-0003). External/entry-point tool-plugin **discovery** stays
   deferred: the MCP-connectivity RFC is the home for external tool sources.
+
+- **Out of scope — a future RFC.** *How the model signals a tool call* (native
+  provider function-calling vs. a ReAct-style text protocol) and *how tools are
+  authored* (the conventions and contract for writing a tool) are their own
+  concern, deferred to a dedicated future RFC. This RFC specifies only that a
+  requested tool call runs through `ToolService`, is permission-gated, and is
+  framed on the `tools` channel — not the mechanism by which the model decides to
+  call one.
 
 ### 8. Manifest and live health (RFC-0006 T7)
 
