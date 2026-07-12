@@ -42,7 +42,7 @@ service's concrete class. The nine service contracts are:
 | Service | Contract (abridged) | Ports from v1 |
 |---|---|---|
 | `ModelService` | `classify_task`, `select_model`, `generate`, `stream` | provider router, protocol adapters |
-| `MemoryService` | `store`, `retrieve`, `search`, `summarize` | context manager/storage/compaction (layered: working, episodic, semantic, procedural) |
+| `MemoryService` | `store`, `retrieve`, `search`, `summarize`, `embed_backlog` | context manager/storage/compaction (layered: working, episodic, semantic, procedural); retrieval pluggable — lexical (FTS5) / vector / hybrid ([RFC-0006](./docs/rfcs/README.md#index)) |
 | `ToolService` | `register`, `execute`, `execute_stream` | tool registry/executors, permissions, validation |
 | `SkillService` | `discover`, `rank`, `execute`, `propose` | learning manager concepts |
 | `TraceService` | `begin_trace`, `record_event`, `snapshot_state`, `finish_trace`, `reflect` | provider observability (extended) |
@@ -110,9 +110,9 @@ Bootstrap
 | Load Configuration | Implemented — Pydantic schema + loader (M1) |
 | Resolve Plugins | Implemented — config-declared resolver (M1, [ADR-0003](./docs/adr/ADR-0003-config-declared-plugins.md)) |
 | Initialize Services | Implemented — constructor injection at the composition root (M1, [ADR-0002](./docs/adr/ADR-0002-constructor-injection.md)) |
-| Register Capabilities | Planned — design pending [RFC-0003](./docs/rfcs/README.md#index) |
+| Register Capabilities | Implemented — capability registry (M3 Cycle 3, [RFC-0003](./docs/rfcs/README.md#index)) |
 | Load Skills | Planned — M6 (`SkillService`) |
-| Load Memory | Planned — M4 (`MemoryService`) |
+| Load Memory | Implemented — `MemoryService` wired at bootstrap (M4); startup `resume()`/`embed_backlog` driven by M8 |
 | Start Scheduler | Planned — scheduler & autonomy milestone |
 | Accept Requests | Planned — M8 (FastAPI adapter + WebSocket) |
 | Execute | Planned — session loop and services fill in across M2–M7 |
@@ -147,12 +147,15 @@ architecture bug**.
 
 ---
 
-## Event Model (planned — RFC-0002)
+## Event Model (implemented — RFC-0002)
 
-> **Design pending.** This section records architectural intent. The event
-> schema, delivery semantics, and the relationship to `ExecutionContext` are
-> decided by RFC-0002 ("Runtime Event Bus and ExecutionContext", currently
-> [Reserved](./docs/rfcs/README.md#index)) — not by this page.
+> **Implemented (M3 Cycle 1, 2026-07-05).** The event schema, delivery
+> semantics, and the relationship to `ExecutionContext` are decided by RFC-0002
+> ("Runtime Event Bus and ExecutionContext",
+> [Accepted](./docs/rfcs/README.md#index)) and live in
+> `backend/zygos/runtime/events.py` and `context.py`. Delivery is synchronous
+> and error-isolated; observability is pull-based, so dropping every subscriber
+> leaves behavior unchanged (the load-bearing puller invariant).
 
 Every significant runtime action emits an event onto a runtime event bus:
 request started, memory retrieved, skill executed, tool completed, model
@@ -164,17 +167,20 @@ future plugins subscribe to events instead of coupling to service internals, so
 a new subscriber — the Introspection Console, a metrics exporter, a third-party
 extension — is added without modifying any emitting service.
 
-## Capability Registry (planned — RFC-0003)
+## Capability Registry (implemented — RFC-0003)
 
-> **Design pending.** The registry contract is decided by RFC-0003
-> ("Capability Registry, Runtime Manifest, and Inspection", currently
-> [Reserved](./docs/rfcs/README.md#index)), which also covers the runtime
-> manifest and `zygos inspect`.
+> **Implemented (M3 Cycle 3, 2026-07-09).** The registry contract is decided by
+> RFC-0003 ("Capability Registry, Runtime Manifest, and Inspection",
+> [Accepted](./docs/rfcs/README.md#index)) and lives in
+> `backend/zygos/runtime/capabilities.py` and `manifest.py`, surfaced by the
+> `zygos inspect`/`zygos doctor` CLI. Resolution is pull-based and health-ranked
+> — it never subscribes, honoring the RFC-0002 puller invariant.
 
 Services ask the registry "who can satisfy the *Vision* capability?" rather
-than asking a specific provider "do you support vision?". Capabilities include
-local inference, web search, speech, image generation, scheduling, and
-filesystem access.
+than asking a specific provider "do you support vision?". Capabilities are a
+closed, RFC-extensible set that includes local inference, embedding (added by
+[RFC-0006](./docs/rfcs/README.md#index)), web search, speech (STT/TTS), image
+generation, scheduling, and filesystem access.
 
 The registry is the mechanism behind the Constitution's "Every component must
 be replaceable": consumers bind to capabilities, never to implementations —
@@ -252,11 +258,13 @@ server.
 
 ## Current Implementation Status
 
-Milestone 1 is complete as of 2026-07-03: the Pydantic config schema and loader
-(`backend/zygos/config/`), config-declared plugin resolver
-(`backend/zygos/plugins/resolver.py`), composition root
-(`backend/zygos/runtime/bootstrap.py`), architecture guard
-(`backend/tests/test_architecture.py`), and CI are all in place with 28 tests passing.
+Milestones 1–5 are complete as of 2026-07-11: config schema/loader and
+config-declared plugin resolver (M1), provider router + `ModelService` (M2), the
+adaptive reasoning engine plus the RFC-0002 event bus and RFC-0003 capability
+registry (M3), layered `MemoryService` (M4), and `ToolService` with the starter
+tool suite (M5) — together with RFC-0006 embedding + hybrid retrieval (Cycles
+1–2). The backend suite has 432 tests passing. Next is M8 (FastAPI adapter +
+WebSocket turn loop), the first consumer of `MemoryService` and `ToolService`.
 See [ROADMAP.md](./ROADMAP.md) for the full milestone plan.
 
 ---
