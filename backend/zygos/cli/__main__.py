@@ -26,6 +26,9 @@ def _build_parser() -> argparse.ArgumentParser:
     subcommands.add_parser("inspect", help="Render the runtime manifest")
     doctor = subcommands.add_parser("doctor", help="Validate the wired runtime")
     doctor.add_argument("--probe", action="store_true", help="Actively ping the primary route")
+    serve = subcommands.add_parser("serve", help="Run the HTTP/WebSocket server")
+    serve.add_argument("--host", default=None, help="Bind host (default: config.server.host)")
+    serve.add_argument("--port", type=int, default=None, help="Bind port (default: config.server.port)")
     return parser
 
 
@@ -62,6 +65,22 @@ def render_doctor(report: DoctorReport) -> str:
     return "\n".join(lines)
 
 
+def run_server(runtime, *, host: str, port: int, run=None) -> None:
+    """Build the FastAPI app and hand it to the ASGI server (uvicorn by default).
+
+    fastapi/uvicorn are imported lazily so `inspect`/`doctor` work without the
+    `server` extra. The lifespan owns async startup and aclose; run() owns the loop.
+    """
+    from zygos.api.app import create_app
+
+    app = create_app(runtime, embedder=None, embedding_model="", session_count=lambda: 0)
+    if run is None:
+        import uvicorn
+
+        run = uvicorn.run
+    run(app, host=host, port=port)
+
+
 async def _amain(args: argparse.Namespace) -> int:
     runtime = build_runtime(args.config)
     try:
@@ -80,6 +99,12 @@ async def _amain(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
+        if args.command == "serve":
+            runtime = build_runtime(args.config)
+            host = args.host if args.host is not None else runtime.config.server.host
+            port = args.port if args.port is not None else runtime.config.server.port
+            run_server(runtime, host=host, port=port)
+            return 0
         return asyncio.run(_amain(args))
     except ConfigError as error:
         print(f"zygos: configuration error: {error}", file=sys.stderr)
