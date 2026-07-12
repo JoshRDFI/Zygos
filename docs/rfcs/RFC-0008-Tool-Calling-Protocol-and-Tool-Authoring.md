@@ -1,6 +1,6 @@
 # RFC-0008: Tool-Calling Protocol and Tool Authoring
 
-- **Status:** Draft
+- **Status:** Accepted (2026-07-11)
 - **Author:** Zygos maintainers
 - **Created:** 2026-07-11
 - **Governs:** how a model **signals a tool call** — the mechanism by which an LLM
