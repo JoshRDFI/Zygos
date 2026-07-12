@@ -65,22 +65,6 @@ def render_doctor(report: DoctorReport) -> str:
     return "\n".join(lines)
 
 
-def run_server(runtime, *, host: str, port: int, run=None) -> None:
-    """Build the FastAPI app and hand it to the ASGI server (uvicorn by default).
-
-    fastapi/uvicorn are imported lazily so `inspect`/`doctor` work without the
-    `server` extra. The lifespan owns async startup and aclose; run() owns the loop.
-    """
-    from zygos.api.app import create_app
-
-    app = create_app(runtime, embedder=None, embedding_model="", session_count=lambda: 0)
-    if run is None:
-        import uvicorn
-
-        run = uvicorn.run
-    run(app, host=host, port=port)
-
-
 async def _amain(args: argparse.Namespace) -> int:
     runtime = build_runtime(args.config)
     try:
@@ -100,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
         if args.command == "serve":
+            from zygos.api.app import run_server
+
             runtime = build_runtime(args.config)
             host = args.host if args.host is not None else runtime.config.server.host
             port = args.port if args.port is not None else runtime.config.server.port

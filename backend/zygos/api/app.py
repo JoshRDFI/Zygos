@@ -60,3 +60,17 @@ def create_app(
     app.state.session_count = session_count
     app.include_router(runtime_router)
     return app
+
+
+def run_server(runtime, *, host: str, port: int, run=None) -> None:
+    """Build the FastAPI app and hand it to the ASGI server (uvicorn by default).
+
+    Lives in the api adapter layer (not the CLI) so the runtime core / CLI never
+    import a web framework. uvicorn is imported lazily; the lifespan owns async
+    startup and aclose; run() owns the loop.
+    """
+    app = create_app(runtime, embedder=None, embedding_model="", session_count=lambda: 0)
+    if run is None:
+        import uvicorn
+        run = uvicorn.run
+    run(app, host=host, port=port)

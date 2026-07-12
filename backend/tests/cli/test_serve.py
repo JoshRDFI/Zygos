@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
-from zygos.cli.__main__ import _build_parser, run_server
+from zygos.cli.__main__ import _build_parser
+from zygos.api.app import run_server
 from zygos.runtime.bootstrap import build_runtime
 
 
