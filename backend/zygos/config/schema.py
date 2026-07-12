@@ -129,6 +129,19 @@ class MemoryConfig(BaseModel):
     embed_batch_size: int = Field(default=32, ge=1)
 
 
+class ServerConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    host: str = "127.0.0.1"          # loopback default (RFC-0007 §11)
+    port: int = 8000
+    request_timeout_s: float = 60.0
+    # permission-prompt timeout; reserved here, consumed by the Cycle 3 resolver
+    prompt_timeout_s: float = 120.0
+    # reserved for the voice-build audio handshake (RFC-0005); unused in M8
+    audio_codec: str = "pcm"
+    audio_sample_rate: int = 16000
+
+
 class ZygosConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -136,6 +149,7 @@ class ZygosConfig(BaseModel):
     learning: LearningConfig = Field(default_factory=LearningConfig)
     reasoning: ReasoningConfig = Field(default_factory=ReasoningConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    server: ServerConfig = Field(default_factory=ServerConfig)
     # plugin kind -> plugin name -> "module.path:ClassName" (RFC-0001 §3)
     plugins: dict[str, dict[str, str]] = Field(default_factory=_default_plugins)
     # Capabilities a deployment requires; `zygos doctor` fails if any is unbound

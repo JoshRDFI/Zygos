@@ -18,6 +18,10 @@ embeddings = [
     "fastembed>=0.3",
     "numpy>=1.26",
 ]
+server = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+]
 
 [project.scripts]
 zygos = "zygos.cli.__main__:main"

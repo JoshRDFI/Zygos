@@ -122,3 +122,28 @@ def test_required_capabilities_coerces_valid_capability():
 def test_required_capabilities_rejects_unknown():
     with pytest.raises(ValidationError):
         ZygosConfig(required_capabilities=["teleportation"])
+
+
+def test_server_config_defaults():
+    from zygos.config.schema import ServerConfig
+
+    cfg = ServerConfig()
+    assert cfg.host == "127.0.0.1"
+    assert cfg.port == 8000
+    assert cfg.request_timeout_s == 60.0
+    assert cfg.prompt_timeout_s == 120.0
+    assert cfg.audio_codec == "pcm"
+    assert cfg.audio_sample_rate == 16000
+
+
+def test_server_config_forbids_unknown_key():
+    from zygos.config.schema import ServerConfig
+
+    with pytest.raises(ValidationError):
+        ServerConfig(nope=1)
+
+
+def test_zygos_config_has_server_section_by_default():
+    from zygos.config.schema import ServerConfig
+
+    assert ZygosConfig().server == ServerConfig()
