@@ -13,7 +13,7 @@ from zygos.memory.vector_search import VectorSearch
 from zygos.memory.vectors import pack
 from zygos.providers.embedding import Embedder
 from zygos.providers.fake import FakeEmbedder
-from zygos.providers.types import EmbedRequest, EmbedResult
+from zygos.providers.types import EmbedRequest, EmbedResult, Usage
 
 
 def _rec(store, rid, text):
@@ -85,6 +85,36 @@ async def test_vector_mode_embed_failure_returns_empty(tmp_path):
     _rec(store, "r1", "rollback")
     index = VectorRelevanceIndex(
         BoomEmbedder(), VectorSearch(store, model="fake-embed"), model="fake-embed")
+    assert await index.query("rollback", k=10) == []
+    store.close()
+
+
+class ZeroVectorEmbedder:
+    name = "zero"
+
+    async def embed(self, request: EmbedRequest) -> EmbedResult:
+        return EmbedResult(vectors=(), model="fake-embed", dim=8, usage=Usage())  # empty!
+
+
+@pytest.mark.asyncio
+async def test_hybrid_zero_vector_reply_falls_back_to_lexical(tmp_path):
+    store = MemoryStore(tmp_path / "m.db")
+    emb = FakeEmbedder(dim=8, model="fake-embed")
+    await _embed_texts(store, emb, "fake-embed", [("r1", "rollback the migration")])
+    hybrid = HybridRelevanceIndex(
+        Fts5RelevanceIndex(store.connection),
+        VectorSearch(store, model="fake-embed"), ZeroVectorEmbedder(), model="fake-embed")
+    hits = await hybrid.query("rollback", k=10)  # embed returns no vectors -> lexical only, no IndexError
+    assert [rid for rid, _ in hits] == ["r1"]
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_vector_mode_zero_vector_reply_returns_empty(tmp_path):
+    store = MemoryStore(tmp_path / "m.db")
+    _rec(store, "r1", "rollback")
+    index = VectorRelevanceIndex(
+        ZeroVectorEmbedder(), VectorSearch(store, model="fake-embed"), model="fake-embed")
     assert await index.query("rollback", k=10) == []
     store.close()
 

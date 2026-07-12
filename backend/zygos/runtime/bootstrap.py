@@ -94,7 +94,11 @@ def _build_embedder(config, client, plugin_registry) -> tuple[Embedder | None, s
         try:
             from zygos.providers.embedding_local import LocalEmbedder
             return LocalEmbedder(model=model), model
-        except ImportError:
+        except Exception as error:  # extra missing OR first-run model fetch / construct failure
+            warnings.warn(
+                f"local embedder unavailable ({error!r}); embedding will degrade to FTS5",
+                stacklevel=2,
+            )
             return None, model
     model = ec.model or _EMBED_DEFAULT_MODEL.get(backend, "")
     if not model:

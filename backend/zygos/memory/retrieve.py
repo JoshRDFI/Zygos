@@ -87,9 +87,9 @@ class VectorRelevanceIndex:
     async def query(self, text: str, *, k: int) -> list[tuple[str, float]]:
         try:
             result = await self._embedder.embed(EmbedRequest(model=self._model, texts=(text,)))
+            hits = self._vs.search(result.vectors[0], k=k)
         except Exception:
             return []
-        hits = self._vs.search(result.vectors[0], k=k)
         if not hits:
             return []
         clamped = [(rid, max(0.0, s)) for rid, s in hits]
@@ -116,9 +116,9 @@ class HybridRelevanceIndex:
         lexical = await self._fts.query(text, k=k)
         try:
             result = await self._embedder.embed(EmbedRequest(model=self._model, texts=(text,)))
+            semantic = self._vs.search(result.vectors[0], k=k)
         except Exception:
-            return lexical  # advisory: embed failure -> lexical arm only
-        semantic = self._vs.search(result.vectors[0], k=k)
+            return lexical  # advisory: any embed/vector failure -> lexical arm only, never raises
         return rrf_fuse(lexical, semantic, k=k)
 
 

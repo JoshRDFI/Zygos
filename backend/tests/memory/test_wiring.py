@@ -123,6 +123,33 @@ def test_build_embedder_local_without_fastembed_degrades(monkeypatch):
         asyncio.run(client.aclose())
 
 
+def test_build_embedder_local_construct_failure_degrades(monkeypatch):
+    # A first-run model-fetch / construction failure (NOT ImportError) must degrade, not crash.
+    import asyncio
+    import httpx
+    import zygos.providers.embedding_local as el
+    from zygos.config.schema import ZygosConfig
+    from zygos.plugins.resolver import PluginRegistry
+    from zygos.runtime.bootstrap import _build_embedder
+
+    class _BoomLocal:
+        def __init__(self, *a, **k):
+            raise RuntimeError("model fetch failed (offline)")
+
+    monkeypatch.setattr(el, "LocalEmbedder", _BoomLocal)
+    cfg = ZygosConfig()
+    cfg.memory.retrieval_mode = "hybrid"  # backend defaults to local
+    client = httpx.AsyncClient()
+    try:
+        import pytest
+        with pytest.warns(UserWarning):
+            embedder, model = _build_embedder(cfg, client, PluginRegistry(cfg.plugins))
+        assert embedder is None
+        assert model == "BAAI/bge-small-en-v1.5"
+    finally:
+        asyncio.run(client.aclose())
+
+
 def test_build_embedder_openai_empty_model_raises():
     from zygos.config.schema import ZygosConfig
     from zygos.errors import ConfigError
