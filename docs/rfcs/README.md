@@ -76,5 +76,6 @@ Every RFC must end with an **Architectural Impact** section that answers, at min
 | [RFC-0004](RFC-0004-Secret-Storage-and-Key-Entry.md) | Secret Storage and Key Entry | Accepted — amends RFC-0001 §8; not an M3 gate |
 | [RFC-0005](RFC-0005-Voice-Interaction-STT-and-TTS.md) | Voice Interaction — Local STT and TTS | Review |
 | [RFC-0006](RFC-0006-Embedding-Contract-and-Hybrid-Memory-Retrieval.md) | Embedding Contract and Hybrid Memory Retrieval | Accepted — amends RFC-0003 closed capability set; does not amend RFC-0001; build precedes M8 |
+| [RFC-0007](RFC-0007-Session-Protocol-and-Turn-Loop.md) | Session Protocol and Turn Loop (FastAPI/WebSocket Adapter) | Draft — Milestone 8; reconciles RFC-0005 §4 channel naming; completes RFC-0003 `GET /runtime` |
 
 > **Note on RFC-0001:** This RFC predates the Summary and Architectural Impact sections. Its Architectural Fitness Test table served that role and remains the authoritative impact record for that decision.
