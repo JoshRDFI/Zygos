@@ -112,9 +112,9 @@ Bootstrap
 | Initialize Services | Implemented — constructor injection at the composition root (M1, [ADR-0002](./docs/adr/ADR-0002-constructor-injection.md)) |
 | Register Capabilities | Implemented — capability registry (M3 Cycle 3, [RFC-0003](./docs/rfcs/README.md#index)) |
 | Load Skills | Planned — M6 (`SkillService`) |
-| Load Memory | Implemented — `MemoryService` wired at bootstrap (M4); startup `resume()`/`embed_backlog` driven by M8 |
+| Load Memory | Implemented — `MemoryService` wired at bootstrap (M4); `resume()`/`embed_backlog()` drained at server startup (M8 Cycle 1) |
 | Start Scheduler | Planned — scheduler & autonomy milestone |
-| Accept Requests | Planned — M8 (FastAPI adapter + WebSocket) |
+| Accept Requests | Implemented — FastAPI adapter reaches this stage at startup (M8 Cycle 1); WebSocket turn loop lands M8 Cycle 2 |
 | Execute | Planned — session loop and services fill in across M2–M7 |
 | Graceful Shutdown | Planned — reverse-order teardown |
 
@@ -215,6 +215,17 @@ streaming execution, and one-level fallback tools are preserved.
 ## API Surface
 
 REST handles request/response resources: sessions, config, skills, plans, proposals.
+
+**Live (M8 Cycle 1):**
+
+- `GET /runtime` — renders the pure static runtime `Manifest` (config summary,
+  capabilities, routes, versions); no network, no mutation.
+- `GET /runtime/health` — live status: per-route circuit snapshot, tri-state embedder
+  health (`healthy`/`unhealthy`/`not_probed`; default `not_probed`, `?probe=1` actively
+  probes), and active-session count.
+
+The `/sessions` REST endpoints and the `/ws/session/{id}` WebSocket described below are
+**Planned — M8 Cycle 2**.
 
 Each session has one multiplexed WebSocket at `/ws/session/{id}`. All real-time traffic
 flows over that single connection:
