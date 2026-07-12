@@ -67,3 +67,22 @@ async def test_get_runtime_shows_accept_requests_after_startup():
         ) as client:
             resp = await client.get("/runtime")
     assert resp.json()["lifecycle_stage"] == "accept_requests"
+
+
+class _FailingDrainMemory:
+    async def resume(self, ctx):
+        return 0
+
+    async def embed_backlog(self, ctx):
+        raise RuntimeError("drain boom")
+
+
+@pytest.mark.asyncio
+async def test_startup_drain_failure_still_closes_runtime():
+    runtime = dataclasses.replace(build_runtime(), memory_service=_FailingDrainMemory())
+    app = create_app(runtime)
+    with pytest.raises(RuntimeError, match="drain boom"):
+        async with app.router.lifespan_context(app):
+            pass  # startup raises before we get here
+    # aclose ran in `finally` despite the startup failure
+    assert app.state.runtime.http_client.is_closed

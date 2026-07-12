@@ -33,13 +33,13 @@ def _advance(app: FastAPI, stage: str) -> None:
 async def _lifespan(app: FastAPI):
     runtime = app.state.runtime
     ctx = runtime.new_context()
-    _advance(app, LOAD_SKILLS_STAGE)   # no-op today; SkillService is M6
-    _advance(app, LOAD_MEMORY_STAGE)
-    if runtime.memory_service is not None:
-        await runtime.memory_service.resume(ctx)
-        await runtime.memory_service.embed_backlog(ctx)
-    _advance(app, ACCEPT_REQUESTS_STAGE)
     try:
+        _advance(app, LOAD_SKILLS_STAGE)   # no-op today; SkillService is M6
+        _advance(app, LOAD_MEMORY_STAGE)
+        if runtime.memory_service is not None:
+            await runtime.memory_service.resume(ctx)
+            await runtime.memory_service.embed_backlog(ctx)
+        _advance(app, ACCEPT_REQUESTS_STAGE)
         yield
     finally:
         # Cycle 2 will trip active turns' CancelTokens here before closing.
