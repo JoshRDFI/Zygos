@@ -1,77 +1,119 @@
 # Zygos
 
-Zygos is an open, modular, and inspectable AI runtime. It provides multi-provider reasoning, layered memory, tools, and skills through a composable architecture — and is gaining, in v2, a self-hosted web UI with voice. Whether you need a local-first CLI agent or a production-grade orchestration layer, Zygos is built to be understood, extended, and trusted.
+**Run AI on your terms — private or public, and always inspectable.**
 
-## Why "Zygos"?
+AI increasingly handles your private conversations, your documents, your long-term
+memory, and access to real tools on your system. Too often that means sending sensitive
+context to services you can't see into, accepting agent behavior you can't audit, and
+getting locked into a single provider.
 
-**Zygos** (ζυγός) comes from Ancient Greek and means **yoke**, **coupling**, or **joining**.
+Zygos is an open, **local-first AI runtime you host yourself**. Point it at a private
+local model (Ollama, vLLM) or a public provider (OpenAI, Anthropic) — your choice, and
+you can see which one handled every request. Your memory and history stay in a local
+database on your machine. Nothing phones home. And Zygos is built to be *inspected*: you
+can see the model, memory, and tools behind each answer. It's for people who want
+capable AI without treating privacy, visibility, or control as optional.
 
-For this project, the name captures the core design philosophy:
+## Where Zygos is today
 
-- Binding multiple forces (providers, tools, reasoning) into coordinated motion
-- Balance, alignment, and synchronization between components
-- A control interface between independent actors (LLMs, tools, memory)
+Zygos comes in two runtimes: **v1**, a stable TypeScript CLI you can use today, and
+**v2**, a Python migration toward a self-hosted web app with voice. This README describes
+where Zygos is headed; the table marks what runs now versus what's still being built.
 
-The name is more than a label; it reflects how the system orchestrates independent capabilities into one coherent, reliable agent runtime.
+|                | Today — v1 (TypeScript CLI)                     | Coming — v2 (Python, self-hosted web app)          |
+|----------------|-------------------------------------------------|----------------------------------------------------|
+| **Models**     | Local (Ollama, vLLM) + public (OpenAI, Anthropic) | Same, routed by capability                        |
+| **Your data**  | Local SQLite — history & context on your machine | Layered memory with local semantic recall          |
+| **Interface**  | Command line                                     | Web UI **and** voice *(in development)*             |
+| **Inspection** | Provider & route metrics                          | Full introspection console *(in development)*       |
+| **Status**     | Stable; frozen (bug fixes only)                  | In active development — see the [roadmap](./ROADMAP.md) |
 
-## Project Status
+## Why Zygos
 
-| Runtime | Language | Status |
-|---------|----------|--------|
-| v1 | TypeScript | Stable and usable today; frozen (bugfixes only) |
-| v2 | Python | In development — Milestone 1 complete ([roadmap](./ROADMAP.md)) |
+- **Private *or* public LLMs — your choice, made visible.** Run locally with Ollama or
+  vLLM, or connect a public provider when you want to — and see which handled each
+  request. *(today)*
+- **Your data stays where you put it.** Memory and history live in a local SQLite
+  database on your own machine or VM; there's no managed platform in the middle.
+  *(today; the self-hosted web app is in development)*
+- **Auditable, not opaque.** Inspect the model route, memory, and tools behind an
+  answer — so you can verify what was used and what left your machine. *(partial today;
+  a full introspection console is in development)*
+- **No telemetry.** Zygos ships no analytics and no phone-home — nothing about your usage
+  is collected or sent anywhere. *(today)*
+- **Improvement you approve.** Zygos can propose new skills and refinements, but never
+  changes its own behavior without human review and testing. *(today in v1; the v2
+  service is planned)*
+- **No lock-in.** Swap models, memory backends, tools, and providers without rebuilding —
+  components bind to capabilities, not vendors. *(today)*
+- **Voice, on your machine.** Local-first speech in and out, with optional cloud fallback.
+  *(in development)*
 
-v2 is an architectural migration of v1, governed by [RFC-0001](./docs/rfcs/RFC-0001-Service-Architecture.md).
+## Choose your privacy level
 
-## Quick Start (v1)
+Zygos doesn't force an all-or-nothing choice. You decide how much stays local:
+
+| Level                        | Setup                                   | What leaves your machine                                              |
+|------------------------------|-----------------------------------------|----------------------------------------------------------------------|
+| **Fully local**              | Local model (Ollama/vLLM) + local storage | Nothing, once the model is downloaded.\*                            |
+| **Local storage, public model** | Public LLM (OpenAI/Anthropic) + local storage | Only the prompt/context you send to the chosen provider; history and memory stay local. |
+
+\* Running fully offline is a design goal of the local-first path; verify it for your own
+configuration before relying on it.
+
+## Quick start (v1, local)
+
+The usable runtime today is the v1 CLI. This path keeps everything local with Ollama.
+
+**Prerequisites:** [Node.js](https://nodejs.org), and [Ollama](https://ollama.com)
+running locally with a model pulled (for example, `ollama pull qwen3:8b`).
 
 ```bash
-git clone <your-repo-url>
-cd zygos
+git clone https://github.com/JoshRDFI/Zygos.git
+cd Zygos
 npm install
-cp .env.example .env
-npm run verify
+cp .env.example .env      # Ollama is the default; no API key needed for the local path
+npm run verify            # confirms the runtime is wired correctly
 npm run dev -- "Hello Zygos"
 ```
 
-For the full walkthrough, see [docs/v1/QUICKSTART.md](./docs/v1/QUICKSTART.md).
+To use a public provider instead, set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in `.env`
+and select it in `config/default.yaml`. For the full walkthrough, see
+[docs/v1/QUICKSTART.md](./docs/v1/QUICKSTART.md).
 
-## Working on v2
+## How Zygos works
 
-```bash
-cd backend
-python3.12 -m venv .venv
-.venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest
-```
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for branch conventions, code standards, and the full contributor workflow.
+Zygos is a composable runtime — independent services for model routing, reasoning,
+memory, tools, and tracing, wired together at one place and inspectable end to end. For a
+readable tour of the subsystems and how they fit, see the
+[Technical Overview](./TECHNICAL_OVERVIEW.md); for the authoritative design, see
+[ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ## Documentation
 
-- [Vision](./VISION.md)
-- [Architecture](./ARCHITECTURE.md)
-- [Roadmap](./ROADMAP.md)
-- [Constitution](./CONSTITUTION.md)
-- [Compatibility](./COMPATIBILITY.md)
-- [ADRs](./docs/adr/)
-- [Contributing](./CONTRIBUTING.md)
-- [Style Guide](./STYLE_GUIDE.md)
-- [RFCs](./docs/rfcs/)
+- [Technical Overview](./TECHNICAL_OVERVIEW.md) — how the system works
+- [Architecture](./ARCHITECTURE.md) — the authoritative v2 design
+- [Vision](./VISION.md) — why Zygos exists and where it's headed
+- [Roadmap](./ROADMAP.md) — milestone-by-milestone status
+- [Compatibility](./COMPATIBILITY.md) · [Constitution](./CONSTITUTION.md) · [Style Guide](./STYLE_GUIDE.md)
+- [RFCs](./docs/rfcs/) · [ADRs](./docs/adr/) — the decision log
 - [v1 Guides](./docs/v1/)
 
-## How Zygos Is Built
+## Contributing
 
-Zygos is developed AI-native, and deliberately so. Architecture, design review, and
-direction are human: the RFCs, the governance gates, and every decision about what is
-correct and what ships originate with the maintainer. The code is primarily authored by
-Claude (Anthropic) under that direction, and research and ideation draw on a range of LLM
-tools upstream of implementation. Commit trailers reflect this split — the human is the
-commit author and the accountable party, and the assistant is credited as co-author.
+Contributions are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md) for branch
+conventions, code standards, and the workflow.
 
-This is a methodology, not an accident of tooling. Zygos treats human judgment as the
-scarce input and AI as leverage on it — the same principle of coordinated, inspectable
-orchestration that the runtime itself is built to embody.
+Zygos is developed AI-native and deliberately so: architecture, review, and every
+decision about what ships are the maintainer's; the code is primarily authored by Claude
+(Anthropic) under that direction, reflected in the commit trailers.
+
+## About the name
+
+**Zygos** (ζυγός) is Ancient Greek for **yoke**, **coupling**, or **joining** — binding
+independent forces (providers, tools, reasoning, memory) into coordinated, balanced
+motion. It's the same idea the runtime embodies: many capabilities, one coherent,
+inspectable system.
 
 ## License
 
