@@ -60,3 +60,28 @@ def test_resolvers_return_fixed_decisions():
     req = PermissionRequest(tool="t", run_id="r", call_id="c")
     assert asyncio.run(DenyingResolver().resolve(req, ctx=None)) == "deny"
     assert asyncio.run(AllowingResolver().resolve(req, ctx=None)) == "allow"
+
+
+def test_rule_loosens_ask_to_allow():
+    policy = PermissionPolicy(rules=[Rule(pattern="http_fetch", decision="allow")])
+    assert policy.decide(_meta(name="http_fetch", permission="ask")) == "allow"
+
+
+def test_ask_with_no_rule_stays_ask():
+    policy = PermissionPolicy()
+    assert policy.decide(_meta(name="write_file", permission="ask")) == "ask"
+
+
+def test_rule_cannot_loosen_deny():
+    policy = PermissionPolicy(rules=[Rule(pattern="danger", decision="allow")])
+    assert policy.decide(_meta(name="danger", permission="deny")) == "deny"
+
+
+def test_rule_still_tightens_allow():
+    policy = PermissionPolicy(rules=[Rule(pattern="read_file", decision="deny")])
+    assert policy.decide(_meta(name="read_file", permission="allow")) == "deny"
+
+
+def test_rule_tightens_ask_to_deny():
+    policy = PermissionPolicy(rules=[Rule(pattern="run_command", decision="deny")])
+    assert policy.decide(_meta(name="run_command", permission="ask")) == "deny"

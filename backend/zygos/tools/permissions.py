@@ -38,17 +38,15 @@ class PermissionPolicy(BaseModel):
     default: PermissionDecision = "allow"
 
     def decide(self, meta: ToolMeta) -> PermissionDecision:
-        # meta.permission == "deny" is a hard floor — a rule cannot loosen it.
+        # meta.permission == "deny" is a hard floor — no rule can loosen it.
         if meta.permission == "deny":
             return "deny"
-        # A tool self-declaring "ask" is honored regardless of rules.
-        if meta.permission == "ask":
-            return "ask"
-        # meta.permission == "allow": rules may tighten (allow -> ask/deny); first match wins.
+        # For "allow"/"ask": a matching rule wins (loosen ask->allow OR tighten to deny/ask);
+        # first fnmatch wins. With no matching rule, "ask" stands and "allow" falls to default.
         for rule in self.rules:
             if fnmatch(meta.name, rule.pattern):
                 return rule.decision
-        return self.default
+        return "ask" if meta.permission == "ask" else self.default
 
 
 @runtime_checkable
