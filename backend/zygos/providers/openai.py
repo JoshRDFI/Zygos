@@ -23,6 +23,7 @@ from zygos.runtime.capabilities import Capability
 
 class OpenAIProvider:
     name = "openai"
+    supports_native_tools = True
     capabilities: frozenset[Capability] = frozenset({Capability.LOCAL_INFERENCE, Capability.EMBEDDING})
     chat_path = "/chat/completions"
     embeddings_path = "/embeddings"

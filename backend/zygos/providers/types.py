@@ -3,16 +3,37 @@
 Stability: Experimental.
 """
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
+
+
+class ToolSchema(BaseModel):
+    """A tool as the model sees it (RFC-0008 §1). parameters is a JSON Schema."""
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    description: str
+    parameters: dict[str, Any]
+
+
+class ToolInvocation(BaseModel):
+    """A tool call as the model requests it (RFC-0008 §1). Provider-layer; distinct
+    from tools.ToolCall (the agent/ layer maps one to the other)."""
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    name: str
+    arguments: dict[str, Any]
 
 
 class Message(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    role: Literal["system", "user", "assistant"]
-    content: str
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str = ""
+    tool_calls: tuple[ToolInvocation, ...] = ()   # on an assistant turn
+    tool_call_id: str | None = None                # on a "tool" turn
 
 
 class GenerationRequest(BaseModel):
@@ -25,6 +46,8 @@ class GenerationRequest(BaseModel):
     # local uncapped, cloud a generous default). An explicit int is always honored.
     max_tokens: int | None = None
     temperature: float = 0.7
+    tools: tuple[ToolSchema, ...] = ()
+    tool_choice: Literal["auto", "none", "required"] = "auto"
 
 
 class Usage(BaseModel):
@@ -41,6 +64,8 @@ class GenerationResult(BaseModel):
     model: str
     provider: str
     usage: Usage = Usage()
+    tool_calls: tuple[ToolInvocation, ...] = ()
+    finish_reason: Literal["stop", "tool_calls", "length"] = "stop"
 
 
 class GenerationChunk(BaseModel):

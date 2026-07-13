@@ -43,6 +43,9 @@ class ProviderSettings(BaseModel):
     timeout_s: float = 300.0
 
 
+# Providers also declare a class attribute `supports_native_tools: bool` (RFC-0008
+# §7); it is a plain attribute, not a Protocol member, to avoid tightening
+# runtime_checkable isinstance conformance (which the capability registry relies on).
 @runtime_checkable
 class Provider(Protocol):
     name: str

@@ -17,6 +17,7 @@ from zygos.runtime.capabilities import Capability
 
 class FakeProvider:
     name = "fake"
+    supports_native_tools = True
     capabilities: frozenset[Capability] = frozenset({Capability.LOCAL_INFERENCE})
 
     def __init__(

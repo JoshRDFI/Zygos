@@ -23,6 +23,7 @@ _API_VERSION = "2023-06-01"
 
 class AnthropicProvider:
     name = "anthropic"
+    supports_native_tools = True
     capabilities: frozenset[Capability] = frozenset({Capability.LOCAL_INFERENCE})
 
     def __init__(self, settings: ProviderSettings, client: httpx.AsyncClient) -> None:
