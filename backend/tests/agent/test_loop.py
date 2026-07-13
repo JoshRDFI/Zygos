@@ -110,3 +110,70 @@ async def test_no_tool_calls_returns_immediately():
     assert result.text == "just text"
     assert result.iterations == 1
     assert [m.role for m in result.messages] == ["user"]
+
+
+async def test_multiple_tool_calls_execute_and_history_ordered():
+    two_calls = GenerationResult(
+        text="", model="fake-model", provider="fake", finish_reason="tool_calls",
+        tool_calls=(ToolInvocation(id="a", name="echo", arguments={"value": "1"}),
+                    ToolInvocation(id="b", name="echo", arguments={"value": "2"})))
+    ms = _model_service([two_calls, "done"])
+    ts = _tool_service(EchoTool())
+    result = await run_agentic_loop(
+        _ctx(), model_service=ms, tool_service=ts, tools=[EchoTool()],
+        messages=[Message(role="user", content="go")], config=ToolLoopConfig())
+    # user, assistant(2 calls), tool(a), tool(b), then final answer returned as text
+    tool_msgs = [m for m in result.messages if m.role == "tool"]
+    assert [m.tool_call_id for m in tool_msgs] == ["a", "b"]
+    assert json.loads(tool_msgs[0].content) == {"echoed": "1"}
+    assert json.loads(tool_msgs[1].content) == {"echoed": "2"}
+    assert result.text == "done"
+
+
+async def test_cancelled_context_returns_before_generate():
+    ms = _model_service(["should not be used"])
+    ts = _tool_service(EchoTool())
+    ctx = _ctx()
+    ctx._cancel.trip()   # pre-cancel
+    result = await run_agentic_loop(
+        ctx, model_service=ms, tool_service=ts, tools=[EchoTool()],
+        messages=[Message(role="user", content="go")], config=ToolLoopConfig())
+    assert result.stop_reason == "cancelled"
+    assert result.iterations == 0
+
+
+async def test_max_iterations_triggers_final_tool_choice_none():
+    # A model that always requests a tool -> loop must cap and force a tool-free answer.
+    calls = [_call("echo", {"value": "x"}, cid=f"c{i}") for i in range(3)]
+    # After 2 rounds, the 3rd generate is the forced final (tool_choice="none") -> text.
+    ms = _model_service(calls[:2] + ["forced final answer"])
+    ts = _tool_service(EchoTool())
+    result = await run_agentic_loop(
+        _ctx(), model_service=ms, tool_service=ts, tools=[EchoTool()],
+        messages=[Message(role="user", content="go")], config=ToolLoopConfig(max_iterations=2))
+    assert result.stop_reason == "max_iterations"
+    assert result.iterations == 2
+    assert result.text == "forced final answer"
+
+
+async def test_final_generate_uses_tool_choice_none():
+    # Assert the forced-final request carries tool_choice="none" by capturing it.
+    seen: list[str] = []
+
+    class SpyModel:
+        def classify_task(self, prompt): return "simple"
+        def select_model(self, classification=None): ...
+        async def generate(self, ctx, request):
+            seen.append(request.tool_choice)
+            if len(seen) <= 1:
+                return _call("echo", {"value": "x"})
+            return GenerationResult(text="final", model="m", provider="fake")
+        def stream(self, ctx, request): ...
+
+    ts = _tool_service(EchoTool())
+    result = await run_agentic_loop(
+        _ctx(), model_service=SpyModel(), tool_service=ts, tools=[EchoTool()],
+        messages=[Message(role="user", content="go")], config=ToolLoopConfig(max_iterations=1))
+    assert seen == ["auto", "none"]
+    assert result.text == "final"
+    assert result.stop_reason == "max_iterations"
