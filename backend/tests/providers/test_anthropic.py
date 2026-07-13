@@ -4,7 +4,7 @@ import httpx
 
 from zygos.providers.anthropic import AnthropicProvider
 from zygos.providers.base import DEFAULT_CLOUD_MAX_TOKENS, ProviderSettings
-from zygos.providers.types import GenerationRequest, Message
+from zygos.providers.types import GenerationRequest, Message, ToolInvocation, ToolSchema
 
 from .conftest import contract_request, make_client, run_error_contract
 
@@ -142,3 +142,73 @@ async def test_none_max_tokens_uses_cloud_default():
 
 async def test_error_contract():
     await run_error_contract(_make)
+
+
+def _tools_request():
+    return GenerationRequest(
+        model="claude-x",
+        messages=(Message(role="user", content="read a.txt"),),
+        tools=(ToolSchema(name="read_file", description="Read a file.",
+                          parameters={"type": "object", "properties": {"path": {"type": "string"}}}),),
+    )
+
+
+async def test_request_maps_tools_and_tool_choice():
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["tools"] == [{"name": "read_file", "description": "Read a file.",
+                                  "input_schema": {"type": "object",
+                                                   "properties": {"path": {"type": "string"}}}}]
+        assert body["tool_choice"] == {"type": "auto"}
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}],
+                                         "stop_reason": "end_turn", "usage": {}})
+
+    await _make(make_client(handler)).generate(_tools_request())
+
+
+async def test_parses_tool_use_blocks():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "content": [
+                {"type": "text", "text": "let me read it"},
+                {"type": "tool_use", "id": "toolu_1", "name": "read_file", "input": {"path": "a.txt"}},
+            ],
+            "stop_reason": "tool_use", "usage": {},
+        })
+
+    result = await _make(make_client(handler)).generate(_tools_request())
+    assert result.text == "let me read it"
+    assert result.tool_calls == (ToolInvocation(id="toolu_1", name="read_file", arguments={"path": "a.txt"}),)
+    assert result.finish_reason == "tool_calls"
+
+
+async def test_text_only_response_unchanged():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "pong"}],
+                                         "stop_reason": "end_turn", "usage": {"input_tokens": 3}})
+
+    result = await _make(make_client(handler)).generate(contract_request())
+    assert result.text == "pong"
+    assert result.tool_calls == ()
+    assert result.finish_reason == "stop"
+
+
+async def test_serializes_assistant_tool_use_and_tool_result_as_user():
+    inv = ToolInvocation(id="toolu_1", name="read_file", arguments={"path": "a.txt"})
+    req = GenerationRequest(model="claude-x", messages=(
+        Message(role="user", content="read a.txt"),
+        Message(role="assistant", content="reading", tool_calls=(inv,)),
+        Message(role="tool", tool_call_id="toolu_1", content='{"content": "hello"}'),
+    ))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        msgs = json.loads(request.content)["messages"]
+        assert msgs[1] == {"role": "assistant", "content": [
+            {"type": "text", "text": "reading"},
+            {"type": "tool_use", "id": "toolu_1", "name": "read_file", "input": {"path": "a.txt"}}]}
+        assert msgs[2] == {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_1", "content": '{"content": "hello"}'}]}
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "done"}],
+                                         "stop_reason": "end_turn", "usage": {}})
+
+    await _make(make_client(handler)).generate(req)
