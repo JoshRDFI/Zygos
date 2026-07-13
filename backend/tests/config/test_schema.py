@@ -147,3 +147,34 @@ def test_zygos_config_has_server_section_by_default():
     from zygos.config.schema import ServerConfig
 
     assert ZygosConfig().server == ServerConfig()
+
+
+def test_tools_default_enables_all_four():
+    cfg = ZygosConfig()
+    assert cfg.tools.enabled == ["read_file", "write_file", "http_fetch", "run_command"]
+
+
+def test_tools_default_loosens_http_fetch():
+    cfg = ZygosConfig()
+    rules = cfg.tools.permission_rules
+    assert any(r.pattern == "http_fetch" and r.decision == "allow" for r in rules)
+
+
+def test_tools_default_plugins_declare_starter_tools():
+    cfg = ZygosConfig()
+    assert cfg.plugins["tools"]["run_command"] == "zygos.tools.starter.shell:RunCommandTool"
+    assert set(cfg.plugins["tools"]) == {"read_file", "write_file", "http_fetch", "run_command"}
+
+
+def test_tools_can_be_disabled():
+    from zygos.config.schema import ToolsConfig
+
+    cfg = ZygosConfig(tools=ToolsConfig(enabled=[]))
+    assert cfg.tools.enabled == []
+
+
+def test_tools_max_iterations_floor():
+    from zygos.config.schema import ToolsConfig
+
+    with pytest.raises(ValidationError):
+        ToolsConfig(max_iterations=0)

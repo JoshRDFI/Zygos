@@ -5,6 +5,19 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from zygos.runtime.capabilities import Capability
+from zygos.tools.permissions import Rule
+
+
+def _default_tools_enabled() -> list[str]:
+    return ["read_file", "write_file", "http_fetch", "run_command"]
+
+
+def _default_tool_rules() -> list[Rule]:
+    # Frictionless web: the tool AUTHOR declares http_fetch = "ask"; the shipped default
+    # config loosens it to "allow" via the escape hatch. Fetching a site the user asked for
+    # is not a data-privacy concern on this project (privacy = the user's own data stays
+    # local, not a walled system). Remove this rule to prompt before every outbound request.
+    return [Rule(pattern="http_fetch", decision="allow")]
 
 
 def _default_plugins() -> dict[str, dict[str, str]]:
@@ -15,7 +28,13 @@ def _default_plugins() -> dict[str, dict[str, str]]:
             "anthropic": "zygos.providers.anthropic:AnthropicProvider",
             "vllm": "zygos.providers.vllm:VllmProvider",
             "fake": "zygos.providers.fake:FakeProvider",
-        }
+        },
+        "tools": {
+            "read_file": "zygos.tools.starter.fs:ReadFileTool",
+            "write_file": "zygos.tools.starter.fs:WriteFileTool",
+            "http_fetch": "zygos.tools.starter.http:HttpFetchTool",
+            "run_command": "zygos.tools.starter.shell:RunCommandTool",
+        },
     }
 
 
@@ -129,6 +148,18 @@ class MemoryConfig(BaseModel):
     embed_batch_size: int = Field(default=32, ge=1)
 
 
+class ToolsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Tools ship ON by default (a mid-chat "go look up this site" must just work).
+    enabled: list[str] = Field(default_factory=_default_tools_enabled)
+    workspace_root: str = ".zygos/workspace"     # sandbox root for fs/shell tools
+    settings: dict[str, dict] = Field(default_factory=dict)   # name -> per-tool kwargs
+    permission_rules: list[Rule] = Field(default_factory=_default_tool_rules)  # loosen/tighten
+    max_iterations: int = Field(default=8, ge=1)
+    tool_choice: Literal["auto", "none", "required"] = "auto"
+
+
 class ServerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -150,6 +181,7 @@ class ZygosConfig(BaseModel):
     reasoning: ReasoningConfig = Field(default_factory=ReasoningConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
+    tools: ToolsConfig = Field(default_factory=ToolsConfig)
     # plugin kind -> plugin name -> "module.path:ClassName" (RFC-0001 §3)
     plugins: dict[str, dict[str, str]] = Field(default_factory=_default_plugins)
     # Capabilities a deployment requires; `zygos doctor` fails if any is unbound
