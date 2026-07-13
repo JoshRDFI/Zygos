@@ -4,7 +4,7 @@ import httpx
 
 from zygos.providers.base import ProviderSettings
 from zygos.providers.ollama import OllamaProvider
-from zygos.providers.types import GenerationRequest, Message
+from zygos.providers.types import GenerationRequest, Message, ToolInvocation, ToolSchema
 
 from .conftest import contract_request, make_client, run_error_contract
 
@@ -66,6 +66,68 @@ async def test_stream_parses_ndjson_lines():
 
 async def test_error_contract():
     await run_error_contract(_make)
+
+
+def _tools_request():
+    return GenerationRequest(model="qwen3", messages=(Message(role="user", content="read a.txt"),),
+                             tools=(ToolSchema(name="read_file", description="Read a file.",
+                                               parameters={"type": "object"}),))
+
+
+async def test_request_carries_tools():
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["tools"] == [{"type": "function",
+                                  "function": {"name": "read_file", "description": "Read a file.",
+                                               "parameters": {"type": "object"}}}]
+        return httpx.Response(200, json={"message": {"content": "ok"}})
+
+    await _make(make_client(handler)).generate(_tools_request())
+
+
+async def test_serializes_assistant_tool_calls_and_tool_result():
+    inv = ToolInvocation(id="call_0", name="read_file", arguments={"path": "a.txt"})
+    req = GenerationRequest(model="qwen3", messages=(
+        Message(role="user", content="read a.txt"),
+        Message(role="assistant", content="", tool_calls=(inv,)),
+        Message(role="tool", tool_call_id="call_0", content='{"content": "hello"}'),
+    ))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        msgs = json.loads(request.content)["messages"]
+        # arguments is a JSON OBJECT (not a stringified JSON), no id on the assistant tool_call
+        assert msgs[1] == {"role": "assistant", "content": "",
+                           "tool_calls": [{"function": {"name": "read_file", "arguments": {"path": "a.txt"}}}]}
+        # tool message: role "tool", content only, NO id field
+        assert msgs[2] == {"role": "tool", "content": '{"content": "hello"}'}
+        return httpx.Response(200, json={"message": {"content": "done"}})
+
+    await _make(make_client(handler)).generate(req)
+
+
+async def test_parses_tool_calls_with_synthesized_ids():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"message": {"content": "", "tool_calls": [
+            {"function": {"name": "read_file", "arguments": {"path": "a.txt"}}},
+            {"function": {"name": "read_file", "arguments": {"path": "b.txt"}}}]}})
+
+    result = await _make(make_client(handler)).generate(_tools_request())
+    assert result.tool_calls == (
+        ToolInvocation(id="call_0", name="read_file", arguments={"path": "a.txt"}),
+        ToolInvocation(id="call_1", name="read_file", arguments={"path": "b.txt"}),
+    )
+    assert result.finish_reason == "tool_calls"
+
+
+async def test_text_only_response_unchanged():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "tools" not in json.loads(request.content)
+        return httpx.Response(200, json={"message": {"content": "pong"}})
+
+    result = await _make(make_client(handler)).generate(contract_request())
+    assert result.text == "pong"
+    assert result.tool_calls == ()
+    assert result.finish_reason == "stop"
 
 
 async def test_embed_parses_ollama_batch():

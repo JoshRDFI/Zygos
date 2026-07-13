@@ -11,7 +11,7 @@ import httpx
 from zygos.errors import ProviderProtocolError
 from zygos.providers.base import ProviderSettings, ensure_ok, translate_transport_error
 from zygos.providers.types import (
-    EmbedRequest, EmbedResult, GenerationChunk, GenerationRequest, GenerationResult, Usage,
+    EmbedRequest, EmbedResult, GenerationChunk, GenerationRequest, GenerationResult, ToolInvocation, Usage,
 )
 from zygos.runtime.capabilities import Capability
 
@@ -27,18 +27,36 @@ class OllamaProvider:
         self._settings = settings
         self._client = client
 
+    def _messages(self, request: GenerationRequest) -> list[dict]:
+        out: list[dict] = []
+        for m in request.messages:
+            if m.role == "assistant" and m.tool_calls:
+                out.append({"role": "assistant", "content": m.content, "tool_calls": [
+                    {"function": {"name": tc.name, "arguments": tc.arguments}} for tc in m.tool_calls]})
+            elif m.role == "tool":
+                out.append({"role": "tool", "content": m.content})
+            else:
+                out.append({"role": m.role, "content": m.content})
+        return out
+
     def _body(self, request: GenerationRequest, stream: bool) -> dict:
         options: dict = {"temperature": request.temperature}
         # ADR-0006: local inference is uncapped unless the caller sets an explicit
         # cap. Omitting num_predict lets the model generate to its natural stop.
         if request.max_tokens is not None:
             options["num_predict"] = request.max_tokens
-        return {
+        body = {
             "model": request.model,
-            "messages": [{"role": m.role, "content": m.content} for m in request.messages],
+            "messages": self._messages(request),
             "stream": stream,
             "options": options,
         }
+        if request.tools:
+            body["tools"] = [{"type": "function",
+                              "function": {"name": t.name, "description": t.description,
+                                           "parameters": t.parameters}}
+                             for t in request.tools]
+        return body
 
     async def generate(self, request: GenerationRequest) -> GenerationResult:
         try:
@@ -52,17 +70,21 @@ class OllamaProvider:
         ensure_ok(self.name, response)
         try:
             payload = response.json()
-            text = payload["message"]["content"]
+            message = payload["message"]
+            text = message.get("content") or ""
+            tool_calls = tuple(
+                ToolInvocation(id=f"call_{i}", name=tc["function"]["name"],
+                               arguments=tc["function"].get("arguments", {}))
+                for i, tc in enumerate(message.get("tool_calls") or [])
+            )
         except (ValueError, KeyError, TypeError) as error:
             raise ProviderProtocolError(f"ollama returned malformed body: {error}", provider=self.name) from error
+        finish_reason = "tool_calls" if tool_calls else "stop"
         return GenerationResult(
-            text=text,
-            model=request.model,
-            provider=self.name,
-            usage=Usage(
-                input_tokens=payload.get("prompt_eval_count", 0),
-                output_tokens=payload.get("eval_count", 0),
-            ),
+            text=text, model=request.model, provider=self.name,
+            usage=Usage(input_tokens=payload.get("prompt_eval_count", 0),
+                        output_tokens=payload.get("eval_count", 0)),
+            tool_calls=tool_calls, finish_reason=finish_reason,
         )
 
     async def embed(self, request: EmbedRequest) -> EmbedResult:
