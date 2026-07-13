@@ -16,9 +16,11 @@ capable AI without treating privacy, visibility, or control as optional.
 
 ## Where Zygos is today
 
-Zygos comes in two runtimes: **v1**, a stable TypeScript CLI you can use today, and
-**v2**, a Python migration toward a self-hosted web app with voice. This README describes
-where Zygos is headed; the table marks what runs now versus what's still being built.
+Zygos comes in two runtimes: **v1**, the stable TypeScript CLI, now maintained on the
+[`v1` branch](https://github.com/JoshRDFI/Zygos/tree/v1) (deprecated — final bug fixes
+only), and **v2**, a Python migration toward a self-hosted web app with voice, in active
+development on this (`main`) branch. This README describes where Zygos is headed; the
+table marks what runs now versus what's still being built.
 
 |                | Today — v1 (TypeScript CLI)                     | Coming — v2 (Python, self-hosted web app)          |
 |----------------|-------------------------------------------------|----------------------------------------------------|
@@ -61,16 +63,19 @@ Zygos doesn't force an all-or-nothing choice. You decide how much stays local:
 \* Running fully offline is a design goal of the local-first path; verify it for your own
 configuration before relying on it.
 
-## Quick start (v1, local)
+## Quick start (v1 CLI, local)
 
-The usable runtime today is the v1 CLI. This path keeps everything local with Ollama.
+The usable runtime today is the v1 CLI, which lives on the
+[`v1` branch](https://github.com/JoshRDFI/Zygos/tree/v1). This path keeps everything local
+with Ollama.
 
 **Prerequisites:** [Node.js](https://nodejs.org), and [Ollama](https://ollama.com)
 running locally with a model pulled (for example, `ollama pull qwen3:8b`).
 
 ```bash
-git clone https://github.com/JoshRDFI/Zygos.git
-cd Zygos
+# fetch v1 only — no v2 files or history (or download the v1 branch as a ZIP from GitHub):
+npx degit JoshRDFI/Zygos#v1 zygos-v1
+cd zygos-v1
 npm install
 cp .env.example .env      # Ollama is the default; no API key needed for the local path
 npm run verify            # confirms the runtime is wired correctly
@@ -78,8 +83,8 @@ npm run dev -- "Hello Zygos"
 ```
 
 To use a public provider instead, set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in `.env`
-and select it in `config/default.yaml`. For the full walkthrough, see
-[docs/v1/QUICKSTART.md](./docs/v1/QUICKSTART.md).
+and select it in `config/default.yaml`. For the full v1 walkthrough, see the
+[v1 branch guides](https://github.com/JoshRDFI/Zygos/tree/v1/docs/v1).
 
 ## How Zygos works
 
@@ -97,7 +102,7 @@ readable tour of the subsystems and how they fit, see the
 - [Roadmap](./ROADMAP.md) — milestone-by-milestone status
 - [Compatibility](./COMPATIBILITY.md) · [Constitution](./CONSTITUTION.md) · [Style Guide](./STYLE_GUIDE.md)
 - [RFCs](./docs/rfcs/) · [ADRs](./docs/adr/) — the decision log
-- [v1 Guides](./docs/v1/)
+- [v1 Guides](https://github.com/JoshRDFI/Zygos/tree/v1/docs/v1) — the v1 (TypeScript CLI) docs, on the `v1` branch
 
 ## Contributing
 
