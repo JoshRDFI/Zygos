@@ -16,6 +16,7 @@ from typing import AsyncIterator
 from pydantic import BaseModel, ConfigDict, Field
 
 from zygos.errors import ToolError
+from zygos.tools.build import ToolBuildContext
 from zygos.tools.types import BaseTool, ToolContext, ToolMeta
 
 try:
@@ -77,6 +78,15 @@ class RunCommandTool(BaseTool):
             permission="ask",
             timeout_s=timeout_s,
         )
+
+    @classmethod
+    def from_config(cls, ctx: ToolBuildContext) -> "RunCommandTool":
+        s = ctx.settings
+        kwargs = {}
+        for key in ("max_output_bytes", "cpu_seconds", "address_space_bytes", "timeout_s"):
+            if key in s:
+                kwargs[key] = s[key]
+        return cls(ctx.workspace, **kwargs)
 
     def _resolve_cwd(self, cwd: str | None) -> Path:
         root_r = self._root.resolve()

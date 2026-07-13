@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from zygos.errors import ToolError
+from zygos.tools.build import ToolBuildContext
 from zygos.tools.types import BaseTool, ToolContext, ToolMeta
 
 
@@ -66,6 +67,10 @@ class ReadFileTool(BaseTool):
             permission="allow",
         )
 
+    @classmethod
+    def from_config(cls, ctx: ToolBuildContext) -> "ReadFileTool":
+        return cls(ctx.workspace, max_bytes=int(ctx.settings.get("max_bytes", 1_048_576)))
+
     async def execute(self, input: ReadFileInput, ctx: ToolContext) -> dict:
         target = _resolve_existing(self._root, input.path)
         if not target.is_file():
@@ -113,6 +118,10 @@ class WriteFileTool(BaseTool):
             output_model=WriteFileOutput,
             permission="ask",
         )
+
+    @classmethod
+    def from_config(cls, ctx: ToolBuildContext) -> "WriteFileTool":
+        return cls(ctx.workspace, max_bytes=int(ctx.settings.get("max_bytes", 1_048_576)))
 
     async def execute(self, input: WriteFileInput, ctx: ToolContext) -> dict:
         target = _resolve_target(self._root, input.path)

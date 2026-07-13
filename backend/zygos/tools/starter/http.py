@@ -15,6 +15,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from zygos.errors import ToolError, ToolTransient
+from zygos.tools.build import ToolBuildContext
 from zygos.tools.types import BaseTool, RetryPolicy, ToolContext, ToolMeta
 
 
@@ -88,6 +89,17 @@ class HttpFetchTool(BaseTool):
             retry=RetryPolicy(attempts=3),
             timeout_s=timeout_s,
         )
+
+    @classmethod
+    def from_config(cls, ctx: ToolBuildContext) -> "HttpFetchTool":
+        s = ctx.settings
+        kwargs = {}
+        if "allow_schemes" in s:
+            kwargs["allow_schemes"] = tuple(s["allow_schemes"])
+        for key in ("max_bytes", "max_redirects", "ssrf_guard", "timeout_s"):
+            if key in s:
+                kwargs[key] = s[key]
+        return cls(**kwargs)
 
     async def execute(self, input: HttpFetchInput, ctx: ToolContext) -> dict:
         url = input.url

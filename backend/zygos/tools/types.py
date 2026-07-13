@@ -6,7 +6,10 @@ Stability: Experimental.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, AsyncIterator, Literal, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from zygos.tools.build import ToolBuildContext
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -129,6 +132,11 @@ class BaseTool:
     """Convenience base supplying default phases so trivial tools write only meta+execute."""
 
     meta: ToolMeta
+
+    @classmethod
+    def from_config(cls, ctx: "ToolBuildContext") -> "Tool":
+        """Build this tool from config. Override in concrete tools; default rejects."""
+        raise NotImplementedError(f"{cls.__name__} does not support config construction")
 
     def prepare(self, ctx: ToolContext) -> None:
         return None
