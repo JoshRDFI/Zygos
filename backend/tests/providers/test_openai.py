@@ -97,6 +97,86 @@ async def test_generate_omits_auth_header_without_api_key():
     assert result.provider == "openai"
 
 
+from zygos.providers.types import ToolInvocation, ToolSchema
+
+
+def _tools_request():
+    return GenerationRequest(
+        model="gpt-x",
+        messages=(Message(role="user", content="read a.txt"),),
+        tools=(ToolSchema(name="read_file", description="Read a file.",
+                          parameters={"type": "object", "properties": {"path": {"type": "string"}}}),),
+    )
+
+
+async def test_request_carries_native_tools():
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["tools"] == [{
+            "type": "function",
+            "function": {"name": "read_file", "description": "Read a file.",
+                         "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}},
+        }]
+        assert body["tool_choice"] == "auto"
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": None, "tool_calls": [
+                {"id": "call_1", "type": "function",
+                 "function": {"name": "read_file", "arguments": '{"path": "a.txt"}'}}]},
+                "finish_reason": "tool_calls"}],
+            "usage": {},
+        })
+
+    result = await _make(make_client(handler)).generate(_tools_request())
+    assert result.finish_reason == "tool_calls"
+    assert result.tool_calls == (ToolInvocation(id="call_1", name="read_file", arguments={"path": "a.txt"}),)
+    assert result.text == ""
+
+
+async def test_text_only_request_omits_tools_key():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "tools" not in json.loads(request.content)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "hi"},
+                                                       "finish_reason": "stop"}], "usage": {}})
+
+    result = await _make(make_client(handler)).generate(contract_request())
+    assert result.text == "hi"
+    assert result.tool_calls == ()
+    assert result.finish_reason == "stop"
+
+
+async def test_serializes_assistant_tool_calls_and_tool_result():
+    inv = ToolInvocation(id="call_1", name="read_file", arguments={"path": "a.txt"})
+    req = GenerationRequest(model="gpt-x", messages=(
+        Message(role="user", content="read a.txt"),
+        Message(role="assistant", content="", tool_calls=(inv,)),
+        Message(role="tool", tool_call_id="call_1", content='{"content": "hello"}'),
+    ))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        msgs = json.loads(request.content)["messages"]
+        assert msgs[1] == {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "call_1", "type": "function",
+             "function": {"name": "read_file", "arguments": '{"path": "a.txt"}'}}]}
+        assert msgs[2] == {"role": "tool", "tool_call_id": "call_1", "content": '{"content": "hello"}'}
+        return httpx.Response(200, json={"choices": [{"message": {"content": "done"},
+                                                      "finish_reason": "stop"}], "usage": {}})
+
+    await _make(make_client(handler)).generate(req)
+
+
+async def test_malformed_tool_arguments_raise_protocol_error():
+    import pytest
+    from zygos.errors import ProviderProtocolError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"choices": [{"message": {"tool_calls": [
+            {"id": "c1", "type": "function", "function": {"name": "x", "arguments": "{not json"}}]},
+            "finish_reason": "tool_calls"}], "usage": {}})
+
+    with pytest.raises(ProviderProtocolError):
+        await _make(make_client(handler)).generate(_tools_request())
+
+
 async def test_embed_parses_openai_embeddings():
     import json
     import httpx

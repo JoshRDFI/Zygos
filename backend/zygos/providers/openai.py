@@ -16,7 +16,7 @@ from zygos.providers.base import (
     translate_transport_error,
 )
 from zygos.providers.types import (
-    EmbedRequest, EmbedResult, GenerationChunk, GenerationRequest, GenerationResult, Usage,
+    EmbedRequest, EmbedResult, GenerationChunk, GenerationRequest, GenerationResult, ToolInvocation, Usage,
 )
 from zygos.runtime.capabilities import Capability
 
@@ -40,16 +40,38 @@ class OpenAIProvider:
             return {"Authorization": f"Bearer {self._settings.api_key}"}
         return {}
 
+    def _tool_defs(self, request: GenerationRequest) -> list[dict]:
+        return [{"type": "function",
+                 "function": {"name": t.name, "description": t.description, "parameters": t.parameters}}
+                for t in request.tools]
+
+    def _messages(self, request: GenerationRequest) -> list[dict]:
+        out: list[dict] = []
+        for m in request.messages:
+            if m.role == "assistant" and m.tool_calls:
+                out.append({"role": "assistant", "content": m.content, "tool_calls": [
+                    {"id": tc.id, "type": "function",
+                     "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)}}
+                    for tc in m.tool_calls]})
+            elif m.role == "tool":
+                out.append({"role": "tool", "tool_call_id": m.tool_call_id, "content": m.content})
+            else:
+                out.append({"role": m.role, "content": m.content})
+        return out
+
     def _body(self, request: GenerationRequest, stream: bool) -> dict:
         body: dict = {
             "model": request.model,
-            "messages": [{"role": m.role, "content": m.content} for m in request.messages],
+            "messages": self._messages(request),
             "temperature": request.temperature,
             "stream": stream,
         }
         cap = request.max_tokens if request.max_tokens is not None else self.default_max_tokens
         if cap is not None:
             body["max_tokens"] = cap
+        if request.tools:
+            body["tools"] = self._tool_defs(request)
+            body["tool_choice"] = request.tool_choice
         return body
 
     async def generate(self, request: GenerationRequest) -> GenerationResult:
@@ -65,7 +87,11 @@ class OpenAIProvider:
         ensure_ok(self.name, response)
         try:
             payload = response.json()
-            text = payload["choices"][0]["message"]["content"]
+            choice = payload["choices"][0]
+            message = choice["message"]
+            text = message.get("content") or ""
+            tool_calls = self._parse_tool_calls(message.get("tool_calls") or [])
+            finish_reason = self._finish_reason(choice.get("finish_reason"))
         except (ValueError, KeyError, IndexError, TypeError) as error:
             raise ProviderProtocolError(f"{self.name} returned malformed body: {error}", provider=self.name) from error
         usage = payload.get("usage") or {}
@@ -77,7 +103,27 @@ class OpenAIProvider:
                 input_tokens=usage.get("prompt_tokens", 0),
                 output_tokens=usage.get("completion_tokens", 0),
             ),
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
         )
+
+    def _parse_tool_calls(self, raw: list) -> tuple[ToolInvocation, ...]:
+        calls = []
+        for tc in raw:
+            fn = tc["function"]
+            try:
+                args = json.loads(fn["arguments"]) if isinstance(fn["arguments"], str) else fn["arguments"]
+            except ValueError as error:
+                raise ProviderProtocolError(
+                    f"{self.name} sent malformed tool arguments: {error}", provider=self.name) from error
+            calls.append(ToolInvocation(id=tc["id"], name=fn["name"], arguments=args))
+        return tuple(calls)
+
+    @staticmethod
+    def _finish_reason(raw: str | None) -> str:
+        if raw in ("stop", "tool_calls", "length"):
+            return raw
+        return "stop"
 
     async def embed(self, request: EmbedRequest) -> EmbedResult:
         try:

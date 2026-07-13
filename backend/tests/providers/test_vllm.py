@@ -3,6 +3,7 @@ import json
 import httpx
 
 from zygos.providers.base import ProviderSettings
+from zygos.providers.types import GenerationRequest, Message, ToolSchema
 from zygos.providers.vllm import VllmProvider
 
 from .conftest import contract_request, make_client, run_error_contract
@@ -43,6 +44,29 @@ async def test_local_vllm_omits_max_tokens_when_none():
 
 async def test_error_contract():
     await run_error_contract(_make)
+
+
+async def test_vllm_inherits_native_tool_translation_and_stays_uncapped():
+    # Belt-and-suspenders: vLLM subclasses OpenAIProvider, so a tools request should
+    # both carry `tools`/`tool_choice` AND stay uncapped (no max_tokens) by default.
+    req = GenerationRequest(
+        model="test-model",
+        messages=(Message(role="user", content="read a.txt"),),
+        tools=(ToolSchema(name="read_file", description="Read a file.",
+                          parameters={"type": "object", "properties": {}}),),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body["tools"] == [{"type": "function", "function": {
+            "name": "read_file", "description": "Read a file.",
+            "parameters": {"type": "object", "properties": {}}}}]
+        assert body["tool_choice"] == "auto"
+        assert "max_tokens" not in body
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"},
+                                                       "finish_reason": "stop"}], "usage": {}})
+
+    await _make(make_client(handler)).generate(req)
 
 
 def test_vllm_declares_embedding_and_inherits_embed():
