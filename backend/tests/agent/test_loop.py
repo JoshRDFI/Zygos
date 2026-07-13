@@ -177,3 +177,43 @@ async def test_final_generate_uses_tool_choice_none():
     assert seen == ["auto", "none"]
     assert result.text == "final"
     assert result.stop_reason == "max_iterations"
+
+
+from zygos.agent.observer import ToolCallFinished, ToolCallStarted
+
+
+async def test_observer_receives_call_then_result_in_order():
+    ms = _model_service([_call("echo", {"value": "hi"}), "done"])
+    ts = _tool_service(EchoTool())
+    events = []
+    await run_agentic_loop(
+        _ctx(), model_service=ms, tool_service=ts, tools=[EchoTool()],
+        messages=[Message(role="user", content="echo hi")], config=ToolLoopConfig(),
+        observer=events.append)
+    assert [type(e).__name__ for e in events] == ["ToolCallStarted", "ToolCallFinished"]
+    assert events[0].call_id == "c1" and events[0].name == "echo"
+    assert events[0].arguments == {"value": "hi"}
+    assert isinstance(events[1], ToolCallFinished)
+    assert events[1].result.ok is True
+
+
+async def test_observer_none_leaves_result_unchanged():
+    ms = _model_service([_call("echo", {"value": "hi"}), "done"])
+    ts = _tool_service(EchoTool())
+    result = await run_agentic_loop(
+        _ctx(), model_service=ms, tool_service=ts, tools=[EchoTool()],
+        messages=[Message(role="user", content="echo hi")], config=ToolLoopConfig())
+    assert result.text == "done"
+
+
+async def test_observer_reports_tool_not_found_result():
+    ms = _model_service([_call("ghost", {"value": "x"}), "recovered"])
+    ts = _tool_service(EchoTool())   # 'ghost' not registered
+    events = []
+    await run_agentic_loop(
+        _ctx(), model_service=ms, tool_service=ts, tools=[EchoTool()],
+        messages=[Message(role="user", content="call ghost")], config=ToolLoopConfig(),
+        observer=events.append)
+    finished = [e for e in events if isinstance(e, ToolCallFinished)]
+    assert finished[0].result.ok is False
+    assert finished[0].result.error_code == "tool_not_found"

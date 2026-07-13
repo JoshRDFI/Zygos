@@ -18,6 +18,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from zygos.agent.config import ToolLoopConfig
+from zygos.agent.observer import ToolCallFinished, ToolCallStarted, ToolObserver
 from zygos.agent.schema import tool_schema
 from zygos.errors import ToolNotFound
 from zygos.providers.types import GenerationRequest, Message
@@ -56,6 +57,7 @@ async def run_agentic_loop(
     tools: Sequence[Tool],
     messages: Sequence[Message],
     config: ToolLoopConfig,
+    observer: ToolObserver | None = None,
 ) -> AgentResult:
     schemas = tuple(tool_schema(t) for t in tools)
     history: list[Message] = list(messages)
@@ -78,16 +80,21 @@ async def run_agentic_loop(
             return AgentResult(text="", messages=tuple(history), iterations=i + 1, stop_reason="cancelled")
 
         async def _dispatch(inv):
+            if observer is not None:
+                observer(ToolCallStarted(call_id=inv.id, name=inv.name, arguments=dict(inv.arguments)))
             try:
-                return await tool_service.execute(
+                res = await tool_service.execute(
                     ToolCall(tool=inv.name, args=inv.arguments, call_id=inv.id),
                     ctx.child(inv.id),
                 )
             except ToolNotFound as exc:
-                return ToolResult.failed(
+                res = ToolResult.failed(
                     tool=inv.name, call_id=inv.id,
                     error_code="tool_not_found", error_message=str(exc),
                 )
+            if observer is not None:
+                observer(ToolCallFinished(call_id=inv.id, name=inv.name, result=res))
+            return res
 
         results = await asyncio.gather(*[_dispatch(inv) for inv in result.tool_calls])
         for inv, res in zip(result.tool_calls, results):
