@@ -21,6 +21,7 @@ embeddings = [
 server = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
+    "websockets>=12",
 ]
 
 [project.scripts]
