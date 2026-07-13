@@ -130,6 +130,19 @@ async def test_text_only_response_unchanged():
     assert result.finish_reason == "stop"
 
 
+async def test_tool_choice_none_drops_tools():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "tools" not in json.loads(request.content)
+        return httpx.Response(200, json={"message": {"content": "final"}})
+
+    req = GenerationRequest(model="qwen3", messages=(Message(role="user", content="x"),),
+                            tools=(ToolSchema(name="read_file", description="Read a file.",
+                                              parameters={"type": "object"}),),
+                            tool_choice="none")
+    result = await _make(make_client(handler)).generate(req)
+    assert result.text == "final"
+
+
 async def test_embed_parses_ollama_batch():
     import httpx
     from zygos.providers.ollama import OllamaProvider

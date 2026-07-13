@@ -193,6 +193,22 @@ async def test_text_only_response_unchanged():
     assert result.finish_reason == "stop"
 
 
+async def test_parses_tool_use_before_text_block():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "content": [
+                {"type": "tool_use", "id": "toolu_2", "name": "read_file", "input": {"path": "b.txt"}},
+                {"type": "text", "text": "after"},
+            ],
+            "stop_reason": "tool_use", "usage": {},
+        })
+
+    result = await _make(make_client(handler)).generate(_tools_request())
+    assert result.text == "after"
+    assert result.tool_calls == (ToolInvocation(id="toolu_2", name="read_file", arguments={"path": "b.txt"}),)
+    assert result.finish_reason == "tool_calls"
+
+
 async def test_serializes_assistant_tool_use_and_tool_result_as_user():
     inv = ToolInvocation(id="toolu_1", name="read_file", arguments={"path": "a.txt"})
     req = GenerationRequest(model="claude-x", messages=(

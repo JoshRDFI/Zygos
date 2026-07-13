@@ -51,7 +51,7 @@ class OllamaProvider:
             "stream": stream,
             "options": options,
         }
-        if request.tools:
+        if request.tools and request.tool_choice != "none":
             body["tools"] = [{"type": "function",
                               "function": {"name": t.name, "description": t.description,
                                            "parameters": t.parameters}}
