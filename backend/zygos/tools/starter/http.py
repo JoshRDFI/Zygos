@@ -12,7 +12,7 @@ import socket
 from urllib.parse import urljoin, urlsplit
 
 import httpx
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from zygos.errors import ToolError, ToolTransient
 from zygos.tools.types import BaseTool, RetryPolicy, ToolContext, ToolMeta
@@ -47,10 +47,10 @@ def _validate_url(url: str, allow_schemes: tuple[str, ...]) -> None:
 
 class HttpFetchInput(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
-    url: str
-    method: str = "GET"
-    headers: dict[str, str] = {}
-    body: str | None = None
+    url: str = Field(description="Absolute http(s) URL to fetch.")
+    method: str = Field(default="GET", description="HTTP method, e.g. GET or POST.")
+    headers: dict[str, str] = Field(default={}, description="Optional HTTP request headers.")
+    body: str | None = Field(default=None, description="Optional request body for POST/PUT.")
 
 
 class HttpFetchOutput(BaseModel):
@@ -79,7 +79,9 @@ class HttpFetchTool(BaseTool):
         self._transport = transport
         self.meta = ToolMeta(
             name="http_fetch",
-            description="Fetch an http(s) URL; returns any received response, retries transport faults.",
+            description="Fetch an http(s) URL and return the response status, headers, and body. Use "
+                        "when you need data from the web or an HTTP API. Network side effect; blocks "
+                        "internal/loopback addresses.",
             input_model=HttpFetchInput,
             output_model=HttpFetchOutput,
             permission="ask",

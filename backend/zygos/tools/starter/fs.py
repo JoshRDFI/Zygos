@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from zygos.errors import ToolError
 from zygos.tools.types import BaseTool, ToolContext, ToolMeta
@@ -43,7 +43,7 @@ def _resolve_target(root: Path, rel: str) -> Path:
 
 class ReadFileInput(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
-    path: str
+    path: str = Field(description="Path to the file to read, relative to the tool's root directory.")
 
 
 class ReadFileOutput(BaseModel):
@@ -59,7 +59,8 @@ class ReadFileTool(BaseTool):
         self._max_bytes = max_bytes
         self.meta = ToolMeta(
             name="read_file",
-            description="Read a UTF-8 text file confined to the tool's root directory.",
+            description="Read the UTF-8 text contents of a file. Use when you need to see what a file "
+                        "contains. Read-only; confined to the tool's root directory.",
             input_model=ReadFileInput,
             output_model=ReadFileOutput,
             permission="allow",
@@ -86,9 +87,12 @@ class ReadFileTool(BaseTool):
 
 class WriteFileInput(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
-    path: str
-    content: str
-    mode: Literal["create", "overwrite", "append"] = "create"
+    path: str = Field(description="Path to write, relative to the tool's root directory.")
+    content: str = Field(description="UTF-8 text to write to the file.")
+    mode: Literal["create", "overwrite", "append"] = Field(
+        default="create",
+        description="How to write: 'create' fails if the file exists, 'overwrite' replaces it, "
+                    "'append' adds to the end.")
 
 
 class WriteFileOutput(BaseModel):
@@ -103,7 +107,8 @@ class WriteFileTool(BaseTool):
         self._max_bytes = max_bytes
         self.meta = ToolMeta(
             name="write_file",
-            description="Write a UTF-8 text file confined to the tool's root directory.",
+            description="Create, overwrite, or append to a UTF-8 text file within the tool's root "
+                        "directory. Use when you need to save or modify a file. Writes to disk (side effect).",
             input_model=WriteFileInput,
             output_model=WriteFileOutput,
             permission="ask",

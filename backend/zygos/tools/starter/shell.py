@@ -13,7 +13,7 @@ import signal
 from pathlib import Path
 from typing import AsyncIterator
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from zygos.errors import ToolError
 from zygos.tools.types import BaseTool, ToolContext, ToolMeta
@@ -38,9 +38,12 @@ def _kill_process_group(proc) -> None:
 
 class RunCommandInput(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
-    argv: list[str]
-    cwd: str | None = None
-    env: dict[str, str] | None = None
+    argv: list[str] = Field(
+        description="Command and arguments as a list (e.g. ['ls', '-la']); executed without a shell.")
+    cwd: str | None = Field(
+        default=None, description="Working directory relative to the tool's root; defaults to the root.")
+    env: dict[str, str] | None = Field(
+        default=None, description="Extra environment variables to add to the scrubbed base environment.")
 
 
 class RunCommandOutput(BaseModel):
@@ -66,7 +69,9 @@ class RunCommandTool(BaseTool):
         self._address_space_bytes = address_space_bytes
         self.meta = ToolMeta(
             name="run_command",
-            description="Run a command (argv list, no shell) sandboxed under the tool's root.",
+            description="Run a command (given as an argv list, no shell) sandboxed under the tool's "
+                        "root directory. Use to execute a program and capture its output. Executes a "
+                        "subprocess (side effect).",
             input_model=RunCommandInput,
             output_model=RunCommandOutput,
             permission="ask",
