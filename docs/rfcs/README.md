@@ -78,5 +78,6 @@ Every RFC must end with an **Architectural Impact** section that answers, at min
 | [RFC-0006](RFC-0006-Embedding-Contract-and-Hybrid-Memory-Retrieval.md) | Embedding Contract and Hybrid Memory Retrieval | Accepted — amends RFC-0003 closed capability set; does not amend RFC-0001; build precedes M8 |
 | [RFC-0007](RFC-0007-Session-Protocol-and-Turn-Loop.md) | Session Protocol and Turn Loop (FastAPI/WebSocket Adapter) | Accepted (2026-07-11) — Milestone 8; reconciles RFC-0005 §4 channel naming; completes RFC-0003 `GET /runtime` |
 | [RFC-0008](RFC-0008-Tool-Calling-Protocol-and-Tool-Authoring.md) | Tool-Calling Protocol and Tool Authoring | Accepted (2026-07-11) — native function-calling normalized at the provider seam; amends RFC-0001 §2/§7 |
+| [RFC-0009](RFC-0009-Model-Routing-and-Multimodal-Capabilities.md) | Best-Model-Per-Task Routing and Multimodal Capabilities | Draft — per-turn authoring-model selection (amends RFC-0001 §2, makes it load-bearing); fills RFC-0003 `VISION`/`IMAGE_GENERATION` contracts; backend-agnostic capability binding + local swap; built in 4 phases |
 
 > **Note on RFC-0001:** This RFC predates the Summary and Architectural Impact sections. Its Architectural Fitness Test table served that role and remains the authoritative impact record for that decision.
