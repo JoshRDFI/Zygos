@@ -2,7 +2,7 @@ import pytest
 
 from zygos.errors import ProviderUnavailable
 from zygos.providers.fake import FakeProvider
-from zygos.providers.types import GenerationRequest, Message
+from zygos.providers.types import GenerationRequest, GenerationResult, Message, ToolInvocation
 
 
 def _request() -> GenerationRequest:
@@ -42,3 +42,22 @@ async def test_fake_embedder_is_deterministic():
     assert a.vectors == b.vectors           # same input -> same vectors
     assert a.dim == 8 and len(a.vectors[0]) == 8
     assert a.vectors[0] != a.vectors[1]     # different text -> different vector
+
+
+async def test_script_returns_generation_result_verbatim():
+    scripted = GenerationResult(
+        text="", model="fake-model", provider="fake",
+        tool_calls=(ToolInvocation(id="c1", name="echo", arguments={"v": "x"}),),
+        finish_reason="tool_calls",
+    )
+    fake = FakeProvider(script=[scripted, "final answer"])
+    req = GenerationRequest(messages=(Message(role="user", content="hi"),))
+
+    first = await fake.generate(req)
+    assert first.tool_calls[0].name == "echo"
+    assert first.finish_reason == "tool_calls"
+
+    second = await fake.generate(req)
+    assert second.text == "final answer"
+    assert second.tool_calls == ()
+    assert second.finish_reason == "stop"

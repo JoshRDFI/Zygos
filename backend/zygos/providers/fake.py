@@ -25,13 +25,13 @@ class FakeProvider:
         settings: ProviderSettings | None = None,
         client: httpx.AsyncClient | None = None,
         *,
-        script: list[str | Exception] | None = None,
+        script: list["str | Exception | GenerationResult"] | None = None,
         text: str = "fake response",
     ) -> None:
         self._script = list(script) if script is not None else None
         self._text = text
 
-    def _next_text(self) -> str:
+    def _next_item(self):
         if self._script is None:
             return self._text
         item = self._script.pop(0)
@@ -40,16 +40,18 @@ class FakeProvider:
         return item
 
     async def generate(self, request: GenerationRequest) -> GenerationResult:
-        text = self._next_text()
+        item = self._next_item()
+        if isinstance(item, GenerationResult):
+            return item
+        text = item
         return GenerationResult(
-            text=text,
-            model=request.model,
-            provider=self.name,
+            text=text, model=request.model, provider=self.name,
             usage=Usage(input_tokens=len(request.messages), output_tokens=len(text.split())),
         )
 
     async def stream(self, request: GenerationRequest) -> AsyncIterator[GenerationChunk]:
-        text = self._next_text()
+        item = self._next_item()
+        text = item.text if isinstance(item, GenerationResult) else item
         for word in text.split():
             yield GenerationChunk(text=word)
         yield GenerationChunk(text="", done=True)
