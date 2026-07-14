@@ -88,7 +88,10 @@ async def end_audio_turn(session) -> None:
 async def cancel_audio_turn(session) -> None:
     audio = session.audio
     if audio is not None:
-        await audio.transcription.cancel()
+        try:
+            await audio.transcription.cancel()
+        except Exception:  # noqa: BLE001 - a dead sidecar must not kill the session
+            logger.debug("cancel_audio_turn: transcription.cancel() failed", exc_info=True)
         audio.pusher.cancel()
         audio.consumer.cancel()
         session.audio = None
