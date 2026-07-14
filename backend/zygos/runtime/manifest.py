@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 from zygos.runtime.capabilities import Capability, CapabilityBinding
-from zygos.voice.contract import SttHealth
+from zygos.voice.contract import SttHealth, TtsHealth
 
 if TYPE_CHECKING:
     from zygos.runtime.bootstrap import RuntimeAssembly
@@ -38,6 +38,7 @@ class VoiceManifest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     stt: SttHealth | None = None
+    tts: TtsHealth | None = None
 
 
 class Manifest(BaseModel):
@@ -70,7 +71,8 @@ def runtime_manifest(runtime: "RuntimeAssembly") -> Manifest:
     )
     voice = None
     if runtime.voice_service is not None:
-        voice = VoiceManifest(stt=runtime.voice_service.snapshot().stt)
+        snap = runtime.voice_service.snapshot()
+        voice = VoiceManifest(stt=snap.stt, tts=snap.tts)
     return Manifest(
         lifecycle_stage=runtime.lifecycle_stage,
         capabilities=dict(snapshot.bindings),

@@ -18,3 +18,17 @@ def test_manifest_reports_stt_direction_when_on(tmp_path):
     assert m.voice.stt.device == "cpu"
     # not spawned in bootstrap → alive is False until _lifespan starts it
     assert m.voice.stt.alive is False
+
+
+def test_manifest_reports_tts_direction_when_on(tmp_path):
+    import yaml
+    p = tmp_path / "zygos.yaml"
+    p.write_text(yaml.safe_dump(
+        {"voice": {"enabled": True, "stt": {"engine": "fake"}, "tts": {"engine": "fake"}}}))
+    m = runtime_manifest(build_runtime(p))
+    assert m.voice is not None
+    assert m.voice.tts is not None
+    assert m.voice.tts.engine == "fake"
+    assert m.voice.tts.device == "cpu"
+    # not spawned in bootstrap → alive is False until _lifespan starts it
+    assert m.voice.tts.alive is False
