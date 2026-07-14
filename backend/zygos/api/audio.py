@@ -57,6 +57,10 @@ async def start_audio_turn(session, deps: TurnDeps) -> None:
                     session.enqueue(Frame(channel=CHAT, type="partial", payload={"text": ev.text}))
                 else:  # final
                     session.enqueue(Frame(channel=CHAT, type="final", payload={"text": ev.text}))
+                    if session.active_task is not None and not session.active_task.done():
+                        if session.active_cancel is not None:
+                            session.active_cancel.trip()
+                        await session.active_task  # barge-in: unwind the prior turn first
                     token = CancelToken()
                     session.active_cancel = token
                     session.active_task = asyncio.create_task(

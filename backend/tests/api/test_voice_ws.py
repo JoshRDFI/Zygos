@@ -75,3 +75,69 @@ def test_voice_drives_a_turn(tmp_path):
             assert final["payload"]["text"]  # committed transcript
             end = _drive_until(ws, lambda f: f["channel"] == "chat" and f["type"] == "turn.end", frames)
             assert "text" in end["payload"]  # the assistant's answer to the spoken turn
+
+
+import json
+
+
+def test_default_off_rejects_audio_and_chat_still_works(tmp_path):
+    # voice NOT enabled → audio.start is inert, typed chat turn unchanged
+    import dataclasses
+    from zygos.providers.fake import FakeProvider
+    from zygos.services.model import DefaultModelService
+    from zygos.services.router import ProviderRouter, RouteChoice
+    rt = dataclasses.replace(
+        build_runtime(),
+        model_service=DefaultModelService(
+            ProviderRouter([RouteChoice("fake", "m")], {"fake": FakeProvider(script=["hi"])})),
+        memory_service=None,
+    )
+    assert rt.voice_service is None
+    app = create_app(rt)
+    with TestClient(app) as client:
+        sid = client.post("/sessions").json()["id"]
+        with client.websocket_connect(f"/ws/session/{sid}") as ws:
+            ws.send_text(json.dumps({"channel": "control", "type": "audio.start", "payload": {}}))
+            # a typed turn still works
+            ws.send_text(json.dumps({"channel": "chat", "type": "user_message", "payload": {"text": "yo"}}))
+            frames = []
+            _drive_until(ws, lambda f: f["channel"] == "chat" and f["type"] == "turn.end", frames)
+
+
+def test_cancel_mid_utterance_is_clean(tmp_path):
+    rt = _voice_runtime(tmp_path)
+    app = create_app(rt)
+    with TestClient(app) as client:
+        sid = client.post("/sessions").json()["id"]
+        with client.websocket_connect(f"/ws/session/{sid}") as ws:
+            ws.send_text(json.dumps({"channel": "control", "type": "audio.start", "payload": {}}))
+            ws.send_bytes(bytes([AUDIO_TAG_IN]) + b"\x00" * 320)
+            ws.send_text(json.dumps({"channel": "control", "type": "cancel", "payload": {}}))
+            # a fresh utterance still works afterward
+            ws.send_text(json.dumps({"channel": "control", "type": "audio.start", "payload": {}}))
+            ws.send_bytes(bytes([AUDIO_TAG_IN]) + b"\x00" * 640)
+            ws.send_text(json.dumps({"channel": "control", "type": "audio.endpoint", "payload": {}}))
+            frames = []
+            _drive_until(ws, lambda f: f["channel"] == "chat" and f["type"] == "final", frames)
+
+
+def test_back_to_back_utterances_barge_in_cleanly(tmp_path):
+    # controller-directed fix: the audio-final path must barge in on a still-
+    # running prior turn the same way the typed user_message path does,
+    # otherwise back-to-back utterances clobber session.active_task.
+    rt = _voice_runtime(tmp_path, script=["first answer", "second answer"])
+    app = create_app(rt)
+    with TestClient(app) as client:
+        sid = client.post("/sessions").json()["id"]
+        with client.websocket_connect(f"/ws/session/{sid}") as ws:
+            for _ in range(2):
+                ws.send_text(json.dumps({"channel": "control", "type": "audio.start", "payload": {}}))
+                ws.send_bytes(bytes([AUDIO_TAG_IN]) + b"\x00" * 640)
+                ws.send_text(json.dumps({"channel": "control", "type": "audio.endpoint", "payload": {}}))
+                frames: list[dict] = []
+                final = _drive_until(
+                    ws, lambda f: f["channel"] == "chat" and f["type"] == "final", frames)
+                assert final["payload"]["text"]
+                end = _drive_until(
+                    ws, lambda f: f["channel"] == "chat" and f["type"] == "turn.end", frames)
+                assert "text" in end["payload"]

@@ -17,7 +17,7 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from zygos.api.audio import end_audio_turn, feed_audio, start_audio_turn
+from zygos.api.audio import cancel_audio_turn, end_audio_turn, feed_audio, start_audio_turn
 from zygos.api.frames import AUDIO_TAG_IN, CHAT, CONTROL, TOOLS, Frame, decode, encode
 from zygos.api.session import Session
 from zygos.api.turn import TurnDeps, run_turn
@@ -53,6 +53,7 @@ async def _dispatch(session: Session, deps: TurnDeps, frame: Frame) -> None:
     elif frame.channel == CONTROL and frame.type == "cancel":
         if session.active_cancel is not None:
             session.active_cancel.trip()
+        await cancel_audio_turn(session)
     elif frame.channel == CONTROL and frame.type == "ping":
         session.enqueue(Frame(channel=CONTROL, type="pong", payload={}))
     elif frame.channel == CONTROL and frame.type == "hello":
@@ -117,6 +118,10 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
             if session.active_task is not None and not session.active_task.done():
                 if session.active_cancel is not None:
                     session.active_cancel.trip()
+            if session.audio is not None:
+                session.audio.consumer.cancel()
+                session.audio.pusher.cancel()
+                session.audio = None
             session.connected = False
             for fut in list(session.pending_permissions.values()):
                 if not fut.done():
