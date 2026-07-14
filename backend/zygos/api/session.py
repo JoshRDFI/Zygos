@@ -39,6 +39,8 @@ class Session:
         self.outbound: asyncio.Queue[Frame] = asyncio.Queue()
         self.active_cancel: CancelToken | None = None
         self.active_task: asyncio.Task | None = None
+        # call_id -> future awaiting a tools:permission_response (M8 C3)
+        self.pending_permissions: dict[str, asyncio.Future] = {}
         # connection bookkeeping used by the WS handler (Task 8)
         self._writer: asyncio.Task | None = None
         self._conn: object | None = None
