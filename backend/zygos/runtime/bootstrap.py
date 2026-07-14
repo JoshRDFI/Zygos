@@ -42,6 +42,7 @@ from zygos.tools.permissions import PermissionPolicy
 from zygos.tools.registry import ToolRegistry
 from zygos.tools.service import ToolService
 from zygos.tools.types import Tool
+from zygos.voice import VoiceService, build_stt_plugin
 
 REGISTER_CAPABILITIES_STAGE = "register_capabilities"
 LOAD_SKILLS_STAGE = "load_skills"
@@ -57,6 +58,7 @@ class RuntimeAssembly:
     reasoning_service: ReasoningService
     reasoning_factory: Callable[[], ReasoningService]
     memory_service: MemoryService | None
+    voice_service: "VoiceService | None"
     http_client: httpx.AsyncClient
     event_bus: EventBus
     capability_registry: CapabilityRegistry
@@ -267,6 +269,15 @@ def build_runtime(
         # `resume()` is intentionally NOT awaited here — build_runtime is a sync
         # composition root; the async consumer (M8) drains it at startup.
 
+    voice_service: VoiceService | None = None
+    if config.voice.enabled:
+        stt_plugin = build_stt_plugin(config.voice.stt.engine)
+        voice_service = VoiceService(stt=stt_plugin)
+        registry.register(Capability.SPEECH_TO_TEXT, stt_plugin, priority=0)
+        # `VoiceService.start` is intentionally NOT awaited here — build_runtime
+        # is a sync composition root; the async consumer (Task 10) spawns the
+        # sidecar at startup.
+
     return RuntimeAssembly(
         config=config,
         plugins=plugin_registry,
@@ -274,6 +285,7 @@ def build_runtime(
         reasoning_service=reasoning_service,
         reasoning_factory=reasoning_factory,
         memory_service=memory_service,
+        voice_service=voice_service,
         http_client=client,
         event_bus=bus,
         capability_registry=registry,
