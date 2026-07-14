@@ -34,3 +34,29 @@ class SpeechToText(Protocol):
     def begin(self, ctx: ExecutionContext) -> Transcription: ...
 
     def health(self) -> SttHealth: ...
+
+
+class TtsHealth(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    engine: str
+    device: str
+    alive: bool
+    last_error: str | None = None
+
+
+@runtime_checkable
+class Synthesis(Protocol):
+    """A single in-flight synthesis."""
+    def chunks(self) -> AsyncIterator[bytes]: ...
+    async def cancel(self) -> None: ...
+    async def aclose(self) -> None: ...
+
+
+@runtime_checkable
+class TextToSpeech(Protocol):
+    """The TEXT_TO_SPEECH capability contract. A concrete engine satisfies this."""
+    name: str
+
+    def synthesize(self, ctx: ExecutionContext, text: str) -> Synthesis: ...
+
+    def health(self) -> TtsHealth: ...

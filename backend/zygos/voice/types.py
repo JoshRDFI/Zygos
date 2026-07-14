@@ -66,3 +66,23 @@ class SttEngineSpec(BaseModel):
     name: str
     argv: tuple[str, ...]
     device: str = "cpu"
+
+
+# runtime -> TTS sidecar
+class SynthesizeMsg(BaseModel):
+    type: Literal["synthesize"] = "synthesize"
+    text: str
+    sample_rate: int = SAMPLE_RATE_HZ
+
+
+# TTS sidecar -> runtime (audio arrives as KIND_PCM frames, terminated by this)
+class TtsEndMsg(BaseModel):
+    type: Literal["end"] = "end"
+
+
+class TtsEngineSpec(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    name: str
+    argv: tuple[str, ...]
+    device: str = "cpu"
+    output_sample_rate: int = 24000

@@ -22,3 +22,7 @@ class IpcProtocolError(VoiceError):
 
 class TranscriptionFailed(VoiceError):
     code = "voice_transcription_failed"
+
+
+class SynthesisFailed(VoiceError):
+    code = "voice_synthesis_failed"

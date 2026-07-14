@@ -26,8 +26,7 @@ def test_stub_satisfies_protocol_and_registers():
     assert bindings and bindings[0].provider == "stub"
 
 
-def test_text_to_speech_still_has_no_contract():
-    # Cycle 1 does not add TTS; registering it must still fail.
-    reg = CapabilityRegistry()
-    with pytest.raises(ValueError):
-        reg.register(Capability.TEXT_TO_SPEECH, _StubStt(), priority=0)
+def test_text_to_speech_now_has_a_contract():
+    # Cycle 2 adds the TTS contract; a conforming engine registers.
+    from zygos.voice.contract import TextToSpeech
+    assert CAPABILITY_CONTRACTS[Capability.TEXT_TO_SPEECH] is TextToSpeech

@@ -20,11 +20,12 @@ def test_capability_enum_is_the_closed_rfc0003_set():
 
 def test_only_contracted_capabilities_are_registrable():
     from zygos.providers.embedding import Embedder
-    from zygos.voice.contract import SpeechToText
+    from zygos.voice.contract import SpeechToText, TextToSpeech
     assert CAPABILITY_CONTRACTS == {
         Capability.LOCAL_INFERENCE: Provider,
         Capability.EMBEDDING: Embedder,
         Capability.SPEECH_TO_TEXT: SpeechToText,
+        Capability.TEXT_TO_SPEECH: TextToSpeech,
     }
 
 
