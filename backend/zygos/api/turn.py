@@ -33,6 +33,7 @@ from zygos.runtime.context import CancelToken
 from zygos.services.model import ModelService
 from zygos.tools.service import ToolService
 from zygos.tools.types import Tool
+from zygos.voice import VoiceService
 
 logger = logging.getLogger("zygos.api.turn")
 
@@ -47,6 +48,7 @@ class TurnDeps:
     tool_service: ToolService | None = None
     tools: tuple[Tool, ...] = ()
     tool_loop_config: ToolLoopConfig | None = None
+    voice_service: "VoiceService | None" = None
 
 
 def _json_safe(value):

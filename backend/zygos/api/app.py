@@ -50,6 +50,8 @@ async def _lifespan(app: FastAPI):
             await runtime.memory_service.embed_backlog(ctx)
         if runtime.tools:
             Path(runtime.config.tools.workspace_root).mkdir(parents=True, exist_ok=True)
+        if runtime.voice_service is not None:
+            await runtime.voice_service.start(ctx)
         _advance(app, ACCEPT_REQUESTS_STAGE)
         yield
     finally:
@@ -62,6 +64,8 @@ async def _lifespan(app: FastAPI):
                     and session.active_cancel is not None
                 ):
                     session.active_cancel.trip()
+        if runtime.voice_service is not None:
+            await runtime.voice_service.aclose()
         await app.state.runtime.aclose()
 
 
@@ -94,6 +98,7 @@ def create_app(
         tool_service=runtime.tool_service,
         tools=runtime.tools,
         tool_loop_config=runtime.tool_loop_config,
+        voice_service=runtime.voice_service,
     )
     install_trace_bridge(runtime.event_bus, registry)
     app.state.session_count = session_count if session_count is not None else registry.count
