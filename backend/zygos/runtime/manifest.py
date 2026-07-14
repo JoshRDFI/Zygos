@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 from zygos.runtime.capabilities import Capability, CapabilityBinding
+from zygos.voice.contract import SttHealth
 
 if TYPE_CHECKING:
     from zygos.runtime.bootstrap import RuntimeAssembly
@@ -33,6 +34,12 @@ class RouteSummary(BaseModel):
     model: str
 
 
+class VoiceManifest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    stt: SttHealth | None = None
+
+
 class Manifest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -43,6 +50,7 @@ class Manifest(BaseModel):
     fallback_routes: tuple[RouteSummary, ...]
     reasoning_enabled: bool
     versions: dict[str, str]
+    voice: VoiceManifest | None = None
 
 
 def _package_version() -> str:
@@ -60,6 +68,9 @@ def runtime_manifest(runtime: "RuntimeAssembly") -> Manifest:
         for kind, entries in sorted(config.plugins.items())
         for name, module in sorted(entries.items())
     )
+    voice = None
+    if runtime.voice_service is not None:
+        voice = VoiceManifest(stt=runtime.voice_service.snapshot().stt)
     return Manifest(
         lifecycle_stage=runtime.lifecycle_stage,
         capabilities=dict(snapshot.bindings),
@@ -74,4 +85,5 @@ def runtime_manifest(runtime: "RuntimeAssembly") -> Manifest:
         ),
         reasoning_enabled=config.reasoning.enabled,
         versions={"zygos": _package_version(), "python": platform.python_version()},
+        voice=voice,
     )
