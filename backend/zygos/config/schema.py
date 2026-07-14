@@ -148,6 +148,21 @@ class MemoryConfig(BaseModel):
     embed_batch_size: int = Field(default=32, ge=1)
 
 
+class SttConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    engine: Literal["fake", "whisper_cpp"] = "fake"
+
+
+class VoiceConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    stt: SttConfig = Field(default_factory=SttConfig)
+    # how long the runtime waits for a client endpoint signal before giving up
+    prompt_endpoint_timeout_s: float = 30.0
+
+
 class ToolsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -182,6 +197,7 @@ class ZygosConfig(BaseModel):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    voice: VoiceConfig = Field(default_factory=VoiceConfig)
     # plugin kind -> plugin name -> "module.path:ClassName" (RFC-0001 §3)
     plugins: dict[str, dict[str, str]] = Field(default_factory=_default_plugins)
     # Capabilities a deployment requires; `zygos doctor` fails if any is unbound
