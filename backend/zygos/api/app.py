@@ -14,9 +14,11 @@ import time
 import uuid
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 
+from zygos.api.permission import WebSocketPromptResolver
 from zygos.api.routes_runtime import router as runtime_router
 from zygos.api.routes_sessions import router as sessions_router
 from zygos.api.session import SessionRegistry
@@ -46,6 +48,8 @@ async def _lifespan(app: FastAPI):
         if runtime.memory_service is not None:
             await runtime.memory_service.resume(ctx)
             await runtime.memory_service.embed_backlog(ctx)
+        if runtime.tools:
+            Path(runtime.config.tools.workspace_root).mkdir(parents=True, exist_ok=True)
         _advance(app, ACCEPT_REQUESTS_STAGE)
         yield
     finally:
@@ -79,12 +83,17 @@ def create_app(
         new_id=lambda: uuid.uuid4().hex,
     )
     app.state.registry = registry
+    resolver = WebSocketPromptResolver(registry, runtime.config.server.prompt_timeout_s)
+    runtime.tool_service.bind_resolver(resolver)
     app.state.turn_deps = TurnDeps(
         model_service=runtime.model_service,
         reasoning_factory=runtime.reasoning_factory,
         reasoning_enabled=runtime.config.reasoning.enabled,
         memory_service=runtime.memory_service,
         new_id=lambda: uuid.uuid4().hex,
+        tool_service=runtime.tool_service,
+        tools=runtime.tools,
+        tool_loop_config=runtime.tool_loop_config,
     )
     install_trace_bridge(runtime.event_bus, registry)
     app.state.session_count = session_count if session_count is not None else registry.count
