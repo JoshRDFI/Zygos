@@ -4,7 +4,10 @@ Produces chat frames directly onto the session's outbound queue — never throug
 the event bus (output is load-bearing, not observational; RFC-0002). Memory is
 guarded by presence and advisory (a retrieve failure degrades, never aborts).
 Reasoning-off streams tokens; reasoning-on constructs a fresh ReasoningService
-per turn and delivers the answer at turn.end.
+per turn and delivers the answer at turn.end. Tools-present (deps.tools non-empty)
+wins over both: it drives the agentic loop (RFC-0008), emitting live `tools:call`/
+`tools:result` frames and delivering the answer whole at turn.end (no chat:token
+frames — the no-synthetic-tokens rule).
 
 Stability: Experimental.
 """
@@ -15,7 +18,12 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from zygos.api.frames import CHAT, Frame
+from pydantic import BaseModel
+
+from zygos.agent.config import ToolLoopConfig
+from zygos.agent.loop import run_agentic_loop
+from zygos.agent.observer import ToolCallFinished, ToolCallStarted, ToolEvent
+from zygos.api.frames import CHAT, TOOLS, Frame
 from zygos.api.session import Session
 from zygos.memory.service import MemoryService
 from zygos.providers.types import GenerationRequest, Message
@@ -23,6 +31,8 @@ from zygos.reasoning.service import ReasoningService
 from zygos.reasoning.types import ReasoningInput
 from zygos.runtime.context import CancelToken
 from zygos.services.model import ModelService
+from zygos.tools.service import ToolService
+from zygos.tools.types import Tool
 
 logger = logging.getLogger("zygos.api.turn")
 
@@ -34,6 +44,18 @@ class TurnDeps:
     reasoning_enabled: bool
     memory_service: MemoryService | None
     new_id: Callable[[], str]
+    tool_service: ToolService | None = None
+    tools: tuple[Tool, ...] = ()
+    tool_loop_config: ToolLoopConfig | None = None
+
+
+def _json_safe(value):
+    """Render a tool output for a JSON frame payload."""
+    if isinstance(value, BaseModel):
+        return value.model_dump()
+    if value is None or isinstance(value, (dict, list, str, int, float, bool)):
+        return value
+    return str(value)
 
 
 def build_messages(context: tuple[str, ...], text: str) -> tuple[Message, ...]:
@@ -71,7 +93,30 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
                 logger.warning("memory retrieve failed; degrading to no context", exc_info=True)
                 context = ()
 
-        if not deps.reasoning_enabled:
+        if deps.tools:
+            messages = build_messages(context, text)
+
+            def _frame(event: ToolEvent) -> None:
+                if isinstance(event, ToolCallStarted):
+                    session.enqueue(Frame(channel=TOOLS, type="call", payload={
+                        "call_id": event.call_id, "tool": event.name,
+                        "arguments": dict(event.arguments)}))
+                else:  # ToolCallFinished
+                    r = event.result
+                    payload = {"call_id": event.call_id, "tool": event.name, "ok": r.ok}
+                    if r.ok:
+                        payload["output"] = _json_safe(r.output)
+                    else:
+                        payload["error_code"] = r.error_code
+                        payload["error_message"] = r.error_message
+                    session.enqueue(Frame(channel=TOOLS, type="result", payload=payload))
+
+            agent_result = await run_agentic_loop(
+                ctx, model_service=deps.model_service, tool_service=deps.tool_service,
+                tools=deps.tools, messages=messages, config=deps.tool_loop_config, observer=_frame)
+            final = agent_result.text
+            end_extra = {"stop_reason": agent_result.stop_reason, "iterations": agent_result.iterations}
+        elif not deps.reasoning_enabled:
             request = GenerationRequest(messages=build_messages(context, text))
             async for chunk in deps.model_service.stream(ctx, request):
                 if ctx.cancelled:
