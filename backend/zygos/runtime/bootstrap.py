@@ -42,7 +42,7 @@ from zygos.tools.permissions import PermissionPolicy
 from zygos.tools.registry import ToolRegistry
 from zygos.tools.service import ToolService
 from zygos.tools.types import Tool
-from zygos.voice import VoiceService, build_stt_plugin
+from zygos.voice import VoiceService, build_stt_plugin, build_tts_plugin
 
 REGISTER_CAPABILITIES_STAGE = "register_capabilities"
 LOAD_SKILLS_STAGE = "load_skills"
@@ -272,8 +272,10 @@ def build_runtime(
     voice_service: VoiceService | None = None
     if config.voice.enabled:
         stt_plugin = build_stt_plugin(config.voice.stt.engine)
-        voice_service = VoiceService(stt=stt_plugin)
+        tts_plugin = build_tts_plugin(config.voice.tts.engine)
+        voice_service = VoiceService(stt=stt_plugin, tts=tts_plugin)
         registry.register(Capability.SPEECH_TO_TEXT, stt_plugin, priority=0)
+        registry.register(Capability.TEXT_TO_SPEECH, tts_plugin, priority=0)
         # `VoiceService.start` is intentionally NOT awaited here — build_runtime
         # is a sync composition root; the async consumer (Task 10) spawns the
         # sidecar at startup.
