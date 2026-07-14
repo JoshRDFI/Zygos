@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+
 from zygos.runtime.context import ExecutionContext
-from zygos.voice.contract import SttHealth
-from zygos.voice.errors import TranscriptionFailed
+from zygos.voice.contract import SttHealth, TtsHealth
+from zygos.voice.errors import SynthesisFailed, TranscriptionFailed
 from zygos.voice.ipc import IpcConnection
 from zygos.voice.sidecar import SidecarHandle
-from zygos.voice.types import SttEngineSpec, TranscriptEvent
+from zygos.voice.types import AudioFormat, SttEngineSpec, TranscriptEvent, TtsEngineSpec
 
 
 class Transcription:
@@ -79,6 +81,95 @@ class SttPlugin:
     def health(self) -> SttHealth:
         st = self._handle.snapshot()
         return SttHealth(engine=st.engine, device=st.device, alive=st.alive, last_error=st.last_error)
+
+    async def aclose(self) -> None:
+        await self._handle.aclose()
+        self._started = False
+
+
+class Synthesis:
+    """One in-flight synthesis over the TTS sidecar's shared connection.
+
+    chunks() polls ctx.cancelled on a short timeout so a barge-in unwinds it
+    within poll_s even while blocked waiting for the next sidecar frame.
+    """
+
+    def __init__(self, conn: IpcConnection, ctx: ExecutionContext, *,
+                 text: str, sample_rate: int, poll_s: float = 0.05) -> None:
+        self._conn = conn
+        self._ctx = ctx
+        self._text = text
+        self._sample_rate = sample_rate
+        self._poll_s = poll_s
+        self._started = False
+        self._done = False
+
+    async def _ensure_started(self) -> None:
+        if not self._started:
+            await self._conn.send_control(
+                {"type": "synthesize", "text": self._text, "sample_rate": self._sample_rate})
+            self._started = True
+
+    async def chunks(self):
+        await self._ensure_started()
+        try:
+            while not self._done:
+                if self._ctx.cancelled:
+                    await self.cancel()
+                    return
+                try:
+                    kind, body = await asyncio.wait_for(self._conn.recv(), self._poll_s)
+                except asyncio.TimeoutError:
+                    continue  # re-check ctx.cancelled
+                if kind == "pcm":
+                    yield body
+                    continue
+                mtype = body.get("type")
+                if mtype == "end":
+                    self._done = True
+                elif mtype == "error":
+                    self._done = True
+                    raise SynthesisFailed(body.get("message", "sidecar error"))
+        except EOFError as exc:
+            self._done = True
+            raise SynthesisFailed("sidecar closed mid-synthesis") from exc
+
+    async def cancel(self) -> None:
+        if self._started and not self._done:
+            await self._conn.send_control({"type": "cancel"})
+        self._done = True
+
+    async def aclose(self) -> None:
+        self._done = True
+
+
+class TtsPlugin:
+    """Concrete TTS engine adapter. Satisfies the TextToSpeech contract."""
+
+    def __init__(self, spec: TtsEngineSpec) -> None:
+        self._spec = spec
+        self._handle = SidecarHandle(spec)
+        self._started = False
+
+    @property
+    def name(self) -> str:
+        return self._spec.name
+
+    @property
+    def output_format(self) -> AudioFormat:
+        return AudioFormat(sample_rate=self._spec.output_sample_rate)
+
+    async def start(self) -> None:
+        await self._handle.start()
+        self._started = True
+
+    def synthesize(self, ctx: ExecutionContext, text: str) -> Synthesis:
+        return Synthesis(self._handle.connection, ctx,
+                         text=text, sample_rate=self._spec.output_sample_rate)
+
+    def health(self) -> TtsHealth:
+        st = self._handle.snapshot()
+        return TtsHealth(engine=st.engine, device=st.device, alive=st.alive, last_error=st.last_error)
 
     async def aclose(self) -> None:
         await self._handle.aclose()
