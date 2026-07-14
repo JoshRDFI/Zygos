@@ -8,9 +8,6 @@ TypeScript runtime, which v2 migrates from, is documented in
 
 ---
 
-<!-- TODO(doc-asset): redraw architecture.svg to reflect M8 — add the FastAPI/WebSocket
-     adapter + per-session turn loop, and drop the "(planned)" labels on the Event Bus and
-     Capability Registry (both implemented). Alt text below already describes current state. -->
 ![Zygos runtime architecture: Browser → Adapters (web server + CLI) → Runtime (composition root, per-session turn loop) → Event Bus → Services (model routing, memory, tools, reasoning) → Providers → Models, with the Capability Registry above the services](./docs/assets/architecture.svg)
 
 ## Layering

@@ -25,9 +25,9 @@
   <rect x="150" y="140" width="560" height="70" class="layer"/>
   <text x="430" y="165" text-anchor="middle" class="title">Adapters</text>
   <rect x="180" y="175" width="230" height="26" class="box"/>
-  <text x="295" y="193" text-anchor="middle" class="label">FastAPI — REST + one WebSocket</text>
+  <text x="295" y="193" text-anchor="middle" class="label">FastAPI — REST + WS turn loop</text>
   <rect x="450" y="175" width="230" height="26" class="box"/>
-  <text x="565" y="193" text-anchor="middle" class="label">CLI — zygos / inspect / trace</text>
+  <text x="565" y="193" text-anchor="middle" class="label">CLI — serve / inspect / doctor</text>
 
   <line x1="430" y1="210" x2="430" y2="240" class="flow"/>
   <text x="640" y="230" class="note">runtime never imports adapters</text>
@@ -38,14 +38,14 @@
 
   <line x1="430" y1="300" x2="430" y2="330" class="flow"/>
 
-  <rect x="230" y="330" width="400" height="55" class="planned"/>
+  <rect x="230" y="330" width="400" height="55" class="layer"/>
   <text x="430" y="353" text-anchor="middle" class="title">Event Bus</text>
-  <text x="430" y="372" text-anchor="middle" class="note">planned — RFC-0002 (facts as events; commands stay direct)</text>
+  <text x="430" y="372" text-anchor="middle" class="note">RFC-0002 — facts as events; commands stay direct</text>
 
-  <rect x="645" y="330" width="145" height="70" class="planned"/>
+  <rect x="645" y="330" width="145" height="70" class="layer"/>
   <text x="717" y="352" text-anchor="middle" class="title">Capability</text>
   <text x="717" y="370" text-anchor="middle" class="title">Registry</text>
-  <text x="717" y="390" text-anchor="middle" class="note">planned — RFC-0003</text>
+  <text x="717" y="390" text-anchor="middle" class="note">RFC-0003</text>
 
   <line x1="430" y1="385" x2="430" y2="415" class="flow"/>
 
