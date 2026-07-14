@@ -24,7 +24,7 @@ decision requires an accepted RFC before implementation begins.
 | RFC-0002: Runtime Event Bus and ExecutionContext | Design RFC — implemented in M3 (Cycle 1) | ✅ Implemented (2026-07-05) |
 | RFC-0003: Capability Registry, Runtime Manifest, and Inspection | Design RFC — implemented in M3 (Cycle 3); render surfaces GET /runtime → M8, zygos trace → TraceService | ✅ Implemented (2026-07-09) |
 | RFC-0004: Secret Storage and Key Entry | Design RFC — amends RFC-0001 §8; not an M3 gate | ✅ Accepted (2026-07-04) |
-| RFC-0005: Voice Interaction — Local STT and TTS | Design RFC — governs voice engines behind the RFC-0003 capabilities; audio WS channels built in M8, engines after; a 2.0-complete gate | 🔎 Review (2026-07-09) |
+| RFC-0005: Voice Interaction — Local STT and TTS | Design RFC — governs voice engines behind the RFC-0003 capabilities; audio WS channels built in M8, engines after; a 2.0-complete gate | ✅ Accepted (2026-07-13) |
 | RFC-0006: Embedding Contract and Hybrid Memory Retrieval | Design RFC — adds the `Embedder` contract + `EMBEDDING` capability (amends RFC-0003 closed set); does not amend RFC-0001; builds as its own cycle before M8 | ✅ Implemented (2026-07-11, own cycles) |
 | RFC-0007: Session Protocol and Turn Loop | Design RFC — the M8 wire protocol: multiplexed WS frames (chat/tools/trace/control + reserved audio) + REST sessions; reconciles RFC-0005 §4 | ✅ Implemented (2026-07-13, M8) |
 | RFC-0008: Tool-Calling Protocol and Tool Authoring | Design RFC — native function-calling normalized at the provider seam + the agentic loop; amends RFC-0001 §2/§7 | ✅ Implemented (2026-07-13, M8) |

@@ -74,7 +74,7 @@ Every RFC must end with an **Architectural Impact** section that answers, at min
 | [RFC-0002](RFC-0002-Runtime-Event-Bus-and-ExecutionContext.md) | Runtime Event Bus and ExecutionContext | Implemented (M3 Cycle 1) |
 | [RFC-0003](RFC-0003-Capability-Registry-Runtime-Manifest-and-Inspection.md) | Capability Registry, Runtime Manifest, and Inspection | Implemented (M3 Cycle 3) |
 | [RFC-0004](RFC-0004-Secret-Storage-and-Key-Entry.md) | Secret Storage and Key Entry | Accepted — amends RFC-0001 §8; not an M3 gate |
-| [RFC-0005](RFC-0005-Voice-Interaction-STT-and-TTS.md) | Voice Interaction — Local STT and TTS | Review — §4 WS protocol reconciled to RFC-0007's envelope |
+| [RFC-0005](RFC-0005-Voice-Interaction-STT-and-TTS.md) | Voice Interaction — Local STT and TTS | Accepted (2026-07-13) — §4 WS protocol reconciled to RFC-0007's envelope; engines land after M8 |
 | [RFC-0006](RFC-0006-Embedding-Contract-and-Hybrid-Memory-Retrieval.md) | Embedding Contract and Hybrid Memory Retrieval | Implemented (2026-07-11, own cycles) — amends RFC-0003 closed capability set; does not amend RFC-0001 |
 | [RFC-0007](RFC-0007-Session-Protocol-and-Turn-Loop.md) | Session Protocol and Turn Loop (FastAPI/WebSocket Adapter) | Implemented (2026-07-13, M8) — reconciles RFC-0005 §4 channel naming; completes RFC-0003 `GET /runtime` |
 | [RFC-0008](RFC-0008-Tool-Calling-Protocol-and-Tool-Authoring.md) | Tool-Calling Protocol and Tool Authoring | Implemented (2026-07-13, M8) — native function-calling normalized at the provider seam; amends RFC-0001 §2/§7 |
