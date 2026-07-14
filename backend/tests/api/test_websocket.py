@@ -7,10 +7,10 @@ import pytest
 from fastapi import FastAPI, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
-from zygos.api.frames import CHAT, Frame
+from zygos.api.frames import CHAT, TOOLS, Frame
 from zygos.api.session import Session, SessionRegistry
 from zygos.api.turn import TurnDeps
-from zygos.api.websocket import _writer, router as ws_router
+from zygos.api.websocket import _dispatch, _writer, router as ws_router
 from zygos.api.routes_sessions import router as sessions_router
 from zygos.config.schema import ReasoningConfig
 from zygos.providers.fake import FakeProvider
@@ -155,3 +155,31 @@ def test_connected_flag_true_during_session():
         json.loads(ws.receive_text())
         assert app.state.registry.get(sid).connected is True
     # after close, connection flips off (best-effort; give the server loop a beat)
+
+
+def _bare_session():
+    return Session("s1", root_context(InProcessEventBus(), session_id="s1"), created_at=0.0)
+
+
+@pytest.mark.asyncio
+async def test_permission_response_resolves_future():
+    session = _bare_session()
+    fut = asyncio.get_running_loop().create_future()
+    session.pending_permissions["c1"] = fut
+    await _dispatch(session, None, Frame(channel=TOOLS, type="permission_response",
+                                         payload={"call_id": "c1", "decision": "allow"}))
+    assert fut.result() == "allow"
+
+
+@pytest.mark.asyncio
+async def test_permission_response_ignores_unknown_and_bad_decision():
+    session = _bare_session()
+    fut = asyncio.get_running_loop().create_future()
+    session.pending_permissions["c1"] = fut
+    # unknown call_id -> ignored
+    await _dispatch(session, None, Frame(channel=TOOLS, type="permission_response",
+                                         payload={"call_id": "zzz", "decision": "allow"}))
+    # bad decision -> ignored
+    await _dispatch(session, None, Frame(channel=TOOLS, type="permission_response",
+                                         payload={"call_id": "c1", "decision": "maybe"}))
+    assert not fut.done()

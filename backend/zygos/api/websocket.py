@@ -17,7 +17,7 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from zygos.api.frames import CHAT, CONTROL, Frame, decode, encode
+from zygos.api.frames import CHAT, CONTROL, TOOLS, Frame, decode, encode
 from zygos.api.session import Session
 from zygos.api.turn import TurnDeps, run_turn
 from zygos.runtime.context import CancelToken
@@ -56,6 +56,12 @@ async def _dispatch(session: Session, deps: TurnDeps, frame: Frame) -> None:
         session.enqueue(Frame(channel=CONTROL, type="pong", payload={}))
     elif frame.channel == CONTROL and frame.type == "hello":
         session.enqueue(Frame(channel=CONTROL, type="hello", payload={"ready": True}))
+    elif frame.channel == TOOLS and frame.type == "permission_response":
+        call_id = str(frame.payload.get("call_id", ""))
+        decision = frame.payload.get("decision")
+        fut = session.pending_permissions.get(call_id)
+        if fut is not None and not fut.done() and decision in ("allow", "deny"):
+            fut.set_result(decision)
     # unknown (channel, type) ignored — forward-compat rule
 
 
@@ -97,5 +103,9 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
                 if session.active_cancel is not None:
                     session.active_cancel.trip()
             session.connected = False
+            for fut in list(session.pending_permissions.values()):
+                if not fut.done():
+                    fut.set_result("deny")
+            session.pending_permissions.clear()
             session._writer = None
         writer.cancel()
