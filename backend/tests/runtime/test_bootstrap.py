@@ -20,6 +20,8 @@ def test_build_runtime_wires_declared_plugins(tmp_path: Path):
         "  primary:\n"
         "    provider: fake\n"
         "    model: demo\n"
+        "tools:\n"
+        "  enabled: []\n"
         "plugins:\n"
         "  providers:\n"
         "    ordered: 'collections:OrderedDict'\n"

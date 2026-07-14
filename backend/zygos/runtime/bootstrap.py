@@ -16,6 +16,7 @@ from pathlib import Path
 
 import httpx
 
+from zygos.agent.config import ToolLoopConfig
 from zygos.config.loader import load_config
 from zygos.config.schema import ZygosConfig
 from zygos.errors import ConfigError
@@ -36,6 +37,11 @@ from zygos.runtime.context import ExecutionContext, root_context
 from zygos.runtime.events import EventBus, InProcessEventBus, Subscriber
 from zygos.services.model import DefaultModelService, ModelService
 from zygos.services.router import ProviderRouter, RouterSnapshot, RouteChoice
+from zygos.tools.build import ToolBuildContext
+from zygos.tools.permissions import PermissionPolicy
+from zygos.tools.registry import ToolRegistry
+from zygos.tools.service import ToolService
+from zygos.tools.types import Tool
 
 REGISTER_CAPABILITIES_STAGE = "register_capabilities"
 LOAD_SKILLS_STAGE = "load_skills"
@@ -55,6 +61,9 @@ class RuntimeAssembly:
     event_bus: EventBus
     capability_registry: CapabilityRegistry
     providers: Mapping[str, Provider]
+    tool_service: ToolService
+    tools: tuple[Tool, ...]
+    tool_loop_config: ToolLoopConfig
     _router: ProviderRouter
     lifecycle_stage: str
     _memory_store: MemoryStore | None
@@ -118,6 +127,17 @@ def _build_embedder(config, client, plugin_registry) -> tuple[Embedder | None, s
     provider_cls = plugin_registry.resolve("providers", backend)
     embedder = provider_cls(settings=_provider_settings(config, backend), client=client)
     return embedder, model
+
+
+def _build_tools(config: ZygosConfig, plugin_registry: PluginRegistry) -> tuple[Tool, ...]:
+    """Construct config-enabled tools uniformly via from_config (mirrors provider build)."""
+    workspace = Path(config.tools.workspace_root)
+    built: list[Tool] = []
+    for name in config.tools.enabled:
+        tool_cls = plugin_registry.resolve("tools", name)
+        ctx = ToolBuildContext(workspace=workspace, settings=config.tools.settings.get(name, {}))
+        built.append(tool_cls.from_config(ctx))
+    return tuple(built)
 
 
 def _memory_index(mode, store, embedder, model) -> RelevanceIndex:
@@ -202,6 +222,18 @@ def build_runtime(
     def reasoning_factory() -> ReasoningService:
         return DefaultReasoningService(model_service, config.reasoning)
 
+    tools = _build_tools(config, plugin_registry)
+    tool_registry = ToolRegistry()
+    for tool in tools:
+        tool_registry.register(tool)
+    tool_service = ToolService(
+        tool_registry, policy=PermissionPolicy(rules=config.tools.permission_rules)
+    )
+    tool_loop_config = ToolLoopConfig(
+        max_iterations=config.tools.max_iterations,
+        default_tool_choice=config.tools.tool_choice,
+    )
+
     memory_service: MemoryService | None = None
     memory_store: MemoryStore | None = None
     if config.memory.enabled:
@@ -246,6 +278,9 @@ def build_runtime(
         event_bus=bus,
         capability_registry=registry,
         providers=providers,
+        tool_service=tool_service,
+        tools=tools,
+        tool_loop_config=tool_loop_config,
         _router=router,
         lifecycle_stage=REGISTER_CAPABILITIES_STAGE,
         _memory_store=memory_store,

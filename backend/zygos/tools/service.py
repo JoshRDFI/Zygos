@@ -56,6 +56,14 @@ class ToolService:
     def register(self, tool: Tool) -> None:
         self._registry.register(tool)
 
+    def bind_resolver(self, resolver: PermissionResolver) -> None:
+        """Late-bind the interactive permission resolver (the server wires the WS one).
+
+        The service is built in bootstrap with the headless DenyingResolver; the adapter
+        layer binds a live resolver at wiring time (permissions.py seam).
+        """
+        self._resolver = resolver
+
     async def execute(self, call: ToolCall, ctx: ExecutionContext) -> ToolResult:
         tool = self._registry.get(call.tool)
         if tool is None:
