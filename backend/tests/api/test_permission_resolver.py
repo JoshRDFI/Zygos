@@ -76,3 +76,28 @@ async def test_unknown_session_denies():
     ctx = ToolContext(exec=stray, tool="run_command", call_id="c1")
     resolver = WebSocketPromptResolver(reg, timeout_s=1.0)
     assert await resolver.resolve(_req(), ctx) == "deny"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_wait_denies_and_cleans_up_pending():
+    reg = _registry()
+    session = reg.create()
+    session.connected = True
+    resolver = WebSocketPromptResolver(reg, timeout_s=1.0)
+    task = asyncio.create_task(resolver.resolve(_req(), _tctx(session)))
+    await asyncio.sleep(0)  # let it register the future and enter wait_for
+    task.cancel()
+    result = await task
+    assert result == "deny"
+    assert "c1" not in session.pending_permissions
+
+
+@pytest.mark.asyncio
+async def test_absent_session_id_denies():
+    from zygos.runtime.context import root_context
+    from zygos.runtime.events import InProcessEventBus
+    reg = _registry()
+    stray = root_context(InProcessEventBus(), session_id=None)
+    ctx = ToolContext(exec=stray, tool="run_command", call_id="c1")
+    resolver = WebSocketPromptResolver(reg, timeout_s=1.0)
+    assert await resolver.resolve(_req(), ctx) == "deny"
