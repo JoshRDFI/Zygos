@@ -19,15 +19,18 @@ capable AI without treating privacy, visibility, or control as optional.
 Zygos comes in two runtimes: **v1**, the stable TypeScript CLI, now maintained on the
 [`v1` branch](https://github.com/JoshRDFI/Zygos/tree/v1) (deprecated — final bug fixes
 only), and **v2**, a Python migration toward a self-hosted web app with voice, in active
-development on this (`main`) branch. This README describes where Zygos is headed; the
-table marks what runs now versus what's still being built.
+development on this (`main`) branch. The v2 runtime now **runs as a self-hosted server
+with a live chat-and-tools turn loop over WebSocket** (start it with `zygos serve`); the
+graphical web UI and voice are still in active development. This README describes where
+Zygos is headed; the table marks what runs now versus what's still being built.
 
-|                | Today — v1 (TypeScript CLI)                     | Coming — v2 (Python, self-hosted web app)          |
+|                | Today — v1 (TypeScript CLI)                     | In development — v2 (Python, self-hosted web app)   |
 |----------------|-------------------------------------------------|----------------------------------------------------|
 | **Models**     | Local (Ollama, vLLM) + public (OpenAI, Anthropic) | Same, routed by capability                        |
 | **Your data**  | Local SQLite — history & context on your machine | Layered memory with local semantic recall          |
-| **Interface**  | Command line                                     | Web UI **and** voice *(in development)*             |
-| **Inspection** | Provider & route metrics                          | Full introspection console *(in development)*       |
+| **Tools**      | Tool framework (registry, permission checks, fallback) | Starter file / HTTP / shell tools, called by the model in the live turn loop with permission prompts |
+| **Interface**  | Command line                                     | WebSocket server + turn loop **built**; web UI & voice *(in development)* |
+| **Inspection** | Provider & route metrics                          | Runtime manifest & health today; full introspection console *(in development)* |
 | **Status**     | Stable; frozen (bug fixes only)                  | In active development — see the [roadmap](./ROADMAP.md) |
 
 ## Why Zygos
@@ -41,6 +44,10 @@ table marks what runs now versus what's still being built.
 - **Auditable, not opaque.** Inspect the model route, memory, and tools behind an
   answer — so you can verify what was used and what left your machine. *(partial today;
   a full introspection console is in development)*
+- **Real tools, gated by you.** Zygos can read and write files, fetch the web, and run
+  commands when a task needs them — but side-effecting tools ask before they act, and you
+  can loosen or lock that down per tool in config. *(the starter tools run live in the v2
+  turn loop; v1 provides the tool framework)*
 - **No telemetry.** Zygos ships no analytics and no phone-home — nothing about your usage
   is collected or sent anywhere. *(today)*
 - **Improvement you approve.** Zygos can propose new skills and refinements, but never
@@ -51,17 +58,23 @@ table marks what runs now versus what's still being built.
 - **Voice, on your machine.** Local-first speech in and out, with optional cloud fallback.
   *(in development)*
 
-## Choose your privacy level
+## What "private" means here
 
-Zygos doesn't force an all-or-nothing choice. You decide how much stays local:
+Privacy on Zygos means **your data — your conversations, history, memory, and documents —
+stays yours and lives on your machine.** It does *not* mean the system is walled off from
+the internet: reaching out is a normal capability you control (a public model, a web-fetch
+tool you invoke), and Zygos is built so you can see every time it happens. You decide where
+your data lives and what, if anything, is sent.
 
-| Level                        | Setup                                   | What leaves your machine                                              |
-|------------------------------|-----------------------------------------|----------------------------------------------------------------------|
-| **Fully local**              | Local model (Ollama/vLLM) + local storage | Nothing, once the model is downloaded.\*                            |
-| **Local storage, public model** | Public LLM (OpenAI/Anthropic) + local storage | Only the prompt/context you send to the chosen provider; history and memory stay local. |
+| Level                            | Setup                                          | Your data (history, memory, documents) | What reaches the network                                              |
+|----------------------------------|------------------------------------------------|----------------------------------------|----------------------------------------------------------------------|
+| **Fully local**                  | Local model (Ollama/vLLM) + local storage      | Stays on your machine                  | Nothing is *required* for chat or memory; a web-fetch or search tool reaches out only when you ask it to.\* |
+| **Local storage, public model**  | Public LLM (OpenAI/Anthropic) + local storage  | Stays on your machine                  | The prompt/context you send to the chosen provider — plus any tool you invoke. |
 
-\* Running fully offline is a design goal of the local-first path; verify it for your own
-configuration before relying on it.
+\* Zygos can run its core chat and memory fully offline with a local model once it's
+downloaded — a design goal of the local-first path (verify it for your configuration). A
+tool you invoke — like fetching a web page you asked for — reaches the network by design;
+that's a capability you control and can see, not a data leak.
 
 ## Quick start (v1 CLI, local)
 

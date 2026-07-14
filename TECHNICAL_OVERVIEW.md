@@ -17,13 +17,14 @@ v2's design and marks, honestly, what already runs versus what is still being bu
 Every capability below carries one of these tags:
 
 - **`[v1]`** — usable today in the TypeScript CLI.
-- **`[v2 · built]`** — implemented and tested in the Python backend, but not yet
-  assembled into a runnable app (the web server and turn loop that tie the services
-  together arrive in Milestone 8).
+- **`[v2 · built]`** — implemented and tested in the Python backend. The web server and
+  WebSocket turn loop that tie the services together (Milestone 8) now run, so a built
+  subsystem is reachable over the socket — the tag no longer implies "not yet runnable."
 - **`[v2 · planned]`** — designed, often with an accepted RFC, but not yet built.
 
-So a `[v2 · built]` subsystem is real code with tests — you just can't talk to it
-through a UI yet. That assembly is what v2 is working toward now.
+So a `[v2 · built]` subsystem is real code with tests, now driven by a live turn loop over
+WebSocket (start it with `zygos serve`). What remains before v2 is a finished product is the
+graphical web UI and voice.
 
 ## What Zygos is, technically
 
@@ -72,9 +73,10 @@ failover between routes. Local backends (Ollama, vLLM) and public ones (OpenAI,
 Anthropic) sit behind the same interface, so switching — or keeping some traffic local
 and some public — is a config change. `[v1]` `[v2 · built]`
 
-Letting a model *call tools* uses native function-calling normalized across providers;
-the design is locked in [RFC-0008](./docs/rfcs/RFC-0008-Tool-Calling-Protocol-and-Tool-Authoring.md).
-`[v2 · planned]`
+Letting a model *call tools* uses native function-calling normalized across providers
+([RFC-0008](./docs/rfcs/RFC-0008-Tool-Calling-Protocol-and-Tool-Authoring.md)); tool calls
+run live inside the turn loop, and every side-effecting call is permission-gated with an
+interactive prompt sent over the WebSocket. `[v2 · built]`
 
 ### Reasoning — adaptive, above the model
 An orchestration layer runs a **Prelude → Recurrent → Coda** reasoning pipeline with
@@ -94,12 +96,17 @@ and embeddings **default to running locally**, decoupled from whichever model ha
 chat, so semantic memory costs no tokens and leaves no data unless you opt into a cloud
 embedder. `[v1]` `[v2 · built]`
 
-### Tools — a safe execution contract
+### Tools — a safe execution contract, called live
 Tools implement a four-phase contract — **prepare → execute → verify → cleanup** —
 where `cleanup` always runs (even on failure) and a malformed result is never silently
-accepted. Execution carries permission checks, timeouts, retries, and one-level
-fallback. A starter suite (file read/write, HTTP fetch, shell command) ships with
-permission defaults set by risk. `[v1]` `[v2 · built]`
+accepted. Execution carries permission checks, timeouts, retries, and one-level fallback.
+A starter suite (file read/write, HTTP fetch, shell command) ships **enabled by default**
+with permission defaults set by risk: reading is frictionless, while writing files and
+running commands ask you first — in real time, over the socket — and you can loosen or
+tighten any tool in config. The model invokes these tools inside the live turn loop. A tool
+that reaches the network (fetching a page you asked for) does so by your request and in
+plain view — privacy here means your data stays local, not that the assistant can't act.
+`[v1]` `[v2 · built]`
 
 ### Skills and learning — you approve the changes
 Zygos can observe its own work, generate proposals, test candidates, and keep a
@@ -113,8 +120,9 @@ Significant runtime actions emit events onto an in-process **event bus**, and ru
 state — which route was chosen, what was retrieved, the reasoning trajectory — lives in
 named, snapshotable objects rather than hidden fields. A **capability registry** and a
 **runtime manifest** answer "what can this runtime do, and is it healthy?", surfaced by
-`zygos inspect` / `zygos doctor`. `[v2 · built]` The guiding principle: *state the
-console cannot see is an architecture bug*. The graphical **Introspection Console** that
+`zygos inspect` / `zygos doctor`. A per-session **`trace` channel** now streams these
+events live over the WebSocket as a turn runs. `[v2 · built]` The guiding principle: *state
+the console cannot see is an architecture bug*. The graphical **Introspection Console** that
 renders all of this for auditing — verifying what context was used and what left your
 machine — arrives with the web UI. `[v2 · planned]`
 
@@ -129,12 +137,15 @@ fallback are scoped in the voice RFC. `[v2 · planned]`
 Every run moves through a fixed lifecycle — bootstrap, load configuration, resolve
 plugins, initialize services, register capabilities, load skills, load memory, start
 scheduler, accept requests, execute, graceful shutdown. Stages never reorder; each
-milestone fills one in. Today the runtime reaches *Register Capabilities* and the
-services are wired; *Accept Requests* (the web server + WebSocket turn loop) is
-Milestone 8, the point at which v2 becomes a usable app. The wire protocol for that turn
-loop is locked in
-[RFC-0007](./docs/rfcs/RFC-0007-Session-Protocol-and-Turn-Loop.md). `[v2 · built]`
-lifecycle-so-far; `[v2 · planned]` the request-serving stages.
+milestone fills one in. The runtime now reaches *Accept Requests* and *Execute*: Milestone
+8 built the FastAPI/WebSocket adapter, per-session turn loop, live tool-calling, and
+graceful shutdown, so v2 is a usable — if still headless — app: `zygos serve` and hold a
+chat-and-tools conversation over the socket. The wire protocol is locked in
+[RFC-0007](./docs/rfcs/RFC-0007-Session-Protocol-and-Turn-Loop.md) (multiplexed
+`chat`/`tools`/`trace`/`control` channels, plus reserved binary audio channels) and
+tool-calling in
+[RFC-0008](./docs/rfcs/RFC-0008-Tool-Calling-Protocol-and-Tool-Authoring.md). `[v2 · built]`
+the turn loop and tools; `[v2 · planned]` the graphical UI, voice, and the scheduler.
 
 Zygos is deployed as a **self-hosted web application** — targets are your own machine or
 a droplet-class VM, no Electron wrapper and no managed-platform assumption. A single
@@ -142,9 +153,11 @@ install command is planned to verify Python, create an isolated environment, ins
 dependencies, build the frontend, initialize the database, and launch the server.
 `[v2 · planned]`
 
-It is designed to run **fully offline** with local models once they are downloaded; that
-is a design goal of the local-first path, not yet a verified guarantee across every
-configuration.
+Its **core chat and memory run fully offline** with a local model once it's downloaded —
+a design goal of the local-first path, not yet a verified guarantee across every
+configuration. Tools you invoke (a web fetch, a search) reach the network by design and in
+plain view; "offline" here means Zygos needs no external service to think and remember, not
+that it refuses to act on your behalf.
 
 ## Going deeper
 

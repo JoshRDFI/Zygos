@@ -8,7 +8,10 @@ TypeScript runtime, which v2 migrates from, is documented in
 
 ---
 
-![Zygos runtime architecture: Browser → Adapters → Runtime → Event Bus (planned) → Services → Providers → Models, with a planned Capability Registry above the services](./docs/assets/architecture.svg)
+<!-- TODO(doc-asset): redraw architecture.svg to reflect M8 — add the FastAPI/WebSocket
+     adapter + per-session turn loop, and drop the "(planned)" labels on the Event Bus and
+     Capability Registry (both implemented). Alt text below already describes current state. -->
+![Zygos runtime architecture: Browser → Adapters (web server + CLI) → Runtime (composition root, per-session turn loop) → Event Bus → Services (model routing, memory, tools, reasoning) → Providers → Models, with the Capability Registry above the services](./docs/assets/architecture.svg)
 
 ## Layering
 
@@ -114,9 +117,9 @@ Bootstrap
 | Load Skills | Planned — M6 (`SkillService`) |
 | Load Memory | Implemented — `MemoryService` wired at bootstrap (M4); `resume()`/`embed_backlog()` drained at server startup (M8 Cycle 1) |
 | Start Scheduler | Planned — scheduler & autonomy milestone |
-| Accept Requests | Implemented — FastAPI adapter reaches this stage at startup (M8 Cycle 1); WebSocket turn loop lands M8 Cycle 2 |
-| Execute | Planned — session loop and services fill in across M2–M7 |
-| Graceful Shutdown | Planned — reverse-order teardown |
+| Accept Requests | Implemented — FastAPI adapter + `/ws/session/{id}` turn loop; `chat`, `tools`, and `trace` channels live (M8 Cycles 1–3) |
+| Execute | Implemented — per-session chat-and-tools turn loop with reasoning and live, permission-gated tool-calling (M8 Cycles 2–3) |
+| Graceful Shutdown | Implemented — lifespan drains deferred work, trips active turns, and closes resources (M8 Cycles 1–2); reverse-order teardown extends as later stages gain state |
 
 One deliberate naming choice: the stage is **Resolve Plugins**, not "Discover
 Plugins". Zygos loads exactly the plugins declared in configuration and never
@@ -210,33 +213,48 @@ A/B-test rollback. `verify` failures produce a failed `ToolResult`; a malformed 
 is never silently accepted. v1 semantics for retry policy, timeouts, permission checks,
 streaming execution, and one-level fallback tools are preserved.
 
+In v2 the model invokes tools through this contract inside the live turn loop, via native
+function-calling normalized across providers
+([RFC-0008](./docs/rfcs/RFC-0008-Tool-Calling-Protocol-and-Tool-Authoring.md)). Config
+declares which in-tree tools are active (the starter suite is enabled by default), and each
+side-effecting call is permission-gated with an interactive prompt over the WebSocket. A
+config rule can loosen a tool's default `ask` to `allow`, but a tool declared `deny` is a
+hard floor config cannot lift.
+
 ---
 
 ## API Surface
 
 REST handles request/response resources: sessions, config, skills, plans, proposals.
 
-**Live (M8 Cycle 1):**
+**Live (M8):**
 
 - `GET /runtime` — renders the pure static runtime `Manifest` (config summary,
-  capabilities, routes, versions); no network, no mutation.
+  capabilities, routes, versions); no network, no mutation. (Cycle 1)
 - `GET /runtime/health` — live status: per-route circuit snapshot, tri-state embedder
   health (`healthy`/`unhealthy`/`not_probed`; default `not_probed`, `?probe=1` actively
-  probes), and active-session count.
-
-The `/sessions` REST endpoints and the `/ws/session/{id}` WebSocket described below are
-**Planned — M8 Cycle 2**.
+  probes), and active-session count. (Cycle 1)
+- `POST /sessions` → session id; `GET /sessions` — the in-memory session registry. (Cycle 2)
 
 Each session has one multiplexed WebSocket at `/ws/session/{id}`. All real-time traffic
 flows over that single connection:
 
-- **JSON frames** — structured as `{channel, type, payload}` on channels `chat`,
-  `tools`, `trace`, and `control`.
+- **JSON frames** — `{channel, type, payload}` on channels `chat`, `tools`, `trace`, and
+  `control`.
+  - `chat` — `user_message` in; `turn.start` / `token` (streaming, non-tool turns) /
+    `turn.end` / `error` out.
+  - `tools` — the turn loop emits `call` and `result` frames as each tool runs; when a tool
+    needs approval it emits a `permission` frame (tool name + argument summary, **never
+    secrets**), answered by a `permission_response` correlated by `call_id`. A prompt
+    timeout or a dropped socket resolves to **deny** — the deny-floor. (Cycle 3)
+  - `trace` — a per-session bridge mirrors emitted bus events for live inspection.
+  - `control` — `cancel` / `ping` / `hello`; a mid-turn `user_message` is a barge-in.
 - **Binary frames** — prefixed with a 1-byte channel tag for `audio.in` and `audio.out`
-  (PCM or Opus; codec negotiated in a `control` handshake).
-- **Barge-in** — a `control` frame that cancels in-flight TTS synthesis. Because both
-  the text and audio channels share one socket, barge-in requires no cross-socket
-  coordination.
+  (PCM or Opus; codec negotiated in a `control` handshake). **Reserved — the frame taxonomy
+  is frozen; the voice milestone fills these in.**
+- **Barge-in** — a mid-turn `user_message` (or a `control` cancel) trips the active turn;
+  a `control` frame will likewise cancel in-flight TTS once audio lands. Because all
+  channels share one socket, barge-in requires no cross-socket coordination.
 
 One connection means one auth handshake and no cross-socket ordering problems — a
 property that matters on self-hosted, single-user deployments.
@@ -269,14 +287,18 @@ server.
 
 ## Current Implementation Status
 
-Milestones 1–5 are complete as of 2026-07-11: config schema/loader and
-config-declared plugin resolver (M1), provider router + `ModelService` (M2), the
-adaptive reasoning engine plus the RFC-0002 event bus and RFC-0003 capability
-registry (M3), layered `MemoryService` (M4), and `ToolService` with the starter
-tool suite (M5) — together with RFC-0006 embedding + hybrid retrieval (Cycles
-1–2). The backend suite has 432 tests passing. Next is M8 (FastAPI adapter +
-WebSocket turn loop), the first consumer of `MemoryService` and `ToolService`.
-See [ROADMAP.md](./ROADMAP.md) for the full milestone plan.
+Milestones 1–5 and Milestone 8 are complete as of 2026-07-13: config schema/loader
+and config-declared plugin resolver (M1), provider router + `ModelService` (M2), the
+adaptive reasoning engine plus the RFC-0002 event bus and RFC-0003 capability registry
+(M3), layered `MemoryService` (M4), and `ToolService` with the starter tool suite (M5) —
+together with RFC-0006 embedding + hybrid retrieval, and **M8**, the FastAPI/WebSocket
+adapter with a live per-session turn loop and native tool-calling (RFC-0007 session
+protocol + RFC-0008 tool-calling), M8's first consumer of `MemoryService` and
+`ToolService`. M8 ran as four cycles: server/lifecycle/inspection, WebSocket/session/chat
+turn loop, the tool-calling library, and live tool-calling in the turn loop. The backend
+suite has 580 tests passing. Next are voice (RFC-0005) and the React UI, then M6 (learning)
+and M7 (workflows) — which land after M8 in the build order. See [ROADMAP.md](./ROADMAP.md)
+for the full milestone plan.
 
 ---
 

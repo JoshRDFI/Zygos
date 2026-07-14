@@ -18,14 +18,18 @@ decision requires an accepted RFC before implementation begins.
 | M3 RDT reasoning engine | Prelude/recurrent/coda pipeline, real adaptive compute (iteration/temperature/token/model by complexity+confidence), snapshotable ReasoningState | ✅ Complete (2026-07-06) — ran as three cycles: RFC-0002 foundation, RDT engine, RFC-0003 registry |
 | M4 Layered memory (SQLite WAL + FTS5) | Working, episodic, and semantic memory; deferred consolidation; multi-factor retrieval (procedural memory = named seam → M6/SkillService) | ✅ Complete (2026-07-10) |
 | M5 Tools (4-phase contract) | Executor, permissions, streaming, fallback; cleanup guaranteed | ✅ Complete (2026-07-11) — ran as three cycles: contract + core executor, permissions/streaming/retry/timeout/fallback, starter tool suite |
-| M6 Learning → SkillService (manual approval only) | Proposals, A/B testing (sandboxed), human-approval gate | Planned |
-| M7 Workflows (interviewer first) | Workflow plugins starting with the interviewer pattern | Planned |
-| M8 FastAPI adapter + WebSocket protocol | REST + multiplexed WS; typed frames for chat, tools, trace, audio | Planned |
+| M6 Learning → SkillService (manual approval only) | Proposals, A/B testing (sandboxed), human-approval gate | Planned (lands after M8) |
+| M7 Workflows (interviewer first) | Workflow plugins starting with the interviewer pattern | Planned (lands after M8) |
+| M8 FastAPI adapter + WebSocket protocol | REST + multiplexed WS; live per-session chat-and-tools turn loop; typed frames for chat, tools, trace (audio reserved for voice) | ✅ Complete (2026-07-13) — four cycles: server/lifecycle/inspection, WS/session/chat turn loop, tool-calling library (RFC-0008), live tool-calling |
 | RFC-0002: Runtime Event Bus and ExecutionContext | Design RFC — implemented in M3 (Cycle 1) | ✅ Implemented (2026-07-05) |
 | RFC-0003: Capability Registry, Runtime Manifest, and Inspection | Design RFC — implemented in M3 (Cycle 3); render surfaces GET /runtime → M8, zygos trace → TraceService | ✅ Implemented (2026-07-09) |
 | RFC-0004: Secret Storage and Key Entry | Design RFC — amends RFC-0001 §8; not an M3 gate | ✅ Accepted (2026-07-04) |
 | RFC-0005: Voice Interaction — Local STT and TTS | Design RFC — governs voice engines behind the RFC-0003 capabilities; audio WS channels built in M8, engines after; a 2.0-complete gate | 🔎 Review (2026-07-09) |
-| RFC-0006: Embedding Contract and Hybrid Memory Retrieval | Design RFC — adds the `Embedder` contract + `EMBEDDING` capability (amends RFC-0003 closed set); does not amend RFC-0001; builds as its own cycle before M8 | ✅ Accepted (2026-07-11) |
+| RFC-0006: Embedding Contract and Hybrid Memory Retrieval | Design RFC — adds the `Embedder` contract + `EMBEDDING` capability (amends RFC-0003 closed set); does not amend RFC-0001; builds as its own cycle before M8 | ✅ Implemented (2026-07-11, own cycles) |
+| RFC-0007: Session Protocol and Turn Loop | Design RFC — the M8 wire protocol: multiplexed WS frames (chat/tools/trace/control + reserved audio) + REST sessions; reconciles RFC-0005 §4 | ✅ Implemented (2026-07-13, M8) |
+| RFC-0008: Tool-Calling Protocol and Tool Authoring | Design RFC — native function-calling normalized at the provider seam + the agentic loop; amends RFC-0001 §2/§7 | ✅ Implemented (2026-07-13, M8) |
+| RFC-0009: Model Routing and Multimodal Capabilities | Design RFC — per-turn best-model routing + VISION/IMAGE_GENERATION contracts; amends RFC-0001 §2 | ✏️ Draft (2026-07-13) |
+| RFC-0010: User Personalization and Assistant Identity | Design RFC — bounded preferences store + NL onboarding; fills the RFC-0007 `build_messages` system-prompt seam | ✏️ Draft (2026-07-13) |
 | React UI | React + Tailwind + Vite frontend; WebSocket streaming | Planned (own RFC) |
 | Voice interaction (STT + TTS) | Local-first transcription and synthesis over the WS audio channel; **required before 2.0 is called complete** | Planned (own RFC) |
 | Scheduler & autonomy | SchedulerService with human-in-the-loop guards | Planned |
