@@ -44,6 +44,7 @@ class Session:
         # connection bookkeeping used by the WS handler (Task 8)
         self._writer: asyncio.Task | None = None
         self._conn: object | None = None
+        self.audio = None  # api.audio.AudioTurn | None — in-flight transcription (Task 11)
 
     def enqueue(self, frame: Frame) -> None:
         self.outbound.put_nowait(frame)

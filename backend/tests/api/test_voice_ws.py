@@ -41,3 +41,37 @@ def test_lifespan_starts_and_stops_sidecar(tmp_path):
         assert rt.voice_service.snapshot().stt.alive is True
     # after lifespan exit, sidecar is killed
     assert rt.voice_service.snapshot().stt.alive is False
+
+
+from zygos.api.frames import AUDIO_TAG_IN
+
+
+def _drive_until(ws, predicate, frames):
+    while True:
+        f = __import__("json").loads(ws.receive_text())
+        frames.append(f)
+        if predicate(f):
+            return f
+
+
+def test_voice_drives_a_turn(tmp_path):
+    rt = _voice_runtime(tmp_path, script=["you said it"])
+    app = create_app(rt)
+    with TestClient(app) as client:
+        sid = client.post("/sessions").json()["id"]
+        with client.websocket_connect(f"/ws/session/{sid}") as ws:
+            ws.send_text(__import__("json").dumps(
+                {"channel": "control", "type": "audio.start", "payload": {}}))
+            # stream tagged PCM
+            for _ in range(4):
+                ws.send_bytes(bytes([AUDIO_TAG_IN]) + b"\x00" * 640)
+            ws.send_text(__import__("json").dumps(
+                {"channel": "control", "type": "audio.endpoint", "payload": {}}))
+
+            frames: list[dict] = []
+            partial = _drive_until(ws, lambda f: f["channel"] == "chat" and f["type"] == "partial", frames)
+            assert partial["payload"]["text"]
+            final = _drive_until(ws, lambda f: f["channel"] == "chat" and f["type"] == "final", frames)
+            assert final["payload"]["text"]  # committed transcript
+            end = _drive_until(ws, lambda f: f["channel"] == "chat" and f["type"] == "turn.end", frames)
+            assert "text" in end["payload"]  # the assistant's answer to the spoken turn

@@ -17,7 +17,8 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from zygos.api.frames import CHAT, CONTROL, TOOLS, Frame, decode, encode
+from zygos.api.audio import end_audio_turn, feed_audio, start_audio_turn
+from zygos.api.frames import AUDIO_TAG_IN, CHAT, CONTROL, TOOLS, Frame, decode, encode
 from zygos.api.session import Session
 from zygos.api.turn import TurnDeps, run_turn
 from zygos.runtime.context import CancelToken
@@ -62,6 +63,10 @@ async def _dispatch(session: Session, deps: TurnDeps, frame: Frame) -> None:
         fut = session.pending_permissions.get(call_id)
         if fut is not None and not fut.done() and decision in ("allow", "deny"):
             fut.set_result(decision)
+    elif frame.channel == CONTROL and frame.type == "audio.start":
+        await start_audio_turn(session, deps)
+    elif frame.channel == CONTROL and frame.type == "audio.endpoint":
+        await end_audio_turn(session)
     # unknown (channel, type) ignored — forward-compat rule
 
 
@@ -86,7 +91,17 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
 
     try:
         while True:
-            raw = await websocket.receive_text()
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+            data = message.get("bytes")
+            if data is not None:
+                if data and data[0] == AUDIO_TAG_IN:
+                    feed_audio(session, data[1:])
+                continue
+            raw = message.get("text")
+            if raw is None:
+                continue
             frame = decode(raw)
             if frame is None:
                 session.enqueue(Frame(channel=CONTROL, type="error",

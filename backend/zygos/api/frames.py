@@ -19,6 +19,8 @@ CONTROL = "control"
 AUDIO_IN = "audio.in"
 AUDIO_OUT = "audio.out"
 
+AUDIO_TAG_IN = 0x00  # 1-byte channel tag prefixing binary audio.in frames
+
 
 class Frame(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
