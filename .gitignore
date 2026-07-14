@@ -44,6 +44,10 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 
+# Runtime state directory (workspace + memory.db)
+.zygos/
+backend/.zygos/
+
 # Agent tooling (local-only; not part of the project)
 .claude/
 .gitnexus
