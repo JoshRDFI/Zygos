@@ -50,6 +50,8 @@ async def start_audio_turn(session, deps: TurnDeps) -> None:
                 return
             await tr.push(item)
 
+    pusher_task = asyncio.create_task(pusher())
+
     async def consume() -> None:
         try:
             async for ev in tr.events():
@@ -69,9 +71,14 @@ async def start_audio_turn(session, deps: TurnDeps) -> None:
             session.enqueue(Frame(channel=CHAT, type="error",
                                   payload={"message": "transcription failed"}))
         finally:
+            # If transcription failed before the client sent audio.endpoint, the
+            # pusher is still parked on inbox.get() awaiting a sentinel that will
+            # never arrive. session.audio may already be cleared here, so cancel
+            # the task directly rather than routing through cancel_audio_turn.
+            pusher_task.cancel()
             session.audio = None
 
-    session.audio = AudioTurn(tr, inbox, asyncio.create_task(pusher()), asyncio.create_task(consume()))
+    session.audio = AudioTurn(tr, inbox, pusher_task, asyncio.create_task(consume()))
 
 
 def feed_audio(session, pcm: bytes) -> None:
