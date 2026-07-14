@@ -154,11 +154,18 @@ class SttConfig(BaseModel):
     engine: Literal["fake", "whisper_cpp"] = "fake"
 
 
+class TtsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    engine: Literal["fake"] = "fake"  # "kokoro" / "piper" land in Cycle 2.5
+
+
 class VoiceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
     stt: SttConfig = Field(default_factory=SttConfig)
+    tts: TtsConfig = Field(default_factory=TtsConfig)
     # how long the runtime waits for a client endpoint signal before giving up
     prompt_endpoint_timeout_s: float = 30.0
 

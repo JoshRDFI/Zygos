@@ -17,3 +17,15 @@ def test_unknown_voice_field_rejected():
     import pytest
     with pytest.raises(Exception):
         ZygosConfig.model_validate({"voice": {"enabled": True, "bogus": 1}})
+
+
+def test_voice_config_has_tts_defaulting_to_fake():
+    v = VoiceConfig()
+    assert v.tts.engine == "fake"
+
+
+def test_voice_config_rejects_unknown_tts_engine():
+    import pytest
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        VoiceConfig(tts={"engine": "kokoro"})  # not yet a valid literal
