@@ -3,9 +3,10 @@
 Proves the whole wired stack — WS turn loop -> RFC-0008 agentic loop -> ToolService
 permission gate -> WebSocketPromptResolver -> `tools:*` framing — works together, using
 an in-process ASGI TestClient + a scripted FakeProvider (no real network, no real model).
-Marked `live` per project convention for "drives the real app assembly" tests, but it is
-fully deterministic and in-process, so it is safe to run in CI; it is simply deselected
-from the default `-m 'not live'` run like its sibling in this directory.
+Despite the historical filename, this is fully deterministic and in-process (no real
+network, no real model), so it runs in the default suite alongside the other API tests —
+unlike its sibling `tests/live/test_ollama_live.py`, which genuinely hits a live server
+and stays `@pytest.mark.live`.
 
 Scenarios:
   1. permission "allow" round-trip: tools:permission -> permission_response(allow) ->
@@ -44,8 +45,6 @@ from zygos.services.router import ProviderRouter, RouteChoice
 from zygos.tools.registry import ToolRegistry
 from zygos.tools.service import ToolService
 from zygos.tools.types import BaseTool, ToolContext, ToolMeta
-
-pytestmark = pytest.mark.live
 
 
 # ---------------------------------------------------------------------------
