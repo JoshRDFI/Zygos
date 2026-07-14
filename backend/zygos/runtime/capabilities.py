@@ -14,6 +14,7 @@ from enum import StrEnum
 
 from zygos.providers.base import Provider
 from zygos.providers.embedding import Embedder
+from zygos.voice.contract import SpeechToText
 
 
 class Capability(StrEnum):
@@ -35,6 +36,7 @@ class Capability(StrEnum):
 CAPABILITY_CONTRACTS: Mapping[Capability, type] = {
     Capability.LOCAL_INFERENCE: Provider,
     Capability.EMBEDDING: Embedder,
+    Capability.SPEECH_TO_TEXT: SpeechToText,
 }
 
 
