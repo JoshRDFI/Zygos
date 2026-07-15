@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 
+from zygos.api.duck import clear_duck_state
 from zygos.api.frames import AUDIO_OUT, Frame
 
 logger = logging.getLogger("zygos.api.speech")
@@ -26,6 +27,7 @@ async def speak_reply(session, voice_service, ctx, text: str, turn_id: str) -> N
         "sample_format": fmt.sample_format,
         "turn_id": turn_id,
     }))
+    session.speaking = True
     reason = "complete"
     try:
         async for pcm in synth.chunks():
@@ -36,6 +38,8 @@ async def speak_reply(session, voice_service, ctx, text: str, turn_id: str) -> N
         reason = "error"
         logger.warning("synthesis failed", exc_info=True)
     finally:
+        session.speaking = False
+        clear_duck_state(session)
         if reason != "error" and ctx.cancelled:
             reason = "cancelled"
         try:

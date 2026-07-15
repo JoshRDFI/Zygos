@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from zygos.api.frames import AUDIO_OUT, AUDIO_TAG_OUT
 from zygos.api.session import Session
 from zygos.api.speech import speak_reply
@@ -146,3 +148,52 @@ async def test_teardown_failure_does_not_prevent_tts_end():
     items = _drain(session)
     assert synth.cancel_called is True
     assert items[-1].type == "tts.end" and items[-1].payload["reason"] == "complete"
+
+
+class _SpeakingProbeSynth:
+    """Records session.speaking at the moment the first chunk is streamed."""
+
+    def __init__(self, session):
+        self._session = session
+        self.during = None
+        self.cancel_called = False
+        self.closed = False
+
+    async def chunks(self):
+        self.during = self._session.speaking
+        yield b"\x00"
+
+    async def cancel(self):
+        self.cancel_called = True
+
+    async def aclose(self):
+        self.closed = True
+
+
+async def test_speaking_flag_true_during_stream_false_after():
+    session = _session()
+    synth = _SpeakingProbeSynth(session)
+    await speak_reply(session, _StubVoice(synth), root_context(InProcessEventBus()), "hi", "t")
+    assert synth.during is True       # set before streaming begins
+    assert session.speaking is False  # cleared in the finally
+
+
+async def test_ducked_stream_still_flows():
+    # duck (stage 1) must NOT stop the PCM stream — only stop-on-confirm does.
+    session = _session()
+    session.ducked = True
+    synth = _StubSynth([b"\x00", b"\x11", b"\x22"])
+    await speak_reply(session, _StubVoice(synth), root_context(InProcessEventBus()), "hi", "t")
+    audio = [i for i in _drain(session) if isinstance(i, (bytes, bytearray))]
+    assert len(audio) == 3  # all chunks streamed despite being ducked
+
+
+async def test_speak_reply_clears_duck_state_on_end():
+    session = _session()
+    session.ducked = True
+    session.duck_timeout = asyncio.create_task(asyncio.sleep(100))
+    synth = _StubSynth([b"\x00"])
+    await speak_reply(session, _StubVoice(synth), root_context(InProcessEventBus()), "hi", "t")
+    assert session.speaking is False
+    assert session.ducked is False
+    assert session.duck_timeout is None
