@@ -71,6 +71,8 @@ async def _dispatch(session: Session, deps: TurnDeps, frame: Frame) -> None:
         await start_audio_turn(session, deps)
     elif frame.channel == CONTROL and frame.type == "audio.endpoint":
         await end_audio_turn(session)
+    elif frame.channel == CONTROL and frame.type == "audio.output":
+        session.speak = bool(frame.payload.get("enabled", False))
     # unknown (channel, type) ignored — forward-compat rule
 
 

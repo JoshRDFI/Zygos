@@ -7,7 +7,7 @@ import pytest
 from fastapi import FastAPI, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
-from zygos.api.frames import AUDIO_TAG_OUT, CHAT, TOOLS, Frame
+from zygos.api.frames import AUDIO_TAG_OUT, CHAT, CONTROL, TOOLS, Frame
 from zygos.api.session import Session, SessionRegistry
 from zygos.api.turn import TurnDeps
 from zygos.api.websocket import _dispatch, _writer, router as ws_router
@@ -212,3 +212,17 @@ async def test_writer_sends_frames_as_text_and_audio_as_bytes():
     kinds = [k for k, _ in ws.sent]
     assert kinds == ["text", "bytes"]  # FIFO order preserved
     assert ws.sent[1][1] == bytes([AUDIO_TAG_OUT]) + b"\x00\x00"
+
+
+@pytest.mark.asyncio
+async def test_audio_output_frame_toggles_speak():
+    session = _bare_session()
+    assert session.speak is False
+    # deps unused by this control branch; None-friendly minimal stand-in
+    deps = object()
+    await _dispatch(session, deps, Frame(channel=CONTROL, type="audio.output",
+                                         payload={"enabled": True}))
+    assert session.speak is True
+    await _dispatch(session, deps, Frame(channel=CONTROL, type="audio.output",
+                                         payload={"enabled": False}))
+    assert session.speak is False
