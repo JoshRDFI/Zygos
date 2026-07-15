@@ -270,3 +270,83 @@ def test_gate_enforced_first_allows_second_warns():
     warn = b.sent[0]
     assert warn.channel == "control" and warn.type == "audio.unavailable"
     assert warn.payload["reason"] == "voice_in_use"
+
+
+import asyncio
+from types import SimpleNamespace
+
+from zygos.api.duck import arm_duck
+from zygos.api.frames import AUDIO_OUT, CONTROL, Frame
+from zygos.api.session import Session
+from zygos.api.websocket import _dispatch
+from zygos.runtime.context import CancelToken, root_context
+from zygos.runtime.events import InProcessEventBus
+
+
+def _vad_session() -> Session:
+    return Session("s", root_context(InProcessEventBus()), created_at=0.0)
+
+
+def _vad_deps():
+    return SimpleNamespace(duck_gain=0.2, duck_timeout_s=5.0,
+                           voice_service=None, voice_gate=None)
+
+
+def _drain_ws(session):
+    out = []
+    while not session.outbound.empty():
+        out.append(session.outbound.get_nowait())
+    return out
+
+
+async def test_dispatch_vad_onset_ducks_when_speaking():
+    s = _vad_session()
+    s.speaking = True
+    await _dispatch(s, _vad_deps(),
+                    Frame(channel=CONTROL, type="audio.vad", payload={"state": "onset"}))
+    items = _drain_ws(s)
+    assert len(items) == 1 and items[0].channel == AUDIO_OUT and items[0].type == "tts.duck"
+    assert s.ducked is True
+    s.duck_timeout.cancel()
+
+
+async def test_dispatch_vad_silence_unducks():
+    s = _vad_session()
+    s.speaking = True
+    arm_duck(s, gain=0.2, timeout_s=5.0)
+    _drain_ws(s)
+    await _dispatch(s, _vad_deps(),
+                    Frame(channel=CONTROL, type="audio.vad", payload={"state": "silence"}))
+    items = _drain_ws(s)
+    assert len(items) == 1 and items[0].type == "tts.unduck"
+    assert s.ducked is False
+
+
+async def test_dispatch_vad_speech_trips_active_turn():
+    s = _vad_session()
+    token = CancelToken()
+    s.active_cancel = token
+
+    async def _never():
+        await asyncio.Event().wait()
+
+    s.active_task = asyncio.create_task(_never())
+    await _dispatch(s, _vad_deps(),
+                    Frame(channel=CONTROL, type="audio.vad", payload={"state": "speech"}))
+    assert token.is_set is True
+    s.active_task.cancel()
+
+
+async def test_dispatch_vad_onset_no_op_when_not_speaking():
+    s = _vad_session()  # not speaking
+    await _dispatch(s, _vad_deps(),
+                    Frame(channel=CONTROL, type="audio.vad", payload={"state": "onset"}))
+    assert _drain_ws(s) == [] and s.ducked is False
+
+
+async def test_dispatch_vad_unknown_state_ignored():
+    s = _vad_session()
+    s.speaking = True
+    await _dispatch(s, _vad_deps(),
+                    Frame(channel=CONTROL, type="audio.vad", payload={"state": "bogus"}))
+    assert _drain_ws(s) == [] and s.ducked is False

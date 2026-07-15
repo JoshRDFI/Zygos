@@ -18,6 +18,7 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from zygos.api.audio import cancel_audio_turn, end_audio_turn, feed_audio, start_audio_turn
+from zygos.api.duck import arm_duck, clear_duck_state, release_duck, stop_speech
 from zygos.api.frames import AUDIO_TAG_IN, CHAT, CONTROL, TOOLS, Frame, decode, encode
 from zygos.api.session import Session
 from zygos.api.turn import TurnDeps, run_turn
@@ -94,6 +95,15 @@ async def _dispatch(session: Session, deps: TurnDeps, frame: Frame) -> None:
             session.speak = False  # disabling never gated; does not release ownership
         elif _acquire_voice_or_warn(session, deps):
             session.speak = True
+    elif frame.channel == CONTROL and frame.type == "audio.vad":
+        state = frame.payload.get("state")
+        if state == "onset":
+            arm_duck(session, gain=deps.duck_gain, timeout_s=deps.duck_timeout_s)
+        elif state == "speech":
+            stop_speech(session)
+        elif state == "silence":
+            release_duck(session)
+        # unknown state ignored
     # unknown (channel, type) ignored — forward-compat rule
 
 
@@ -148,6 +158,8 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
                 session.audio.consumer.cancel()
                 session.audio.pusher.cancel()
                 session.audio = None
+            clear_duck_state(session)
+            session.speaking = False
             session.connected = False
             gate = getattr(deps, "voice_gate", None)
             if gate is not None:
