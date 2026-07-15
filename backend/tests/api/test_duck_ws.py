@@ -160,6 +160,26 @@ def test_vad_onset_then_silence_ducks_and_restores(tmp_path):
             session.speaking = False
 
 
+def test_disconnect_clears_armed_duck_timeout(tmp_path):
+    # AC9 disconnect path: teardown clears an armed duck timeout (regression coverage;
+    # the behavior already exists from Task 5's teardown wiring).
+    app = _voice_app(tmp_path)
+    with TestClient(app) as client:
+        sid = client.post("/sessions").json()["id"]
+        with client.websocket_connect(f"/ws/session/{sid}") as ws:
+            ws.send_text(json.dumps({"channel": "control", "type": "ping", "payload": {}}))
+            _drive_until(ws, lambda f: f["type"] == "pong", [])
+            session = app.state.registry.get(sid)
+            session.speaking = True  # grey-box: represent active TTS so onset arms a real timeout
+            ws.send_text(json.dumps(
+                {"channel": "control", "type": "audio.vad", "payload": {"state": "onset"}}))
+            _drive_until(ws, lambda f: f["channel"] == "audio.out" and f["type"] == "tts.duck", [])
+            assert session.ducked is True and session.duck_timeout is not None
+        # ws closed -> disconnect teardown runs on the app loop; poll for it
+        _wait_until(lambda: session.duck_timeout is None, timeout=3.0)
+        assert session.ducked is False
+
+
 def test_vad_frames_are_no_ops_when_not_speaking(tmp_path):
     # AC7/AC8: with nothing speaking, onset/silence/speech emit no tts.* and a typed
     # turn still completes normally (default-off invariance for the duck half).

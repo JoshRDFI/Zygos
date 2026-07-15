@@ -14,6 +14,7 @@ from collections.abc import Callable
 
 from pydantic import BaseModel, ConfigDict
 
+from zygos.api.duck import clear_duck_state
 from zygos.api.frames import AUDIO_TAG_OUT, Frame
 from zygos.runtime.context import CancelToken, ExecutionContext
 
@@ -117,6 +118,7 @@ class SessionRegistry:
             and session.active_cancel is not None
         ):
             session.active_cancel.trip()
+        clear_duck_state(session)
         return True
 
     def count(self) -> int:

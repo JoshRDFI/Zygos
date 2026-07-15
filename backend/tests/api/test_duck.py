@@ -4,13 +4,28 @@ import asyncio
 
 from zygos.api.duck import arm_duck, clear_duck_state, release_duck, stop_speech
 from zygos.api.frames import AUDIO_OUT
-from zygos.api.session import Session
+from zygos.api.session import Session, SessionRegistry
 from zygos.runtime.context import CancelToken, root_context
 from zygos.runtime.events import InProcessEventBus
 
 
 def _session() -> Session:
     return Session("s", root_context(InProcessEventBus()), created_at=0.0)
+
+
+def _registry() -> SessionRegistry:
+    bus = InProcessEventBus()
+    counter = {"n": 0}
+
+    def new_id():
+        counter["n"] += 1
+        return f"id-{counter['n']}"
+
+    return SessionRegistry(
+        new_context=lambda sid: root_context(bus, session_id=sid),
+        clock=lambda: 100.0,
+        new_id=new_id,
+    )
 
 
 def _drain(session):
@@ -127,3 +142,16 @@ async def test_clear_duck_state_cancels_timeout_without_emitting():
     assert s.ducked is False and s.duck_timeout is None
     assert timeout.cancelled() or timeout.done()
     assert _drain(s) == []  # no tts.unduck on a silent clear
+
+
+async def test_registry_delete_clears_duck_state():
+    reg = _registry()
+    s = reg.create()
+    s.speaking = True
+    arm_duck(s, gain=0.2, timeout_s=5.0)
+    timeout = s.duck_timeout
+    assert reg.delete(s.id) is True
+    await asyncio.sleep(0)  # let the scheduled cancel settle
+    assert s.ducked is False
+    assert s.duck_timeout is None
+    assert timeout.cancelled() or timeout.done()
