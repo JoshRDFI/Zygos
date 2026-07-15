@@ -30,9 +30,12 @@ router = APIRouter()
 
 async def _writer(websocket: WebSocket, session: Session) -> None:
     while True:
-        frame = await session.outbound.get()
+        item = await session.outbound.get()
         try:
-            await websocket.send_text(encode(frame))
+            if isinstance(item, (bytes, bytearray)):
+                await websocket.send_bytes(bytes(item))
+            else:
+                await websocket.send_text(encode(item))
         except asyncio.CancelledError:
             raise  # teardown's writer.cancel() must still work
         except Exception:  # noqa: BLE001 - client dropped mid-turn; stop draining quietly

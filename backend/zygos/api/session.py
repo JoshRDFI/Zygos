@@ -14,7 +14,7 @@ from collections.abc import Callable
 
 from pydantic import BaseModel, ConfigDict
 
-from zygos.api.frames import Frame
+from zygos.api.frames import AUDIO_TAG_OUT, Frame
 from zygos.runtime.context import CancelToken, ExecutionContext
 
 
@@ -36,7 +36,8 @@ class Session:
         self.turn_count = 0
         self.turn_status = "idle"
         self.connected = False
-        self.outbound: asyncio.Queue[Frame] = asyncio.Queue()
+        self.outbound: asyncio.Queue[Frame | bytes] = asyncio.Queue()
+        self.speak = False  # per-session spoken-output preference (Voice C2 T8 sets it)
         self.active_cancel: CancelToken | None = None
         self.active_task: asyncio.Task | None = None
         # call_id -> future awaiting a tools:permission_response (M8 C3)
@@ -48,6 +49,9 @@ class Session:
 
     def enqueue(self, frame: Frame) -> None:
         self.outbound.put_nowait(frame)
+
+    def enqueue_audio(self, pcm: bytes) -> None:
+        self.outbound.put_nowait(bytes([AUDIO_TAG_OUT]) + pcm)
 
     def begin_turn(self) -> None:
         self.turn_status = "running"

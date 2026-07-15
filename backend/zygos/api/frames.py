@@ -20,6 +20,7 @@ AUDIO_IN = "audio.in"
 AUDIO_OUT = "audio.out"
 
 AUDIO_TAG_IN = 0x00  # 1-byte channel tag prefixing binary audio.in frames
+AUDIO_TAG_OUT = 0x01  # 1-byte channel tag prefixing binary audio.out (TTS) frames
 
 
 class Frame(BaseModel):

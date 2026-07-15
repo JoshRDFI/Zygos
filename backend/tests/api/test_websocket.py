@@ -7,7 +7,7 @@ import pytest
 from fastapi import FastAPI, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
-from zygos.api.frames import CHAT, TOOLS, Frame
+from zygos.api.frames import AUDIO_TAG_OUT, CHAT, TOOLS, Frame
 from zygos.api.session import Session, SessionRegistry
 from zygos.api.turn import TurnDeps
 from zygos.api.websocket import _dispatch, _writer, router as ws_router
@@ -183,3 +183,32 @@ async def test_permission_response_ignores_unknown_and_bad_decision():
     await _dispatch(session, None, Frame(channel=TOOLS, type="permission_response",
                                          payload={"call_id": "c1", "decision": "maybe"}))
     assert not fut.done()
+
+
+class _RecordingWS:
+    """Fake websocket that records send_text/send_bytes calls in FIFO order."""
+
+    def __init__(self):
+        self.sent = []
+
+    async def send_text(self, s):
+        self.sent.append(("text", s))
+
+    async def send_bytes(self, b):
+        self.sent.append(("bytes", b))
+
+
+async def test_writer_sends_frames_as_text_and_audio_as_bytes():
+    session = _session()
+    session.enqueue(Frame(channel=CHAT, type="tok", payload={"text": "hi"}))
+    session.enqueue_audio(b"\x00\x00")
+    ws = _RecordingWS()
+    task = asyncio.create_task(_writer(ws, session))
+    try:
+        while len(ws.sent) < 2:
+            await asyncio.sleep(0)
+    finally:
+        task.cancel()
+    kinds = [k for k, _ in ws.sent]
+    assert kinds == ["text", "bytes"]  # FIFO order preserved
+    assert ws.sent[1][1] == bytes([AUDIO_TAG_OUT]) + b"\x00\x00"

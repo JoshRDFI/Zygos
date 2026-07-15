@@ -29,3 +29,8 @@ def test_frame_is_frozen():
     frame = Frame(channel=CHAT, type="token", payload={"text": "x"})
     with pytest.raises(Exception):
         frame.type = "other"
+
+
+def test_audio_tag_out_is_distinct():
+    from zygos.api.frames import AUDIO_TAG_IN, AUDIO_TAG_OUT
+    assert AUDIO_TAG_OUT == 0x01 and AUDIO_TAG_OUT != AUDIO_TAG_IN
