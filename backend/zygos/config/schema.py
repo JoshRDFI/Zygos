@@ -158,6 +158,8 @@ class TtsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     engine: Literal["fake"] = "fake"  # "kokoro" / "piper" land in Cycle 2.5
+    # suggested client playback gain while the assistant is "ducked" (barge-in stage 1)
+    duck_gain: float = 0.2
 
 
 class VoiceConfig(BaseModel):
@@ -168,6 +170,9 @@ class VoiceConfig(BaseModel):
     tts: TtsConfig = Field(default_factory=TtsConfig)
     # how long the runtime waits for a client endpoint signal before giving up
     prompt_endpoint_timeout_s: float = 30.0
+    # max time the assistant stays ducked with no speech/silence resolution
+    # before auto-restoring full volume (barge-in liveness backstop)
+    duck_timeout_s: float = 2.0
 
 
 class ToolsConfig(BaseModel):

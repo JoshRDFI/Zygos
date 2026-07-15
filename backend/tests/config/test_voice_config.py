@@ -29,3 +29,16 @@ def test_voice_config_rejects_unknown_tts_engine():
     from pydantic import ValidationError
     with pytest.raises(ValidationError):
         VoiceConfig(tts={"engine": "kokoro"})  # not yet a valid literal
+
+
+def test_duck_config_defaults():
+    v = VoiceConfig()
+    assert v.tts.duck_gain == 0.2
+    assert v.duck_timeout_s == 2.0
+
+
+def test_duck_config_overrides():
+    cfg = ZygosConfig.model_validate(
+        {"voice": {"tts": {"duck_gain": 0.5}, "duck_timeout_s": 1.0}})
+    assert cfg.voice.tts.duck_gain == 0.5
+    assert cfg.voice.duck_timeout_s == 1.0
