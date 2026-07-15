@@ -38,7 +38,10 @@ async def speak_reply(session, voice_service, ctx, text: str, turn_id: str) -> N
     finally:
         if reason != "error" and ctx.cancelled:
             reason = "cancelled"
-        await synth.cancel()
-        await synth.aclose()
+        try:
+            await synth.cancel()
+            await synth.aclose()
+        except Exception:  # noqa: BLE001 - teardown failure must not skip tts.end
+            logger.debug("speak_reply: synth teardown failed", exc_info=True)
         session.enqueue(Frame(channel=AUDIO_OUT, type="tts.end",
                               payload={"turn_id": turn_id, "reason": reason}))

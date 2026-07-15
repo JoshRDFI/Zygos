@@ -10,11 +10,13 @@ from zygos.voice.types import AudioFormat
 
 
 class _StubSynth:
-    def __init__(self, chunks, token=None, cancel_after=None, raise_after=None):
+    def __init__(self, chunks, token=None, cancel_after=None, raise_after=None,
+                 cancel_raises=False):
         self._chunks = chunks
         self._token = token
         self._cancel_after = cancel_after
         self._raise_after = raise_after
+        self._cancel_raises = cancel_raises
         self.cancel_called = False
         self.closed = False
 
@@ -26,6 +28,32 @@ class _StubSynth:
                 raise SynthesisFailed("boom")
             yield c
             if self._cancel_after is not None and i == self._cancel_after and self._token:
+                self._token.trip()
+
+    async def cancel(self):
+        self.cancel_called = True
+        if self._cancel_raises:
+            raise SynthesisFailed("teardown boom")
+
+    async def aclose(self):
+        self.closed = True
+
+
+class _StubSynthLoopBreak:
+    """Yields chunks unconditionally and trips the token mid-stream without any
+    internal check in `chunks()` — exercises speak_reply's own
+    `if ctx.cancelled: break` line, as opposed to a generator that stops itself."""
+
+    def __init__(self, chunks, token):
+        self._chunks = chunks
+        self._token = token
+        self.cancel_called = False
+        self.closed = False
+
+    async def chunks(self):
+        for i, c in enumerate(self._chunks):
+            yield c
+            if i == 0:
                 self._token.trip()
 
     async def cancel(self):
@@ -91,3 +119,30 @@ async def test_synthesis_failure_ends_error_without_raising():
     await speak_reply(session, _StubVoice(synth), ctx, "hi", "t3")  # must not raise
     items = _drain(session)
     assert items[-1].type == "tts.end" and items[-1].payload["reason"] == "error"
+
+
+async def test_loop_body_break_on_cancelled_ends_cancelled():
+    # ctx.cancelled becomes true only between iterations of speak_reply's own
+    # loop body (not inside the generator), exercising `if ctx.cancelled: break`
+    # directly rather than the generator returning early (test_barge_in_ends_cancelled).
+    session = _session()
+    token = CancelToken()
+    ctx = root_context(InProcessEventBus()).child("t", cancel=token)
+    synth = _StubSynthLoopBreak([b"\x00", b"\x01", b"\x02"], token)
+    await speak_reply(session, _StubVoice(synth), ctx, "hi", "t4")
+    items = _drain(session)
+    audio = [i for i in items if isinstance(i, (bytes, bytearray))]
+    assert len(audio) == 1  # chunk 0 enqueued; loop breaks before chunk 1
+    assert items[-1].type == "tts.end" and items[-1].payload["reason"] == "cancelled"
+
+
+async def test_teardown_failure_does_not_prevent_tts_end():
+    # synth.cancel() raising (e.g. a dead sidecar) must not skip the tts.end frame
+    # or escape speak_reply.
+    session = _session()
+    ctx = root_context(InProcessEventBus())
+    synth = _StubSynth([b"\x00", b"\x01"], cancel_raises=True)
+    await speak_reply(session, _StubVoice(synth), ctx, "hi", "t5")  # must not raise
+    items = _drain(session)
+    assert synth.cancel_called is True
+    assert items[-1].type == "tts.end" and items[-1].payload["reason"] == "complete"
