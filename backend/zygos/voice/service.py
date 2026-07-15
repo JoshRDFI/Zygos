@@ -60,6 +60,13 @@ class VoiceService:
     def tts_format(self) -> AudioFormat | None:
         return self._tts.output_format if self._tts is not None else None
 
+    @property
+    def concurrent_sessions_ok(self) -> bool:
+        """True iff every active engine can serve concurrent sessions. Shared
+        local sidecars are not; a future API-backed engine is. Vacuously True
+        with no engines (nothing shared to protect)."""
+        return all(p.concurrent_safe for p in (self._stt, self._tts) if p is not None)
+
     async def start(self, ctx: ExecutionContext) -> None:
         if self._stt is not None:
             await self._stt.start()

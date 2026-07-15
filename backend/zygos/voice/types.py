@@ -66,6 +66,7 @@ class SttEngineSpec(BaseModel):
     name: str
     argv: tuple[str, ...]
     device: str = "cpu"
+    concurrent_safe: bool = False  # shared local sidecar -> False; API-backed engine -> True
 
 
 # runtime -> TTS sidecar
@@ -86,3 +87,4 @@ class TtsEngineSpec(BaseModel):
     argv: tuple[str, ...]
     device: str = "cpu"
     output_sample_rate: int = 24000
+    concurrent_safe: bool = False  # shared local sidecar -> False; API-backed engine -> True

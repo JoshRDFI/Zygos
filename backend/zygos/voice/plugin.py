@@ -71,6 +71,10 @@ class SttPlugin:
     def name(self) -> str:
         return self._spec.name
 
+    @property
+    def concurrent_safe(self) -> bool:
+        return self._spec.concurrent_safe
+
     async def start(self) -> None:
         await self._handle.start()
         self._started = True
@@ -154,6 +158,10 @@ class TtsPlugin:
     @property
     def name(self) -> str:
         return self._spec.name
+
+    @property
+    def concurrent_safe(self) -> bool:
+        return self._spec.concurrent_safe
 
     @property
     def output_format(self) -> AudioFormat:

@@ -84,3 +84,22 @@ async def test_voice_service_without_tts_raises():
     import pytest
     with pytest.raises(VoiceError):
         svc.synthesize_stream(ctx, "x")
+
+
+async def test_concurrent_sessions_ok_false_for_local_sidecar_engine():
+    svc = VoiceService(stt=build_stt_plugin("fake"))
+    assert svc.concurrent_sessions_ok is False
+
+
+async def test_concurrent_sessions_ok_true_when_engine_marked_safe():
+    from zygos.voice.plugin import SttPlugin
+    from zygos.voice.types import SttEngineSpec
+
+    spec = SttEngineSpec(name="api", argv=("x",), concurrent_safe=True)
+    svc = VoiceService(stt=SttPlugin(spec))  # no start(): reads spec only, spawns nothing
+    assert svc.concurrent_sessions_ok is True
+
+
+async def test_concurrent_sessions_ok_vacuously_true_without_engines():
+    svc = VoiceService(stt=None)
+    assert svc.concurrent_sessions_ok is True  # nothing shared -> no gate needed
