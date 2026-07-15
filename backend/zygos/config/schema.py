@@ -151,7 +151,14 @@ class MemoryConfig(BaseModel):
 class SttConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    engine: Literal["fake", "whisper_cpp"] = "fake"
+    engine: Literal["fake", "faster_whisper"] = "fake"
+    model: str = "base.en"
+    compute_type: str = "int8"
+    device: str = "cpu"
+    # None -> resolved to a Zygos-owned model cache dir at build time
+    download_root: str | None = None
+    # max wait for the worker to report health_ok (model load) at startup
+    readiness_timeout_s: float = 60.0
 
 
 class TtsConfig(BaseModel):

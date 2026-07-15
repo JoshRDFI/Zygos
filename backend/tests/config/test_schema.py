@@ -178,3 +178,23 @@ def test_tools_max_iterations_floor():
 
     with pytest.raises(ValidationError):
         ToolsConfig(max_iterations=0)
+
+
+def test_stt_config_defaults_to_fake():
+    from zygos.config.schema import SttConfig
+
+    c = SttConfig()
+    assert c.engine == "fake"
+    assert c.model == "base.en"
+    assert c.compute_type == "int8"
+    assert c.device == "cpu"
+    assert c.download_root is None
+    assert c.readiness_timeout_s == 60.0
+
+
+def test_stt_config_accepts_faster_whisper():
+    from zygos.config.schema import SttConfig
+
+    c = SttConfig(engine="faster_whisper", model="small.en")
+    assert c.engine == "faster_whisper"
+    assert c.model == "small.en"
