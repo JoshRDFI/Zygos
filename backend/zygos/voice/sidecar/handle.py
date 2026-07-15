@@ -75,6 +75,7 @@ class SidecarHandle:
                 *self._spec.argv, self._listener.address,
                 stdin=asyncio.subprocess.DEVNULL,
                 start_new_session=True,
+                env={**os.environ, **self._spec.env},
             )
             conn = await asyncio.wait_for(self._listener.accept(), _ACCEPT_TIMEOUT_S)
         except (OSError, asyncio.TimeoutError) as exc:

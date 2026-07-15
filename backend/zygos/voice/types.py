@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 SAMPLE_RATE_HZ = 16000
 CHANNELS = 1
@@ -67,6 +67,7 @@ class SttEngineSpec(BaseModel):
     argv: tuple[str, ...]
     device: str = "cpu"
     concurrent_safe: bool = False  # shared local sidecar -> False; API-backed engine -> True
+    env: dict[str, str] = Field(default_factory=dict)  # extra child-process env vars
 
 
 # runtime -> TTS sidecar
@@ -88,3 +89,4 @@ class TtsEngineSpec(BaseModel):
     device: str = "cpu"
     output_sample_rate: int = 24000
     concurrent_safe: bool = False  # shared local sidecar -> False; API-backed engine -> True
+    env: dict[str, str] = Field(default_factory=dict)  # extra child-process env vars

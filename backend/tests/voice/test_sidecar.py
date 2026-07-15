@@ -3,6 +3,7 @@ import sys
 
 import pytest
 
+from zygos.voice.plugin import Transcription
 from zygos.voice.sidecar import SidecarHandle
 from zygos.voice.types import SttEngineSpec
 
@@ -55,5 +56,23 @@ async def test_restart_exhaustion_raises(monkeypatch):
         with pytest.raises(Exception):
             for _ in range(3):
                 await h.ensure_alive()
+    finally:
+        await h.aclose()
+
+
+async def test_spec_env_reaches_child_process():
+    spec = SttEngineSpec(
+        name="fake",
+        argv=(sys.executable, "-m", "zygos.voice.sidecar.fake_stt"),
+        env={"ZYGOS_FAKE_STT_TRANSCRIPT": "marco polo"},
+    )
+    h = SidecarHandle(spec)
+    try:
+        await h.start()
+        tr = Transcription(h.connection)
+        await tr.push(b"\x00\x00" * 8)
+        await tr.endpoint()
+        finals = [ev async for ev in tr.events() if ev.kind == "final"]
+        assert finals and finals[-1].text == "marco polo"
     finally:
         await h.aclose()
