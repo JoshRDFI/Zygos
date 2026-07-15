@@ -25,6 +25,7 @@ from zygos.agent.loop import run_agentic_loop
 from zygos.agent.observer import ToolCallFinished, ToolCallStarted, ToolEvent
 from zygos.api.frames import CHAT, TOOLS, Frame
 from zygos.api.session import Session
+from zygos.api.speech import speak_reply
 from zygos.memory.service import MemoryService
 from zygos.providers.types import GenerationRequest, Message
 from zygos.reasoning.service import ReasoningService
@@ -147,6 +148,10 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
 
         payload = {"text": final, **end_extra}
         session.enqueue(Frame(channel=CHAT, type="turn.end", payload=payload))
+
+        if (session.speak and deps.voice_service is not None
+                and deps.voice_service.tts_available and final):
+            await speak_reply(session, deps.voice_service, ctx, final, turn_id)
     except Exception:  # noqa: BLE001 - a failed turn must not kill the session
         logger.exception("turn failed")
         session.enqueue(Frame(channel=CHAT, type="error", payload={"message": "generation failed"}))
