@@ -24,6 +24,7 @@ from zygos.api.routes_sessions import router as sessions_router
 from zygos.api.session import SessionRegistry
 from zygos.api.trace import install_trace_bridge
 from zygos.api.turn import TurnDeps
+from zygos.api.voice_gate import VoiceGate
 from zygos.api.websocket import router as ws_router
 from zygos.providers.embedding import Embedder
 from zygos.runtime.bootstrap import (
@@ -89,6 +90,7 @@ def create_app(
     app.state.registry = registry
     resolver = WebSocketPromptResolver(registry, runtime.config.server.prompt_timeout_s)
     runtime.tool_service.bind_resolver(resolver)
+    voice_gate = VoiceGate()
     app.state.turn_deps = TurnDeps(
         model_service=runtime.model_service,
         reasoning_factory=runtime.reasoning_factory,
@@ -99,6 +101,7 @@ def create_app(
         tools=runtime.tools,
         tool_loop_config=runtime.tool_loop_config,
         voice_service=runtime.voice_service,
+        voice_gate=voice_gate,
     )
     install_trace_bridge(runtime.event_bus, registry)
     app.state.session_count = session_count if session_count is not None else registry.count

@@ -43,6 +43,23 @@ async def _writer(websocket: WebSocket, session: Session) -> None:
             return
 
 
+def _acquire_voice_or_warn(session: Session, deps: TurnDeps) -> bool:
+    """Gate voice to one session at a time for shared local sidecars. Returns
+    True (and takes ownership) if the session may use voice; returns False and
+    warns the client otherwise. Inert when there is no voice service, no gate,
+    or the engine is concurrency-safe (API-backed)."""
+    vs = deps.voice_service
+    gate = deps.voice_gate
+    if vs is None or gate is None or vs.concurrent_sessions_ok:
+        return True
+    if gate.try_acquire(session.id):
+        return True
+    session.enqueue(Frame(channel=CONTROL, type="audio.unavailable",
+                          payload={"reason": "voice_in_use",
+                                   "message": "Voice is active in another session."}))
+    return False
+
+
 async def _dispatch(session: Session, deps: TurnDeps, frame: Frame) -> None:
     if frame.channel == CHAT and frame.type == "user_message":
         text = str(frame.payload.get("text", ""))
@@ -68,11 +85,15 @@ async def _dispatch(session: Session, deps: TurnDeps, frame: Frame) -> None:
         if fut is not None and not fut.done() and decision in ("allow", "deny"):
             fut.set_result(decision)
     elif frame.channel == CONTROL and frame.type == "audio.start":
-        await start_audio_turn(session, deps)
+        if _acquire_voice_or_warn(session, deps):
+            await start_audio_turn(session, deps)
     elif frame.channel == CONTROL and frame.type == "audio.endpoint":
         await end_audio_turn(session)
     elif frame.channel == CONTROL and frame.type == "audio.output":
-        session.speak = bool(frame.payload.get("enabled", False))
+        if not bool(frame.payload.get("enabled", False)):
+            session.speak = False  # disabling never gated; does not release ownership
+        elif _acquire_voice_or_warn(session, deps):
+            session.speak = True
     # unknown (channel, type) ignored — forward-compat rule
 
 

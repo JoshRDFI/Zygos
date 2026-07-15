@@ -268,3 +268,29 @@ def test_back_to_back_utterances_barge_in_cleanly(tmp_path):
             normal = [e for e in ends if not e["payload"].get("cancelled")]
             assert len(cancelled) == 1, "turn 1 must have been barged-in on (turn.end cancelled=True)"
             assert len(normal) == 1 and "text" in normal[0]["payload"]  # turn 2 completed normally
+
+
+def test_second_session_voice_is_refused(tmp_path):
+    rt = _voice_runtime(tmp_path)
+    app = create_app(rt)
+    with TestClient(app) as client:
+        a = client.post("/sessions").json()["id"]
+        b = client.post("/sessions").json()["id"]
+        with client.websocket_connect(f"/ws/session/{a}") as ws_a, \
+             client.websocket_connect(f"/ws/session/{b}") as ws_b:
+            # A claims voice
+            ws_a.send_text(json.dumps({"channel": "control", "type": "audio.start", "payload": {}}))
+            ws_a.send_text(json.dumps({"channel": "control", "type": "ping", "payload": {}}))
+            _drive_until(ws_a, lambda f: f["channel"] == "control" and f["type"] == "pong", [])
+
+            # B is refused with a degraded-service warning, and never begins a transcription
+            ws_b.send_text(json.dumps({"channel": "control", "type": "audio.start", "payload": {}}))
+            warn = _drive_until(
+                ws_b, lambda f: f["channel"] == "control" and f["type"] == "audio.unavailable", [])
+            assert warn["payload"]["reason"] == "voice_in_use"
+            assert app.state.registry.get(b).audio is None
+
+            # B's typed chat still works (text is never gated)
+            ws_b.send_text(json.dumps(
+                {"channel": "chat", "type": "user_message", "payload": {"text": "yo"}}))
+            _drive_until(ws_b, lambda f: f["channel"] == "chat" and f["type"] == "turn.end", [])

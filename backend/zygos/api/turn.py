@@ -26,6 +26,7 @@ from zygos.agent.observer import ToolCallFinished, ToolCallStarted, ToolEvent
 from zygos.api.frames import CHAT, TOOLS, Frame
 from zygos.api.session import Session
 from zygos.api.speech import speak_reply
+from zygos.api.voice_gate import VoiceGate
 from zygos.memory.service import MemoryService
 from zygos.providers.types import GenerationRequest, Message
 from zygos.reasoning.service import ReasoningService
@@ -50,6 +51,7 @@ class TurnDeps:
     tools: tuple[Tool, ...] = ()
     tool_loop_config: ToolLoopConfig | None = None
     voice_service: "VoiceService | None" = None
+    voice_gate: "VoiceGate | None" = None
 
 
 def _json_safe(value):

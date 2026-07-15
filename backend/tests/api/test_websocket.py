@@ -218,11 +218,55 @@ async def test_writer_sends_frames_as_text_and_audio_as_bytes():
 async def test_audio_output_frame_toggles_speak():
     session = _bare_session()
     assert session.speak is False
-    # deps unused by this control branch; None-friendly minimal stand-in
-    deps = object()
+    # no voice service configured -> gate is inert; deps just needs the two attrs
+    deps = SimpleNamespace(voice_service=None, voice_gate=None)
     await _dispatch(session, deps, Frame(channel=CONTROL, type="audio.output",
                                          payload={"enabled": True}))
     assert session.speak is True
     await _dispatch(session, deps, Frame(channel=CONTROL, type="audio.output",
                                          payload={"enabled": False}))
     assert session.speak is False
+
+
+from types import SimpleNamespace
+
+from zygos.api.voice_gate import VoiceGate
+from zygos.api.websocket import _acquire_voice_or_warn
+
+
+class _Sess:
+    def __init__(self, sid):
+        self.id = sid
+        self.sent = []
+    def enqueue(self, frame):
+        self.sent.append(frame)
+
+
+def _deps(voice_service, gate):
+    return SimpleNamespace(voice_service=voice_service, voice_gate=gate)
+
+
+def test_gate_inert_when_no_voice_service():
+    s = _Sess("a")
+    assert _acquire_voice_or_warn(s, _deps(None, VoiceGate())) is True
+    assert s.sent == []
+
+
+def test_gate_inert_for_concurrency_safe_engine():
+    s = _Sess("a")
+    vs = SimpleNamespace(concurrent_sessions_ok=True)
+    assert _acquire_voice_or_warn(s, _deps(vs, VoiceGate())) is True
+    assert s.sent == []
+
+
+def test_gate_enforced_first_allows_second_warns():
+    gate = VoiceGate()
+    vs = SimpleNamespace(concurrent_sessions_ok=False)
+    a, b = _Sess("a"), _Sess("b")
+    assert _acquire_voice_or_warn(a, _deps(vs, gate)) is True
+    assert a.sent == []
+    assert _acquire_voice_or_warn(b, _deps(vs, gate)) is False
+    assert len(b.sent) == 1
+    warn = b.sent[0]
+    assert warn.channel == "control" and warn.type == "audio.unavailable"
+    assert warn.payload["reason"] == "voice_in_use"
