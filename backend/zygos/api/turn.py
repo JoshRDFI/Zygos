@@ -52,6 +52,8 @@ class TurnDeps:
     tool_loop_config: ToolLoopConfig | None = None
     voice_service: "VoiceService | None" = None
     voice_gate: "VoiceGate | None" = None
+    duck_gain: float = 0.2
+    duck_timeout_s: float = 2.0
 
 
 def _json_safe(value):

@@ -102,6 +102,8 @@ def create_app(
         tool_loop_config=runtime.tool_loop_config,
         voice_service=runtime.voice_service,
         voice_gate=voice_gate,
+        duck_gain=runtime.config.voice.tts.duck_gain,
+        duck_timeout_s=runtime.config.voice.duck_timeout_s,
     )
     install_trace_bridge(runtime.event_bus, registry)
     app.state.session_count = session_count if session_count is not None else registry.count
