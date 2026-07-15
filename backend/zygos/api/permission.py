@@ -28,12 +28,23 @@ class WebSocketPromptResolver:
             return "deny"
         fut: asyncio.Future[PermissionDecision] = asyncio.get_running_loop().create_future()
         session.pending_permissions[req.call_id] = fut
+        cancel_wait = asyncio.ensure_future(ctx.wait_cancelled())
         try:
             session.enqueue(Frame(channel=TOOLS, type="permission", payload={
                 "call_id": req.call_id, "tool": req.tool, "args_summary": req.args_summary,
             }))
-            return await asyncio.wait_for(fut, self._timeout_s)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
+            # Race the client's response against the turn's cancellation. A barge-in
+            # or control:cancel trips the CancelToken; without observing it here the
+            # tool would stay parked until the timeout, freezing the WS reader loop
+            # that awaits the cancelled turn (9774f63d). An abandoned turn's
+            # permission is moot, so cancellation (like a timeout) denies.
+            await asyncio.wait({fut, cancel_wait}, timeout=self._timeout_s,
+                               return_when=asyncio.FIRST_COMPLETED)
+            if fut.done() and not fut.cancelled():
+                return fut.result()
+            return "deny"  # cancelled or timed out
+        except asyncio.CancelledError:
             return "deny"
         finally:
+            cancel_wait.cancel()
             session.pending_permissions.pop(req.call_id, None)

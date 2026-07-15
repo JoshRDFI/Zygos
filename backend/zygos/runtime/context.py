@@ -62,6 +62,13 @@ class ExecutionContext:
     def cancelled(self) -> bool:
         return self._cancel.is_set
 
+    async def wait_cancelled(self) -> None:
+        """Block until this context's CancelToken is tripped (cooperative cancel).
+
+        Lets an awaiter race a long wait against cancellation instead of polling.
+        """
+        await self._cancel.wait()
+
 
 def root_context(bus: EventBus, *, session_id: str | None = None) -> ExecutionContext:
     return ExecutionContext(

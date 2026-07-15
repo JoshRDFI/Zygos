@@ -350,3 +350,58 @@ async def test_dispatch_vad_unknown_state_ignored():
     await _dispatch(s, _vad_deps(),
                     Frame(channel=CONTROL, type="audio.vad", payload={"state": "bogus"}))
     assert _drain_ws(s) == [] and s.ducked is False
+
+
+from zygos.api.permission import WebSocketPromptResolver
+from zygos.tools.permissions import PermissionRequest
+from zygos.tools.types import ToolContext
+
+
+async def test_barge_in_does_not_hang_when_turn_parked_on_permission():
+    # End-to-end guard for 9774f63d. A chat:user_message barge-in trips the active
+    # turn's CancelToken then awaits that turn before starting a new one. When the
+    # interrupted turn is parked inside the permission resolver, the parked
+    # resolve() must observe the trip and return promptly — otherwise this await
+    # (running on the WS reader loop) freezes until the permission timeout.
+    bus = InProcessEventBus()
+    registry = SessionRegistry(new_context=lambda sid: root_context(bus, session_id=sid),
+                               clock=lambda: 0.0, new_id=lambda: "s1")
+    session = registry.create()
+    session.connected = True
+    provider = FakeProvider(text="ok")
+    model = DefaultModelService(ProviderRouter([RouteChoice("fake", "m")], {"fake": provider}))
+    deps = TurnDeps(model_service=model,
+                    reasoning_factory=lambda: DefaultReasoningService(model, ReasoningConfig(enabled=True)),
+                    reasoning_enabled=False, memory_service=None, new_id=lambda: "turn")
+
+    # A prior turn is parked inside the permission resolver, tied to the session token.
+    token = CancelToken()
+    session.active_cancel = token
+    resolver = WebSocketPromptResolver(registry, timeout_s=30.0)
+    ctx = ToolContext(exec=session.root.child("prior", cancel=token),
+                      tool="run_command", call_id="c1")
+    req = PermissionRequest(tool="run_command", args_summary={}, run_id="r", call_id="c1")
+    parked = asyncio.create_task(resolver.resolve(req, ctx))
+    session.active_task = parked
+    await asyncio.sleep(0)  # park it awaiting the permission response
+    assert "c1" in session.pending_permissions
+
+    # Barge in. Poll for _dispatch to finish ON ITS OWN — do NOT wrap it in
+    # wait_for, whose timeout would cancel the chain and let the buggy resolve's
+    # `except CancelledError` mask the hang (a false pass).
+    frame = Frame(channel=CHAT, type="user_message", payload={"text": "stop, do this instead"})
+    disp = asyncio.create_task(_dispatch(session, deps, frame))
+    for _ in range(40):
+        await asyncio.sleep(0.005)
+        if disp.done():
+            break
+    finished = disp.done()
+    new_task = session.active_task
+    if not finished:  # buggy: reader hung on the parked turn — clean up and fail
+        disp.cancel()
+        parked.cancel()
+    assert finished, "barge-in await hung: the parked resolve ignored the cancel-token trip"
+    assert parked.done() and parked.result() == "deny"
+    assert new_task is not parked  # a fresh turn was started
+    if new_task is not None:
+        await asyncio.wait_for(new_task, timeout=1.0)  # let it finish, no leak

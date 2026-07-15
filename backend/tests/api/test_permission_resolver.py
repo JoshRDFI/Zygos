@@ -5,6 +5,7 @@ import pytest
 from zygos.api.frames import TOOLS
 from zygos.api.permission import WebSocketPromptResolver
 from zygos.api.session import SessionRegistry
+from zygos.runtime.context import CancelToken
 from zygos.runtime.events import InProcessEventBus
 from zygos.tools.permissions import PermissionRequest
 from zygos.tools.types import ToolContext
@@ -89,6 +90,36 @@ async def test_cancelled_wait_denies_and_cleans_up_pending():
     task.cancel()
     result = await task
     assert result == "deny"
+    assert "c1" not in session.pending_permissions
+
+
+@pytest.mark.asyncio
+async def test_tripped_cancel_token_denies_without_waiting_for_timeout():
+    # A barge-in trips the turn's CancelToken while a tool is parked awaiting a
+    # permission response. resolve() must observe the trip and deny promptly,
+    # never hang for the (long) permission timeout — otherwise the WS reader
+    # loop, which is awaiting the parked turn, freezes until timeout (9774f63d).
+    reg = _registry()
+    session = reg.create()
+    session.connected = True
+    token = CancelToken()
+    ctx = ToolContext(exec=session.root.child("turn1", cancel=token),
+                      tool="run_command", call_id="c1")
+    resolver = WebSocketPromptResolver(reg, timeout_s=30.0)
+    task = asyncio.create_task(resolver.resolve(_req(), ctx))
+    await asyncio.sleep(0)  # let it register the future and start waiting
+    assert "c1" in session.pending_permissions
+    token.trip()  # barge-in / cancel trips the turn's token
+    # resolve must finish ON ITS OWN (no external cancellation) after the trip.
+    for _ in range(20):
+        await asyncio.sleep(0)
+        if task.done():
+            break
+    finished = task.done()
+    if not finished:
+        task.cancel()  # don't leak a parked task into the next test
+    assert finished, "resolve ignored the cancel-token trip and hung for the timeout"
+    assert task.result() == "deny"
     assert "c1" not in session.pending_permissions
 
 

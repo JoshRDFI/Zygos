@@ -107,6 +107,9 @@ class ToolContext:
     def cancelled(self) -> bool:
         return self.exec.cancelled
 
+    async def wait_cancelled(self) -> None:
+        await self.exec.wait_cancelled()
+
     async def emit(self, payload: EventPayload, *, source: str) -> None:
         await self.exec.emit(payload, source=source)
 
