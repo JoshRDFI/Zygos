@@ -36,4 +36,8 @@ async def get_session(session_id: str, request: Request) -> dict:
 async def delete_session(session_id: str, request: Request) -> dict:
     if not request.app.state.registry.delete(session_id):
         raise HTTPException(status_code=404, detail="session not found")
+    # turn_deps is absent in the bare-FastAPI route tests; nested getattr tolerates it.
+    gate = getattr(getattr(request.app.state, "turn_deps", None), "voice_gate", None)
+    if gate is not None:
+        gate.release(session_id)
     return {"deleted": session_id}

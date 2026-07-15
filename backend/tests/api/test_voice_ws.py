@@ -294,3 +294,40 @@ def test_second_session_voice_is_refused(tmp_path):
             ws_b.send_text(json.dumps(
                 {"channel": "chat", "type": "user_message", "payload": {"text": "yo"}}))
             _drive_until(ws_b, lambda f: f["channel"] == "chat" and f["type"] == "turn.end", [])
+
+
+def test_disconnect_releases_voice_for_next_session(tmp_path):
+    rt = _voice_runtime(tmp_path)
+    app = create_app(rt)
+    with TestClient(app) as client:
+        a = client.post("/sessions").json()["id"]
+        b = client.post("/sessions").json()["id"]
+        with client.websocket_connect(f"/ws/session/{a}") as ws_a:
+            ws_a.send_text(json.dumps({"channel": "control", "type": "audio.start", "payload": {}}))
+            ws_a.send_text(json.dumps({"channel": "control", "type": "ping", "payload": {}}))
+            _drive_until(ws_a, lambda f: f["channel"] == "control" and f["type"] == "pong", [])
+            assert app.state.turn_deps.voice_gate.owner == a
+        # A disconnected (with-block exit) -> ownership freed
+        gate = app.state.turn_deps.voice_gate
+        _wait_until(lambda: gate.owner is None, timeout=3.0)
+
+        # B can now claim voice and drive a spoken turn
+        with client.websocket_connect(f"/ws/session/{b}") as ws_b:
+            ws_b.send_text(json.dumps({"channel": "control", "type": "audio.start", "payload": {}}))
+            for _ in range(4):
+                ws_b.send_bytes(bytes([AUDIO_TAG_IN]) + b"\x00" * 640)
+            ws_b.send_text(json.dumps({"channel": "control", "type": "audio.endpoint", "payload": {}}))
+            _drive_until(ws_b, lambda f: f["channel"] == "chat" and f["type"] == "final", [])
+            assert gate.owner == b
+
+
+def test_delete_session_releases_voice_ownership(tmp_path):
+    rt = _voice_runtime(tmp_path)
+    app = create_app(rt)
+    client = TestClient(app)  # no `with`: skip lifespan; app.state.turn_deps is set in create_app
+    gate = app.state.turn_deps.voice_gate
+    sid = client.post("/sessions").json()["id"]
+    gate.try_acquire(sid)
+    assert gate.owner == sid
+    assert client.delete(f"/sessions/{sid}").status_code == 200
+    assert gate.owner is None

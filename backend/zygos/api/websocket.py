@@ -149,6 +149,9 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
                 session.audio.pusher.cancel()
                 session.audio = None
             session.connected = False
+            gate = getattr(deps, "voice_gate", None)
+            if gate is not None:
+                gate.release(session.id)
             for fut in list(session.pending_permissions.values()):
                 if not fut.done():
                     fut.set_result("deny")
