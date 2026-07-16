@@ -23,6 +23,9 @@ server = [
     "uvicorn>=0.29",
     "websockets>=12",
 ]
+voice = [
+    "faster-whisper>=1.0",
+]
 
 [project.scripts]
 zygos = "zygos.cli.__main__:main"
@@ -39,5 +42,6 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "live: hits a real local Ollama server; excluded by default",
+    "live_voice: loads a real faster-whisper model; excluded by default",
 ]
-addopts = "-m 'not live'"
+addopts = "-m 'not live and not live_voice'"
