@@ -96,6 +96,10 @@ class VoiceService:
         if self._tts is not None:
             await self._tts.start()
 
+    async def ensure_stt_ready(self, ctx: ExecutionContext) -> None:
+        if self._stt is not None:
+            await self._stt.ensure_alive()
+
     def begin_transcription(self, ctx: ExecutionContext) -> Transcription:
         if self._stt is None:
             raise VoiceError("no speech_to_text engine registered")

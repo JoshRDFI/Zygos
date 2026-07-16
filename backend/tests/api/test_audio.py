@@ -82,6 +82,9 @@ class _FakeVoiceService:
     def __init__(self, transcription) -> None:
         self._transcription = transcription
 
+    async def ensure_stt_ready(self, ctx) -> None:
+        pass
+
     def begin_transcription(self, ctx):
         return self._transcription
 
@@ -120,3 +123,33 @@ async def test_start_audio_turn_cancels_pusher_when_transcription_fails_before_e
     assert pusher_task.cancelled() or pusher_task.done()
     assert session.audio is None
     assert any(f.channel == CHAT and f.type == "error" for f in session.frames)
+
+
+import sys
+from zygos.api.audio import cancel_audio_turn
+from zygos.voice.plugin import SttPlugin
+from zygos.voice.service import VoiceService
+from zygos.voice.types import SttEngineSpec
+
+FAKE_STT = SttEngineSpec(name="fake", argv=(sys.executable, "-m", "zygos.voice.sidecar.fake_stt"))
+
+
+async def test_start_audio_turn_ensures_stt_ready_restarting_dead_sidecar():
+    stt = SttPlugin(FAKE_STT, readiness_timeout_s=5.0)
+    await stt.start()
+    svc = VoiceService(stt=stt)
+    # crash the child out from under the plugin (simulates a crash between turns)
+    stt._handle._proc.kill(); await stt._handle._proc.wait()
+    assert stt.health().alive is False   # dead before the turn starts
+
+    session = _FakeSessionForStart()     # has .root=None, .audio=None, .enqueue
+    deps = _FakeDeps(svc)                # exposes .voice_service (now a real VoiceService)
+    try:
+        await start_audio_turn(session, deps)   # must ensure_stt_ready -> restart
+        assert stt.health().alive is True       # restarted before begin_transcription
+        assert session.audio is not None
+        # cancel drives an IPC send over the (fresh) connection: proves begin bound
+        # the Transcription to the restarted conn, not the dead one.
+        await cancel_audio_turn(session)
+    finally:
+        await svc.aclose()

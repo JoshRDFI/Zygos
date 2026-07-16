@@ -39,6 +39,7 @@ class AudioTurn:
 async def start_audio_turn(session, deps: TurnDeps) -> None:
     if deps.voice_service is None or session.audio is not None:
         return
+    await deps.voice_service.ensure_stt_ready(session.root)
     inbox: asyncio.Queue = asyncio.Queue()
     tr = deps.voice_service.begin_transcription(session.root)
 

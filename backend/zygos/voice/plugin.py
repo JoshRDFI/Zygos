@@ -89,6 +89,9 @@ class SttPlugin:
             raise VoiceError(f"{self._spec.name} unexpected readiness reply: {body!r}")
         self._started = True
 
+    async def ensure_alive(self) -> None:
+        await self._handle.ensure_alive()
+
     def begin(self, ctx: ExecutionContext) -> Transcription:
         return Transcription(self._handle.connection)
 
