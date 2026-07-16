@@ -75,6 +75,27 @@ async def test_concurrent_ensure_alive_spawns_once():
         await h.aclose()
 
 
+async def test_aclose_group_kills_even_when_main_child_already_dead(monkeypatch):
+    h = SidecarHandle(FAKE)
+    await h.start()
+    h._proc.kill(); await h._proc.wait()   # reap the REAL child so it can't leak
+
+    class _DeadProc:                        # main already exited; grandchildren may live
+        pid = 999999
+        returncode = 0
+        async def wait(self):
+            return 0
+
+    h._proc = _DeadProc()
+    calls = []
+    monkeypatch.setattr("zygos.voice.sidecar.handle.os.getpgid", lambda pid: 4242)
+    monkeypatch.setattr("zygos.voice.sidecar.handle.os.killpg",
+                        lambda pgid, sig: calls.append((pgid, sig)))
+
+    await h.aclose()
+    assert calls and calls[0][0] == 4242    # group kill attempted despite the dead main
+
+
 async def test_spec_env_reaches_child_process():
     spec = SttEngineSpec(
         name="fake",

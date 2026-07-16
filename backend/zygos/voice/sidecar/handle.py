@@ -27,16 +27,6 @@ class SidecarState:
     engine: str
 
 
-def _kill_process_group(proc: asyncio.subprocess.Process) -> None:
-    try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):  # pragma: no cover
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-
-
 class SidecarHandle:
     def __init__(
         self,
@@ -119,12 +109,17 @@ class SidecarHandle:
 
     async def aclose(self) -> None:
         self._closed = True
-        if self._proc is not None and self._proc.returncode is None:
-            _kill_process_group(self._proc)
+        if self._proc is not None:
             try:
-                await self._proc.wait()
-            except ProcessLookupError:  # pragma: no cover
+                pgid = os.getpgid(self._proc.pid)
+                os.killpg(pgid, signal.SIGKILL)   # reap forked grandchildren too
+            except (ProcessLookupError, PermissionError):  # pragma: no cover
                 pass
+            if self._proc.returncode is None:
+                try:
+                    await self._proc.wait()
+                except ProcessLookupError:  # pragma: no cover
+                    pass
         if self._conn is not None:
             await self._conn.close()
         if self._listener is not None:
