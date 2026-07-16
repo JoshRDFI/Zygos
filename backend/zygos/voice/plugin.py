@@ -10,6 +10,34 @@ from zygos.voice.sidecar import SidecarHandle
 from zygos.voice.types import AudioFormat, SttEngineSpec, TranscriptEvent, TtsEngineSpec
 
 
+_DRAIN_TERMINALS = frozenset({"end", "final", "error", "cancelled"})
+
+
+async def _drain_to_terminal(conn: IpcConnection, *, poll_s: float = 0.05,
+                             budget_s: float = 2.0) -> None:
+    """Discard frames until a terminal control or EOF, bounded by budget_s.
+
+    Best-effort: after a barge-in `cancel`, the worker emits its terminal
+    promptly, so the terminal arrives within a poll. On a wedged/dead worker we
+    give up within budget_s (the sidecar supervisor respawns it; the
+    single-session gate prevents cross-session bleed).
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + budget_s
+    while True:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return
+        try:
+            kind, body = await asyncio.wait_for(conn.recv(), min(poll_s, remaining))
+        except asyncio.TimeoutError:
+            continue
+        except EOFError:
+            return
+        if kind == "control" and body.get("type") in _DRAIN_TERMINALS:
+            return
+
+
 class Transcription:
     """One in-flight utterance over the sidecar's shared connection."""
 
