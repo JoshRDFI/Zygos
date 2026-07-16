@@ -19,7 +19,7 @@ from zygos.voice.contract import SttHealth, TtsHealth
 if TYPE_CHECKING:
     from zygos.runtime.bootstrap import RuntimeAssembly
 
-_ABS_PATH = re.compile(r"(?:[A-Za-z]:\\[^\s]+|/[^\s]+)")
+_ABS_PATH = re.compile(r"(?:(?<=\s)|^)(?:[A-Za-z]:\\|/)[^\s]*")
 
 
 def _scrub_error(msg: str | None) -> str | None:

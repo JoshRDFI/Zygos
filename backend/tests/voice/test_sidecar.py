@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sys
 
 import pytest
@@ -88,12 +89,43 @@ async def test_aclose_group_kills_even_when_main_child_already_dead(monkeypatch)
 
     h._proc = _DeadProc()
     calls = []
-    monkeypatch.setattr("zygos.voice.sidecar.handle.os.getpgid", lambda pid: 4242)
     monkeypatch.setattr("zygos.voice.sidecar.handle.os.killpg",
-                        lambda pgid, sig: calls.append((pgid, sig)))
+                        lambda pid, sig: calls.append(pid))
+    await h.aclose()
+    assert calls == [999999]   # group kill uses the pid directly, no getpgid, despite dead main
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="POSIX fork()-based integration test")
+async def test_aclose_reaps_grandchild_after_leader_dies_posix():
+    """Faithful end-to-end version of the killpg-by-pid fix: a real grandchild,
+    forked by the sidecar leader, must be killed by aclose() even though the
+    leader process has already exited on its own by the time aclose() runs."""
+    spec = SttEngineSpec(name="fork-worker", argv=(sys.executable, "-m", "tests.voice._fork_worker"))
+    h = SidecarHandle(spec)
+    conn = await h.start()
+    kind, body = await conn.recv()
+    assert body["type"] == "forked"
+    grandchild_pid = body["child_pid"]
+
+    # give the leader time to exit and asyncio time to reap it, so aclose()
+    # really does hit the "main already dead" path this fix targets.
+    for _ in range(50):
+        if h._proc.returncode is not None:
+            break
+        await asyncio.sleep(0.05)
+    assert h._proc.returncode is not None   # leader is dead before aclose() runs
 
     await h.aclose()
-    assert calls and calls[0][0] == 4242    # group kill attempted despite the dead main
+
+    # poll briefly: SIGKILL delivery + reaping by the OS isn't instantaneous
+    for _ in range(50):
+        try:
+            os.kill(grandchild_pid, 0)
+        except ProcessLookupError:
+            break
+        await asyncio.sleep(0.05)
+    else:
+        pytest.fail("grandchild still alive after aclose()")
 
 
 async def test_spec_env_reaches_child_process():

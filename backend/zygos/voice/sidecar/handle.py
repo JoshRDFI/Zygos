@@ -111,10 +111,14 @@ class SidecarHandle:
         self._closed = True
         if self._proc is not None:
             try:
-                pgid = os.getpgid(self._proc.pid)
-                os.killpg(pgid, signal.SIGKILL)   # reap forked grandchildren too
-            except (ProcessLookupError, PermissionError):  # pragma: no cover
-                pass
+                # child is its own session/group leader (start_new_session=True),
+                # so its pgid == pid; kill the whole group to reap forked grandchildren.
+                os.killpg(self._proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                try:
+                    self._proc.kill()
+                except ProcessLookupError:
+                    pass
             if self._proc.returncode is None:
                 try:
                     await self._proc.wait()

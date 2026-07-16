@@ -57,3 +57,7 @@ def test_scrub_error_passthrough_none_and_plain():
 
 def test_scrub_error_truncates():
     assert len(_scrub_error("x" * 500)) <= 200
+
+
+def test_scrub_error_keeps_non_path_slashes():
+    assert _scrub_error("retry and/or fail, ratio 1/2") == "retry and/or fail, ratio 1/2"

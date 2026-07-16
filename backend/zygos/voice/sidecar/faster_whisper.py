@@ -52,7 +52,7 @@ def _transcribe(model, audio: "np.ndarray") -> str:
 
 async def _run(address: str) -> None:
     conn = await connect(address)
-    model = None            # lazy-loaded on connect (below), kept for restarts
+    model = None            # loaded once below, after connect()
     buffer = bytearray()
     active = False
     try:

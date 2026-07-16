@@ -126,7 +126,6 @@ async def test_start_audio_turn_cancels_pusher_when_transcription_fails_before_e
 
 
 import sys
-from zygos.api.audio import cancel_audio_turn
 from zygos.voice.plugin import SttPlugin
 from zygos.voice.service import VoiceService
 from zygos.voice.types import SttEngineSpec

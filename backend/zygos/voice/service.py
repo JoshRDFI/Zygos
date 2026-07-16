@@ -20,7 +20,7 @@ _DEFAULT_FW_DOWNLOAD_ROOT = ".zygos/models/faster-whisper"
 
 _STT_ENGINES: dict[str, SttEngineSpec] = {
     "fake": SttEngineSpec(name="fake", argv=(sys.executable, "-m", "zygos.voice.sidecar.fake_stt")),
-    # "whisper_cpp": added in the next increment (real engine).
+    # "faster_whisper" is built per-config in build_stt_plugin (needs env params).
 }
 
 
