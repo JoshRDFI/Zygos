@@ -65,3 +65,22 @@ def test_ensure_assets_rejects_sha_mismatch(tmp_path, monkeypatch):
         ensure_assets(str(tmp_path))
     # Verify temp files are cleaned up after mismatch
     assert not list(tmp_path.rglob("*.part"))
+
+
+def test_download_cleanup_on_urlretrieve_failure(tmp_path, monkeypatch):
+    """Verify .part file is cleaned up if urlretrieve raises (network error, etc)."""
+    def failing_urlretrieve(url, dest):
+        Path(dest).write_bytes(b"partial content")
+        raise IOError("network error")
+
+    monkeypatch.setattr(ka.urllib.request, "urlretrieve", failing_urlretrieve)
+    asset = ka.Asset(filename="test.bin", url="http://fake", sha256="deadbeef")
+    dest = tmp_path / "test.bin"
+
+    with pytest.raises(IOError, match="network error"):
+        ka._download(asset, dest)
+
+    # Verify .part file was cleaned up
+    assert not list(tmp_path.rglob("*.part"))
+    # Verify dest was not created
+    assert not dest.exists()

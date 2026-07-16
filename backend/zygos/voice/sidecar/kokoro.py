@@ -73,7 +73,13 @@ async def _run(address: str) -> None:
                 except Exception as exc:  # noqa: BLE001 - report, don't crash
                     await conn.send_control({"type": "error", "message": str(exc)})
             elif mtype == "cancel":
-                pass  # runtime-side Synthesis.chunks() unwinds barge-in; nothing to interrupt here
+                # No-op: this worker synthesizes a whole `synthesize` request before
+                # returning to recv(), so a cancel that arrives mid-synthesis is only
+                # seen after the request completes. Real mid-stream interruption (and
+                # draining stale PCM off the shared connection) is tracked under the
+                # I3 sidecar-mux work (Archon d19a6950). Harmless with the fake worker
+                # and while no real-audio consumer barges in.
+                pass
             elif mtype == "health":
                 await conn.send_control({"type": "health_ok"})
     finally:

@@ -55,11 +55,14 @@ def verify_sha256(path: Path, expected: str) -> bool:
 def _download(asset: Asset, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
-    urllib.request.urlretrieve(asset.url, tmp)
-    if not verify_sha256(tmp, asset.sha256):
+    try:
+        urllib.request.urlretrieve(asset.url, tmp)
+        if not verify_sha256(tmp, asset.sha256):
+            raise RuntimeError(f"sha256 mismatch for {asset.filename}")
+        tmp.replace(dest)
+    except BaseException:
         tmp.unlink(missing_ok=True)
-        raise RuntimeError(f"sha256 mismatch for {asset.filename}")
-    tmp.replace(dest)
+        raise
 
 
 def ensure_assets(download_root: str | None) -> tuple[Path, Path]:

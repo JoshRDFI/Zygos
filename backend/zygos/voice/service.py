@@ -48,7 +48,7 @@ def build_stt_plugin(stt: SttConfig) -> SttPlugin:
 
 _TTS_ENGINES: dict[str, TtsEngineSpec] = {
     "fake": TtsEngineSpec(name="fake", argv=(sys.executable, "-m", "zygos.voice.sidecar.fake_tts")),
-    # "kokoro" / "piper": added in the next increment (real engines).
+    # "kokoro" is built per-config in build_tts_plugin (needs env params).
 }
 
 
