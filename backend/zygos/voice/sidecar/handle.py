@@ -56,6 +56,7 @@ class SidecarHandle:
         self._restarts = 0
         self._last_error: str | None = None
         self._closed = False
+        self._restart_lock = asyncio.Lock()
 
     @property
     def connection(self) -> IpcConnection:
@@ -94,15 +95,18 @@ class SidecarHandle:
     async def ensure_alive(self) -> None:
         if self._closed or not self._child_dead():
             return
-        while self._restarts < self._max_restarts:
-            self._restarts += 1
-            await self._sleep(self._backoff * (2 ** (self._restarts - 1)))
-            try:
-                await self._spawn()
-                return
-            except SidecarSpawnError as exc:
-                self._last_error = str(exc)
-        raise SidecarCrashed(f"{self._spec.name} exhausted {self._max_restarts} restarts")
+        async with self._restart_lock:
+            if self._closed or not self._child_dead():
+                return   # another waiter already restarted it
+            while self._restarts < self._max_restarts:
+                self._restarts += 1
+                await self._sleep(self._backoff * (2 ** (self._restarts - 1)))
+                try:
+                    await self._spawn()
+                    return
+                except SidecarSpawnError as exc:
+                    self._last_error = str(exc)
+            raise SidecarCrashed(f"{self._spec.name} exhausted {self._max_restarts} restarts")
 
     def snapshot(self) -> SidecarState:
         return SidecarState(

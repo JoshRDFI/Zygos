@@ -60,6 +60,21 @@ async def test_restart_exhaustion_raises(monkeypatch):
         await h.aclose()
 
 
+async def test_concurrent_ensure_alive_spawns_once():
+    h = SidecarHandle(FAKE, sleep=lambda s: asyncio.sleep(0))
+    try:
+        await h.start()
+        h._proc.kill(); await h._proc.wait()
+        # fire many concurrent restart requests at the dead handle
+        await asyncio.gather(*(h.ensure_alive() for _ in range(5)))
+        assert h.snapshot().restarts == 1   # not 5
+        await h.connection.send_control({"type": "health"})
+        _, body = await h.connection.recv()
+        assert body["type"] == "health_ok"
+    finally:
+        await h.aclose()
+
+
 async def test_spec_env_reaches_child_process():
     spec = SttEngineSpec(
         name="fake",
