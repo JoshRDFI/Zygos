@@ -271,7 +271,7 @@ def build_runtime(
 
     voice_service: VoiceService | None = None
     if config.voice.enabled:
-        stt_plugin = build_stt_plugin(config.voice.stt.engine)
+        stt_plugin = build_stt_plugin(config.voice.stt)
         tts_plugin = build_tts_plugin(config.voice.tts.engine)
         voice_service = VoiceService(stt=stt_plugin, tts=tts_plugin)
         registry.register(Capability.SPEECH_TO_TEXT, stt_plugin, priority=0)

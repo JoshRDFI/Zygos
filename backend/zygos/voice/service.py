@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 from zygos.runtime.context import ExecutionContext
 from zygos.voice.contract import SttHealth, TtsHealth
@@ -9,17 +11,38 @@ from zygos.voice.errors import VoiceError
 from zygos.voice.plugin import SttPlugin, Transcription, TtsPlugin
 from zygos.voice.types import AudioFormat, SttEngineSpec, TtsEngineSpec
 
+if TYPE_CHECKING:
+    # Deferred: zygos.config.schema -> zygos.runtime.capabilities -> zygos.voice.contract
+    # would otherwise re-enter this package's __init__ mid-import (circular).
+    from zygos.config.schema import SttConfig
+
+_DEFAULT_FW_DOWNLOAD_ROOT = ".zygos/models/faster-whisper"
+
 _STT_ENGINES: dict[str, SttEngineSpec] = {
     "fake": SttEngineSpec(name="fake", argv=(sys.executable, "-m", "zygos.voice.sidecar.fake_stt")),
     # "whisper_cpp": added in the next increment (real engine).
 }
 
 
-def build_stt_plugin(engine: str) -> SttPlugin:
-    spec = _STT_ENGINES.get(engine)
-    if spec is None:
-        raise VoiceError(f"unknown STT engine {engine!r}; available: {sorted(_STT_ENGINES)}")
-    return SttPlugin(spec)
+def build_stt_plugin(stt: SttConfig) -> SttPlugin:
+    if stt.engine == "fake":
+        return SttPlugin(_STT_ENGINES["fake"])
+    if stt.engine == "faster_whisper":
+        download_root = stt.download_root or str(Path(_DEFAULT_FW_DOWNLOAD_ROOT))
+        spec = SttEngineSpec(
+            name="faster_whisper",
+            argv=(sys.executable, "-m", "zygos.voice.sidecar.faster_whisper"),
+            device=stt.device,
+            concurrent_safe=False,
+            env={
+                "ZYGOS_STT_MODEL": stt.model,
+                "ZYGOS_STT_COMPUTE_TYPE": stt.compute_type,
+                "ZYGOS_STT_DEVICE": stt.device,
+                "ZYGOS_STT_DOWNLOAD_ROOT": download_root,
+            },
+        )
+        return SttPlugin(spec)
+    raise VoiceError(f"unknown STT engine {stt.engine!r}")
 
 
 _TTS_ENGINES: dict[str, TtsEngineSpec] = {
