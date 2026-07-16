@@ -9,13 +9,15 @@ Stability: Experimental.
 """
 from __future__ import annotations
 
+import hashlib
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_DOWNLOAD_ROOT = ".zygos/models/kokoro"
 
 
-@dataclass(frozen=True)
+@dataclass
 class Asset:
     filename: str
     url: str
@@ -40,3 +42,29 @@ VOICES = Asset(
 def resolve_paths(download_root: str | None) -> tuple[Path, Path]:
     root = Path(download_root or DEFAULT_DOWNLOAD_ROOT)
     return root / MODEL.filename, root / VOICES.filename
+
+
+def verify_sha256(path: Path, expected: str) -> bool:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest() == expected
+
+
+def _download(asset: Asset, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    urllib.request.urlretrieve(asset.url, tmp)
+    if not verify_sha256(tmp, asset.sha256):
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"sha256 mismatch for {asset.filename}")
+    tmp.replace(dest)
+
+
+def ensure_assets(download_root: str | None) -> tuple[Path, Path]:
+    onnx_path, voices_path = resolve_paths(download_root)
+    for asset, path in ((MODEL, onnx_path), (VOICES, voices_path)):
+        if not (path.exists() and verify_sha256(path, asset.sha256)):
+            _download(asset, path)
+    return onnx_path, voices_path
