@@ -2,11 +2,11 @@ import sys
 
 import pytest
 
-from zygos.config.schema import SttConfig
+from zygos.config.schema import SttConfig, TtsConfig
 from zygos.runtime.context import root_context
 from zygos.runtime.events import InProcessEventBus
 from zygos.voice.contract import SpeechToText
-from zygos.voice.service import VoiceService, build_stt_plugin
+from zygos.voice.service import VoiceService, build_stt_plugin, build_tts_plugin
 
 
 def _ctx():
@@ -63,9 +63,9 @@ async def test_service_reports_unavailable_without_plugin():
 async def test_voice_service_synthesizes_when_tts_present():
     from zygos.runtime.context import root_context
     from zygos.runtime.events import InProcessEventBus
-    from zygos.voice.service import VoiceService, build_tts_plugin
+    from zygos.voice.service import VoiceService
 
-    tts = build_tts_plugin("fake")
+    tts = build_tts_plugin(TtsConfig())
     svc = VoiceService(stt=None, tts=tts)
     assert svc.tts_available is True
     assert svc.tts_format.sample_rate == 24000
@@ -126,3 +126,23 @@ def test_build_stt_plugin_faster_whisper_env():
     assert spec.env["ZYGOS_STT_COMPUTE_TYPE"] == "int8"
     assert spec.env["ZYGOS_STT_DEVICE"] == "cpu"
     assert spec.env["ZYGOS_STT_DOWNLOAD_ROOT"] == "/models/fw"
+
+
+def test_build_tts_plugin_kokoro_spec_env():
+    plugin = build_tts_plugin(TtsConfig(engine="kokoro", voice="am_adam", download_root="/models/k"))
+    spec = plugin._spec
+    assert spec.name == "kokoro"
+    assert spec.argv[-1] == "zygos.voice.sidecar.kokoro"
+    assert spec.env["ZYGOS_TTS_VOICE"] == "am_adam"
+    assert spec.env["ZYGOS_TTS_LANG"] == "en-us"
+    assert spec.env["ZYGOS_TTS_DOWNLOAD_ROOT"] == "/models/k"
+    assert spec.concurrent_safe is False
+
+
+def test_build_tts_plugin_kokoro_defaults_download_root():
+    plugin = build_tts_plugin(TtsConfig(engine="kokoro"))
+    assert plugin._spec.env["ZYGOS_TTS_DOWNLOAD_ROOT"].endswith("kokoro")
+
+
+def test_build_tts_plugin_fake_still_works():
+    assert build_tts_plugin(TtsConfig()).name == "fake"

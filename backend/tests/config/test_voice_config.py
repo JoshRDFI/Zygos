@@ -28,7 +28,7 @@ def test_voice_config_rejects_unknown_tts_engine():
     import pytest
     from pydantic import ValidationError
     with pytest.raises(ValidationError):
-        VoiceConfig(tts={"engine": "kokoro"})  # not yet a valid literal
+        VoiceConfig(tts={"engine": "piper"})  # "piper" is not a valid literal (only fake/kokoro)
 
 
 def test_duck_config_defaults():

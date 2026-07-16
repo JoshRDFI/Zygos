@@ -14,9 +14,10 @@ from zygos.voice.types import AudioFormat, SttEngineSpec, TtsEngineSpec
 if TYPE_CHECKING:
     # Deferred: zygos.config.schema -> zygos.runtime.capabilities -> zygos.voice.contract
     # would otherwise re-enter this package's __init__ mid-import (circular).
-    from zygos.config.schema import SttConfig
+    from zygos.config.schema import SttConfig, TtsConfig
 
 _DEFAULT_FW_DOWNLOAD_ROOT = ".zygos/models/faster-whisper"
+_DEFAULT_KOKORO_DOWNLOAD_ROOT = ".zygos/models/kokoro"
 
 _STT_ENGINES: dict[str, SttEngineSpec] = {
     "fake": SttEngineSpec(name="fake", argv=(sys.executable, "-m", "zygos.voice.sidecar.fake_stt")),
@@ -51,11 +52,24 @@ _TTS_ENGINES: dict[str, TtsEngineSpec] = {
 }
 
 
-def build_tts_plugin(engine: str) -> TtsPlugin:
-    spec = _TTS_ENGINES.get(engine)
-    if spec is None:
-        raise VoiceError(f"unknown TTS engine {engine!r}; available: {sorted(_TTS_ENGINES)}")
-    return TtsPlugin(spec)
+def build_tts_plugin(tts: TtsConfig) -> TtsPlugin:
+    if tts.engine == "fake":
+        return TtsPlugin(_TTS_ENGINES["fake"], readiness_timeout_s=tts.readiness_timeout_s)
+    if tts.engine == "kokoro":
+        download_root = tts.download_root or str(Path(_DEFAULT_KOKORO_DOWNLOAD_ROOT))
+        spec = TtsEngineSpec(
+            name="kokoro",
+            argv=(sys.executable, "-m", "zygos.voice.sidecar.kokoro"),
+            device=tts.device,
+            concurrent_safe=False,
+            env={
+                "ZYGOS_TTS_VOICE": tts.voice,
+                "ZYGOS_TTS_LANG": tts.lang,
+                "ZYGOS_TTS_DOWNLOAD_ROOT": download_root,
+            },
+        )
+        return TtsPlugin(spec, readiness_timeout_s=tts.readiness_timeout_s)
+    raise VoiceError(f"unknown TTS engine {tts.engine!r}")
 
 
 @dataclass(frozen=True)

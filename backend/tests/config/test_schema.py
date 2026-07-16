@@ -198,3 +198,18 @@ def test_stt_config_accepts_faster_whisper():
     c = SttConfig(engine="faster_whisper", model="small.en")
     assert c.engine == "faster_whisper"
     assert c.model == "small.en"
+
+
+def test_tts_config_kokoro_defaults():
+    from zygos.config.schema import TtsConfig
+
+    c = TtsConfig(engine="kokoro")
+    assert c.voice == "af_heart" and c.lang == "en-us" and c.device == "cpu"
+    assert c.download_root is None and c.readiness_timeout_s == 60.0
+    assert c.duck_gain == 0.2
+
+
+def test_tts_config_defaults_to_fake():
+    from zygos.config.schema import TtsConfig
+
+    assert TtsConfig().engine == "fake"

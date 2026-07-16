@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 
+from zygos.config.schema import TtsConfig
 from zygos.runtime.context import CancelToken, root_context
 from zygos.runtime.events import InProcessEventBus
 from zygos.voice.contract import Synthesis, TextToSpeech
@@ -16,7 +17,7 @@ def _ctx(cancel=None):
 
 
 async def test_plugin_satisfies_contract_and_synthesizes():
-    plugin = build_tts_plugin("fake")
+    plugin = build_tts_plugin(TtsConfig())
     assert isinstance(plugin, TextToSpeech)
     await plugin.start()
     try:
@@ -33,7 +34,7 @@ async def test_plugin_satisfies_contract_and_synthesizes():
 
 async def test_cancel_stops_a_held_synthesis(monkeypatch):
     monkeypatch.setenv("ZYGOS_FAKE_TTS_HOLD", "1")
-    plugin = build_tts_plugin("fake")
+    plugin = build_tts_plugin(TtsConfig())
     await plugin.start()
     try:
         cancel = CancelToken()

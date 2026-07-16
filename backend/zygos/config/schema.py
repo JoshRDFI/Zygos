@@ -164,7 +164,14 @@ class SttConfig(BaseModel):
 class TtsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    engine: Literal["fake"] = "fake"  # "kokoro" / "piper" land in Cycle 2.5
+    engine: Literal["fake", "kokoro"] = "fake"
+    voice: str = "af_heart"          # Kokoro flagship graded voice, lang_code 'a'
+    lang: str = "en-us"              # kokoro-onnx tokenizer language (espeak)
+    device: str = "cpu"              # informational for health; CPU-first this cycle
+    # None -> resolved to a Zygos-owned model cache dir at build time
+    download_root: str | None = None
+    # max wait for the worker to report health_ok (model load) at startup
+    readiness_timeout_s: float = 60.0
     # suggested client playback gain while the assistant is "ducked" (barge-in stage 1)
     duck_gain: float = 0.2
 
