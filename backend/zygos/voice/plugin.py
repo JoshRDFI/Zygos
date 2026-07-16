@@ -163,10 +163,11 @@ class Synthesis:
 class TtsPlugin:
     """Concrete TTS engine adapter. Satisfies the TextToSpeech contract."""
 
-    def __init__(self, spec: TtsEngineSpec) -> None:
+    def __init__(self, spec: TtsEngineSpec, *, readiness_timeout_s: float = 60.0) -> None:
         self._spec = spec
         self._handle = SidecarHandle(spec)
         self._started = False
+        self._readiness_timeout_s = readiness_timeout_s
 
     @property
     def name(self) -> str:
@@ -182,6 +183,15 @@ class TtsPlugin:
 
     async def start(self) -> None:
         await self._handle.start()
+        conn = self._handle.connection
+        await conn.send_control({"type": "health"})
+        try:
+            _kind, body = await asyncio.wait_for(conn.recv(), self._readiness_timeout_s)
+        except asyncio.TimeoutError as exc:
+            raise VoiceError(
+                f"{self._spec.name} not ready within {self._readiness_timeout_s}s") from exc
+        if not (isinstance(body, dict) and body.get("type") == "health_ok"):
+            raise VoiceError(f"{self._spec.name} unexpected readiness reply: {body!r}")
         self._started = True
 
     def synthesize(self, ctx: ExecutionContext, text: str) -> Synthesis:
