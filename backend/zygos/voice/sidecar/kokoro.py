@@ -22,6 +22,7 @@ import numpy as np
 
 from zygos.voice.ipc import connect
 from zygos.voice.kokoro_assets import ensure_assets
+from zygos.voice.sidecar.watch import CANCELLED, run_with_cancel_watch, safe_send_control
 
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 
@@ -65,21 +66,27 @@ async def _run(address: str) -> None:
                 continue
             mtype = body.get("type")
             if mtype == "synthesize":
-                try:
-                    for sentence in split_sentences(body.get("text", "")):
-                        samples = await asyncio.to_thread(_synthesize, kokoro, sentence, voice, lang)
+                text = body.get("text", "")
+
+                async def work(cancel_event):
+                    for sentence in split_sentences(text):
+                        if cancel_event.is_set():
+                            return
+                        samples = await asyncio.to_thread(
+                            _synthesize, kokoro, sentence, voice, lang)
+                        if cancel_event.is_set():
+                            return
                         await conn.send_pcm(audio_to_pcm(samples))
-                    await conn.send_control({"type": "end"})
+
+                try:
+                    outcome = await run_with_cancel_watch(conn, work)
                 except Exception as exc:  # noqa: BLE001 - report, don't crash
-                    await conn.send_control({"type": "error", "message": str(exc)})
+                    await safe_send_control(conn, {"type": "error", "message": str(exc)})
+                else:
+                    terminal = "cancelled" if outcome == CANCELLED else "end"
+                    await safe_send_control(conn, {"type": terminal})
             elif mtype == "cancel":
-                # No-op: this worker synthesizes a whole `synthesize` request before
-                # returning to recv(), so a cancel that arrives mid-synthesis is only
-                # seen after the request completes. Real mid-stream interruption (and
-                # draining stale PCM off the shared connection) is tracked under the
-                # I3 sidecar-mux work (Archon d19a6950). Harmless with the fake worker
-                # and while no real-audio consumer barges in.
-                pass
+                pass  # no active utterance to interrupt; ignore late cancel
             elif mtype == "health":
                 await conn.send_control({"type": "health_ok"})
     finally:

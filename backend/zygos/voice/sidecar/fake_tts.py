@@ -12,6 +12,7 @@ import re
 import sys
 
 from zygos.voice.ipc import connect
+from zygos.voice.sidecar.watch import CANCELLED, run_with_cancel_watch, safe_send_control
 
 _SAMPLES_PER_CHAR = 80  # deterministic: PCM bytes per sentence = 2 * 80 * len(sentence)
 
@@ -39,16 +40,23 @@ async def _run(address: str) -> None:
             mtype = body.get("type")
             if mtype == "synthesize":
                 sentences = _sentences(body.get("text", "")) or [""]
-                if hold:
-                    # Emit only the first chunk, then loop back to recv() and wait.
-                    # The runtime's cancel (or shutdown EOF) ends this synthesis.
-                    await conn.send_pcm(_pcm(sentences[0]))
-                    continue
-                for sentence in sentences:
-                    await conn.send_pcm(_pcm(sentence))
-                await conn.send_control({"type": "end"})
+
+                async def work(cancel_event):
+                    if hold:
+                        # Emit one chunk, then stay held until cancel/EOF.
+                        await conn.send_pcm(_pcm(sentences[0]))
+                        await cancel_event.wait()
+                        return
+                    for sentence in sentences:
+                        if cancel_event.is_set():
+                            return
+                        await conn.send_pcm(_pcm(sentence))
+
+                outcome = await run_with_cancel_watch(conn, work)
+                terminal = "cancelled" if outcome == CANCELLED else "end"
+                await safe_send_control(conn, {"type": terminal})
             elif mtype == "cancel":
-                pass  # nothing to interrupt synchronously; ack by ignoring
+                pass  # no active utterance to interrupt; ignore late cancel
             elif mtype == "health":
                 await conn.send_control({"type": "health_ok"})
     finally:

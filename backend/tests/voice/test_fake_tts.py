@@ -60,3 +60,57 @@ async def test_health_roundtrip():
         if conn is not None:
             await conn.close()
         await listener.close()
+
+
+import asyncio
+
+from zygos.voice.ipc import connect, listen
+
+
+async def _spawn_fake_tts(env=None):
+    import os
+    import sys
+    listener = await listen()
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "zygos.voice.sidecar.fake_tts", listener.address,
+        env={**os.environ, **(env or {})},
+    )
+    conn = await listener.accept()
+    return listener, proc, conn
+
+
+async def test_fake_tts_normal_completion_emits_end():
+    listener, proc, conn = await _spawn_fake_tts()
+    try:
+        await conn.send_control({"type": "synthesize", "text": "One. Two.", "sample_rate": 24000})
+        kinds = []
+        while True:
+            kind, body = await asyncio.wait_for(conn.recv(), 5.0)
+            if kind == "pcm":
+                kinds.append("pcm")
+                continue
+            kinds.append(body.get("type"))
+            if body.get("type") in {"end", "cancelled", "error"}:
+                break
+        assert kinds == ["pcm", "pcm", "end"]
+    finally:
+        await conn.close()
+        proc.terminate()
+        await proc.wait()
+        await listener.close()
+
+
+async def test_fake_tts_cancel_emits_cancelled_not_end():
+    listener, proc, conn = await _spawn_fake_tts({"ZYGOS_FAKE_TTS_HOLD": "1"})
+    try:
+        await conn.send_control({"type": "synthesize", "text": "One. Two. Three.", "sample_rate": 24000})
+        kind, _body = await asyncio.wait_for(conn.recv(), 5.0)  # first held chunk
+        assert kind == "pcm"
+        await conn.send_control({"type": "cancel"})
+        kind, body = await asyncio.wait_for(conn.recv(), 5.0)
+        assert kind == "control" and body == {"type": "cancelled"}
+    finally:
+        await conn.close()
+        proc.terminate()
+        await proc.wait()
+        await listener.close()
