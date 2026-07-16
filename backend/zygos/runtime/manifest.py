@@ -7,6 +7,7 @@ credentials never appear here. Stability: Experimental.
 from __future__ import annotations
 
 import platform
+import re
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING
 
@@ -17,6 +18,14 @@ from zygos.voice.contract import SttHealth, TtsHealth
 
 if TYPE_CHECKING:
     from zygos.runtime.bootstrap import RuntimeAssembly
+
+_ABS_PATH = re.compile(r"(?:[A-Za-z]:\\[^\s]+|/[^\s]+)")
+
+
+def _scrub_error(msg: str | None) -> str | None:
+    if msg is None:
+        return None
+    return _ABS_PATH.sub("<path>", msg)[:200]
 
 
 class PluginInfo(BaseModel):
@@ -72,7 +81,9 @@ def runtime_manifest(runtime: "RuntimeAssembly") -> Manifest:
     voice = None
     if runtime.voice_service is not None:
         snap = runtime.voice_service.snapshot()
-        voice = VoiceManifest(stt=snap.stt, tts=snap.tts)
+        stt = snap.stt.model_copy(update={"last_error": _scrub_error(snap.stt.last_error)}) if snap.stt else None
+        tts = snap.tts.model_copy(update={"last_error": _scrub_error(snap.tts.last_error)}) if snap.tts else None
+        voice = VoiceManifest(stt=stt, tts=tts)
     return Manifest(
         lifecycle_stage=runtime.lifecycle_stage,
         capabilities=dict(snapshot.bindings),
