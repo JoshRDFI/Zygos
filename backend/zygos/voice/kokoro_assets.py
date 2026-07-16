@@ -17,7 +17,7 @@ from pathlib import Path
 DEFAULT_DOWNLOAD_ROOT = ".zygos/models/kokoro"
 
 
-@dataclass
+@dataclass(frozen=True)
 class Asset:
     filename: str
     url: str

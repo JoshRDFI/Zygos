@@ -1,3 +1,4 @@
+import dataclasses
 import hashlib
 from pathlib import Path
 
@@ -27,8 +28,8 @@ def test_verify_sha256_true_and_false(tmp_path):
 
 def test_ensure_assets_downloads_when_missing(tmp_path, monkeypatch):
     onnx_bytes, voices_bytes = b"ONNX-DATA", b"VOICES-DATA"
-    monkeypatch.setattr(ka.MODEL, "sha256", hashlib.sha256(onnx_bytes).hexdigest(), raising=False)
-    monkeypatch.setattr(ka.VOICES, "sha256", hashlib.sha256(voices_bytes).hexdigest(), raising=False)
+    monkeypatch.setattr(ka, "MODEL", dataclasses.replace(ka.MODEL, sha256=hashlib.sha256(onnx_bytes).hexdigest()))
+    monkeypatch.setattr(ka, "VOICES", dataclasses.replace(ka.VOICES, sha256=hashlib.sha256(voices_bytes).hexdigest()))
 
     def fake_urlretrieve(url, dest):
         Path(dest).write_bytes(onnx_bytes if url == ka.MODEL.url else voices_bytes)
@@ -45,8 +46,8 @@ def test_ensure_assets_skips_when_present_and_valid(tmp_path, monkeypatch):
     onnx_path.parent.mkdir(parents=True, exist_ok=True)
     onnx_path.write_bytes(b"CACHED-ONNX")
     voices_path.write_bytes(b"CACHED-VOICES")
-    monkeypatch.setattr(ka.MODEL, "sha256", hashlib.sha256(b"CACHED-ONNX").hexdigest(), raising=False)
-    monkeypatch.setattr(ka.VOICES, "sha256", hashlib.sha256(b"CACHED-VOICES").hexdigest(), raising=False)
+    monkeypatch.setattr(ka, "MODEL", dataclasses.replace(ka.MODEL, sha256=hashlib.sha256(b"CACHED-ONNX").hexdigest()))
+    monkeypatch.setattr(ka, "VOICES", dataclasses.replace(ka.VOICES, sha256=hashlib.sha256(b"CACHED-VOICES").hexdigest()))
 
     def boom(url, dest):
         raise AssertionError("should not download when cache is valid")
@@ -56,9 +57,11 @@ def test_ensure_assets_skips_when_present_and_valid(tmp_path, monkeypatch):
 
 
 def test_ensure_assets_rejects_sha_mismatch(tmp_path, monkeypatch):
-    monkeypatch.setattr(ka.MODEL, "sha256", "0" * 64, raising=False)
-    monkeypatch.setattr(ka.VOICES, "sha256", "0" * 64, raising=False)
+    monkeypatch.setattr(ka, "MODEL", dataclasses.replace(ka.MODEL, sha256="0" * 64))
+    monkeypatch.setattr(ka, "VOICES", dataclasses.replace(ka.VOICES, sha256="0" * 64))
     monkeypatch.setattr(ka.urllib.request, "urlretrieve",
                         lambda url, dest: Path(dest).write_bytes(b"WRONG"))
     with pytest.raises(RuntimeError, match="sha256 mismatch"):
         ensure_assets(str(tmp_path))
+    # Verify temp files are cleaned up after mismatch
+    assert not list(tmp_path.rglob("*.part"))
