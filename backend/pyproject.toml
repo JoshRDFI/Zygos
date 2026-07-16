@@ -25,6 +25,7 @@ server = [
 ]
 voice = [
     "faster-whisper>=1.0",
+    "kokoro-onnx>=0.5",
 ]
 
 [project.scripts]
