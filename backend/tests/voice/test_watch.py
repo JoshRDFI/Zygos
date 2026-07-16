@@ -107,3 +107,24 @@ async def test_work_exception_propagates():
         await client.close()
         await server.close()
         await listener.close()
+
+
+async def test_work_exception_propagates_even_when_cancel_races():
+    listener, server, client = await _pair()
+    try:
+        async def work(cancel_event):
+            await cancel_event.wait()
+            raise ValueError("cleanup-boom")
+
+        task = asyncio.create_task(run_with_cancel_watch(server, work))
+        await asyncio.sleep(0)
+        await client.send_control({"type": "cancel"})
+        try:
+            await task
+            assert False, "expected ValueError"
+        except ValueError as exc:
+            assert str(exc) == "cleanup-boom"
+    finally:
+        await client.close()
+        await server.close()
+        await listener.close()

@@ -60,12 +60,18 @@ async def run_with_cancel_watch(
             # also raced to completion on the same event-loop pass.
             work_task.cancel()
             await asyncio.gather(work_task, return_exceptions=True)
+            # Cancel wins over normal completion, but a genuine work error that
+            # raced the cancel still propagates (contract: work exceptions surface).
+            if not work_task.cancelled() and work_task.exception() is not None:
+                raise work_task.exception()
             return CANCELLED
         watch_task.cancel()
         await asyncio.gather(watch_task, return_exceptions=True)
         work_task.result()  # re-raise a work error to the caller
         return COMPLETED
     finally:
+        # Defensive: only fires if run_with_cancel_watch itself is cancelled from
+        # outside mid-await; on normal/cancel/complete paths both tasks are done.
         for task in (work_task, watch_task):
             if not task.done():
                 task.cancel()
