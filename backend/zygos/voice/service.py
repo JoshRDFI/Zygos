@@ -26,7 +26,7 @@ _STT_ENGINES: dict[str, SttEngineSpec] = {
 
 def build_stt_plugin(stt: SttConfig) -> SttPlugin:
     if stt.engine == "fake":
-        return SttPlugin(_STT_ENGINES["fake"])
+        return SttPlugin(_STT_ENGINES["fake"], readiness_timeout_s=stt.readiness_timeout_s)
     if stt.engine == "faster_whisper":
         download_root = stt.download_root or str(Path(_DEFAULT_FW_DOWNLOAD_ROOT))
         spec = SttEngineSpec(
@@ -41,7 +41,7 @@ def build_stt_plugin(stt: SttConfig) -> SttPlugin:
                 "ZYGOS_STT_DOWNLOAD_ROOT": download_root,
             },
         )
-        return SttPlugin(spec)
+        return SttPlugin(spec, readiness_timeout_s=stt.readiness_timeout_s)
     raise VoiceError(f"unknown STT engine {stt.engine!r}")
 
 

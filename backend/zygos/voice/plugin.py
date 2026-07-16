@@ -4,7 +4,7 @@ import asyncio
 
 from zygos.runtime.context import ExecutionContext
 from zygos.voice.contract import SttHealth, TtsHealth
-from zygos.voice.errors import SynthesisFailed, TranscriptionFailed
+from zygos.voice.errors import SynthesisFailed, TranscriptionFailed, VoiceError
 from zygos.voice.ipc import IpcConnection
 from zygos.voice.sidecar import SidecarHandle
 from zygos.voice.types import AudioFormat, SttEngineSpec, TranscriptEvent, TtsEngineSpec
@@ -62,10 +62,11 @@ class Transcription:
 class SttPlugin:
     """Concrete STT engine adapter. Satisfies the SpeechToText contract."""
 
-    def __init__(self, spec: SttEngineSpec) -> None:
+    def __init__(self, spec: SttEngineSpec, *, readiness_timeout_s: float = 60.0) -> None:
         self._spec = spec
         self._handle = SidecarHandle(spec)
         self._started = False
+        self._readiness_timeout_s = readiness_timeout_s
 
     @property
     def name(self) -> str:
@@ -77,6 +78,15 @@ class SttPlugin:
 
     async def start(self) -> None:
         await self._handle.start()
+        conn = self._handle.connection
+        await conn.send_control({"type": "health"})
+        try:
+            _kind, body = await asyncio.wait_for(conn.recv(), self._readiness_timeout_s)
+        except asyncio.TimeoutError as exc:
+            raise VoiceError(
+                f"{self._spec.name} not ready within {self._readiness_timeout_s}s") from exc
+        if not (isinstance(body, dict) and body.get("type") == "health_ok"):
+            raise VoiceError(f"{self._spec.name} unexpected readiness reply: {body!r}")
         self._started = True
 
     def begin(self, ctx: ExecutionContext) -> Transcription:
