@@ -1,3 +1,10 @@
+import { BrowserRouter } from "react-router-dom";
+import Shell from "./Shell";
+
 export default function App() {
-  return <div className="text-text bg-bg">Zygos</div>;
+  return (
+    <BrowserRouter>
+      <Shell />
+    </BrowserRouter>
+  );
 }
