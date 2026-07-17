@@ -20,6 +20,7 @@ import sys
 import numpy as np
 
 from zygos.voice.ipc import connect
+from zygos.voice.sidecar.watch import CANCELLED, run_with_cancel_watch, safe_send_control
 
 _WS = re.compile(r"\s+")
 
@@ -72,14 +73,27 @@ async def _run(address: str) -> None:
             elif mtype == "end":
                 if active:
                     active = False
+                    audio = pcm_to_audio(bytes(buffer))
+                    result: dict[str, str] = {}
+
+                    async def work(cancel_event):
+                        result["text"] = await asyncio.to_thread(_transcribe, model, audio)
+
                     try:
-                        audio = pcm_to_audio(bytes(buffer))
-                        text = await asyncio.to_thread(_transcribe, model, audio)
-                        await conn.send_control({"type": "final", "text": text})
+                        outcome = await run_with_cancel_watch(conn, work)
                     except Exception as exc:  # noqa: BLE001 - report, don't crash
-                        await conn.send_control({"type": "error", "message": str(exc)})
+                        await safe_send_control(conn, {"type": "error", "message": str(exc)})
+                    else:
+                        if outcome == CANCELLED:
+                            await safe_send_control(conn, {"type": "cancelled"})
+                        else:
+                            await safe_send_control(
+                                conn, {"type": "final", "text": result["text"]})
             elif mtype == "cancel":
+                was_active = active
                 active, buffer = False, bytearray()
+                if was_active:
+                    await safe_send_control(conn, {"type": "cancelled"})
             elif mtype == "health":
                 await conn.send_control({"type": "health_ok"})
     finally:

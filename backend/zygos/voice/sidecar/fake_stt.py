@@ -40,7 +40,10 @@ async def _run(address: str) -> None:
                     await conn.send_control({"type": "final", "text": transcript})
                 active = False
             elif mtype == "cancel":
+                was_active = active
                 active, received = False, 0
+                if was_active:
+                    await conn.send_control({"type": "cancelled"})
             elif mtype == "health":
                 await conn.send_control({"type": "health_ok"})
     finally:
