@@ -6,7 +6,7 @@ export default function ToolsSurface() {
   const [m, setM] = useState<Manifest | null>(null);
   useEffect(() => { getManifest().then(setM).catch(() => setM(null)); }, []);
 
-  const tools = m?.plugins.filter((p) => p.kind === "tool") ?? [];
+  const tools = m?.plugins.filter((p) => p.kind === "tools") ?? [];
 
   return (
     <div className="p-6 space-y-4">
