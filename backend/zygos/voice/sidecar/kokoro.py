@@ -22,6 +22,7 @@ import numpy as np
 
 from zygos.voice.ipc import connect
 from zygos.voice.kokoro_assets import ensure_assets
+from zygos.voice.sidecar.inference import new_inference_executor, run_inference
 from zygos.voice.sidecar.watch import CANCELLED, run_with_cancel_watch, safe_send_control
 
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
@@ -54,9 +55,10 @@ async def _run(address: str) -> None:
     conn = await connect(address)
     voice = os.environ.get("ZYGOS_TTS_VOICE", "af_heart")
     lang = os.environ.get("ZYGOS_TTS_LANG", "en-us")
+    executor = new_inference_executor()
     kokoro = None
     try:
-        kokoro = await asyncio.to_thread(_load_kokoro)
+        kokoro = await run_inference(executor, _load_kokoro)
         while True:
             try:
                 kind, body = await conn.recv()
@@ -72,8 +74,8 @@ async def _run(address: str) -> None:
                     for sentence in split_sentences(text):
                         if cancel_event.is_set():
                             return
-                        samples = await asyncio.to_thread(
-                            _synthesize, kokoro, sentence, voice, lang)
+                        samples = await run_inference(
+                            executor, _synthesize, kokoro, sentence, voice, lang)
                         if cancel_event.is_set():
                             return
                         await conn.send_pcm(audio_to_pcm(samples))
@@ -90,6 +92,7 @@ async def _run(address: str) -> None:
             elif mtype == "health":
                 await conn.send_control({"type": "health_ok"})
     finally:
+        executor.shutdown(wait=False)
         await conn.close()
 
 

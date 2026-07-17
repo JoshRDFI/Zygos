@@ -20,6 +20,7 @@ import sys
 import numpy as np
 
 from zygos.voice.ipc import connect
+from zygos.voice.sidecar.inference import new_inference_executor, run_inference
 from zygos.voice.sidecar.watch import CANCELLED, run_with_cancel_watch, safe_send_control
 
 _WS = re.compile(r"\s+")
@@ -53,11 +54,12 @@ def _transcribe(model, audio: "np.ndarray") -> str:
 
 async def _run(address: str) -> None:
     conn = await connect(address)
+    executor = new_inference_executor()
     model = None            # loaded once below, after connect()
     buffer = bytearray()
     active = False
     try:
-        model = await asyncio.to_thread(_load_model)  # heavy; off the event loop
+        model = await run_inference(executor, _load_model)  # heavy; off the event loop
         while True:
             try:
                 kind, body = await conn.recv()
@@ -77,7 +79,7 @@ async def _run(address: str) -> None:
                     result: dict[str, str] = {}
 
                     async def work(cancel_event):
-                        result["text"] = await asyncio.to_thread(_transcribe, model, audio)
+                        result["text"] = await run_inference(executor, _transcribe, model, audio)
 
                     try:
                         outcome = await run_with_cancel_watch(conn, work)
@@ -97,6 +99,7 @@ async def _run(address: str) -> None:
             elif mtype == "health":
                 await conn.send_control({"type": "health_ok"})
     finally:
+        executor.shutdown(wait=False)
         await conn.close()
 
 
