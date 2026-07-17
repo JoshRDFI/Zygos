@@ -5,6 +5,7 @@ export interface PlaybackController {
   begin(): void;
   enqueue(body: ArrayBuffer): void;
   end(): void;
+  dispose(): void;
 }
 
 export function createPlayback(): PlaybackController {
@@ -40,6 +41,13 @@ export function createPlayback(): PlaybackController {
     },
     end(): void {
       sched?.reset();
+    },
+    dispose(): void {
+      enabled = false;
+      void ctx?.close().catch(() => {});
+      ctx = null;
+      gain = null;
+      sched = null;
     },
   };
 }

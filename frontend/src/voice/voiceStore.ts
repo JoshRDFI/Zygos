@@ -84,10 +84,11 @@ export const useVoiceStore = create<VoiceState>()(
           rig.capture.stop();
           rig.mic.stop();
         }
+        rig.playback.dispose();
         rig.offs.forEach((off) => off());
         rig = null;
         pending = null;
-        set({ micOn: false });
+        set({ micOn: false, speakerOn: false });
       },
 
       setVoiceEnabled: (b) => {

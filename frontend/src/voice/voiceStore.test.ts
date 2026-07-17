@@ -22,7 +22,7 @@ function makeFakeClient() {
 
 let fakeMic: { start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> };
 let micFrames: ((f: Float32Array, r: number) => void) | null;
-let fakePlayback: { setEnabled: ReturnType<typeof vi.fn>; begin: ReturnType<typeof vi.fn>; enqueue: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> };
+let fakePlayback: { setEnabled: ReturnType<typeof vi.fn>; begin: ReturnType<typeof vi.fn>; enqueue: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn> };
 
 beforeEach(() => {
   localStorage.clear();
@@ -30,7 +30,7 @@ beforeEach(() => {
   useVoiceStore.setState({ voiceEnabled: false, micOn: false, speakerOn: false, warning: null });
   fakeMic = { start: vi.fn(() => Promise.resolve()), stop: vi.fn() };
   micFrames = null;
-  fakePlayback = { setEnabled: vi.fn(), begin: vi.fn(), enqueue: vi.fn(), end: vi.fn() };
+  fakePlayback = { setEnabled: vi.fn(), begin: vi.fn(), enqueue: vi.fn(), end: vi.fn(), dispose: vi.fn() };
   setVoiceDeps({
     createMicAdapter: (onFrames) => { micFrames = onFrames; return fakeMic; },
     createPlayback: () => fakePlayback,
@@ -85,6 +85,23 @@ test("toggleSpeaker emits audio.output and enables playback", () => {
   s.toggleSpeaker();
   expect(client.sent.at(-1)).toEqual({ channel: "control", type: "audio.output", payload: { enabled: true } });
   expect(fakePlayback.setEnabled).toHaveBeenLastCalledWith(true);
+});
+
+test("detach resets speakerOn and disposes playback (no silent-speaker desync on re-attach)", () => {
+  const client = makeFakeClient();
+  const s = useVoiceStore.getState();
+  s.setVoiceEnabled(true);
+  s.attach(client);
+  s.toggleSpeaker();
+  expect(useVoiceStore.getState().speakerOn).toBe(true);
+  useVoiceStore.getState().detach();
+  expect(useVoiceStore.getState().speakerOn).toBe(false);
+  expect(fakePlayback.dispose).toHaveBeenCalled();
+  // re-attach a new session: speakerOn is now false, so attach() will not
+  // locally re-enable playback without a fresh audio.output frame.
+  const client2 = makeFakeClient();
+  useVoiceStore.getState().attach(client2);
+  expect(useVoiceStore.getState().speakerOn).toBe(false);
 });
 
 test("audio.unavailable reverts the pending toggle and warns", () => {
