@@ -1,0 +1,14 @@
+/* tokens: fallback defaults; full themes defined in Task 2 */
+:root {
+  --bg: #14161a;
+  --surface: #1b1e24;
+  --surface-2: #22262e;
+  --border: #2c313a;
+  --text: #e6e8ec;
+  --text-muted: #9aa1ac;
+  --accent: #6ea8fe;
+  --accent-fg: #0b0d10;
+  --font-sans: system-ui, sans-serif;
+  --font-mono: ui-monospace, monospace;
+  --font-serif: Georgia, serif;
+}
