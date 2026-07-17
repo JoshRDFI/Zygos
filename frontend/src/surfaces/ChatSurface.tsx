@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createSession } from "../client/rest";
 import { WsClient } from "../client/wsClient";
 import { useChatStore } from "../stores/chatStore";
+import VoiceControls from "../components/VoiceControls";
 
 export default function ChatSurface() {
   const messages = useChatStore((s) => s.messages);
@@ -47,10 +48,11 @@ export default function ChatSurface() {
           </div>
         ))}
       </div>
-      <form onSubmit={submit} className="border-t border-border p-3 flex gap-2">
+      <form onSubmit={submit} className="border-t border-border p-3 flex items-center gap-2">
+        <VoiceControls />
         <input
           className="flex-1 bg-surface-2 border border-border rounded px-3 py-2 text-text"
-          placeholder="Message Zygos…"
+          placeholder="Message Zygos…  (drag a file in for one-off context)"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
         />
