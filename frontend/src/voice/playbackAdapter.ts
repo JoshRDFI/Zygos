@@ -27,6 +27,10 @@ export function createPlayback(): PlaybackController {
   return {
     setEnabled(next: boolean): void {
       enabled = next;
+      if (next) {
+        ensure(); // create the AudioContext within the user gesture (Speaker toggle)
+        void ctx?.resume().catch(() => {}); // autoplay policy: resume in-gesture
+      }
     },
     begin(): void {
       if (enabled) ensure().reset();

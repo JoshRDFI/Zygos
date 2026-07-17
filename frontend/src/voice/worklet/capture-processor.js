@@ -1,4 +1,3 @@
-// frontend/src/voice/worklet/capture-processor.js
 // Minimal AudioWorkletProcessor: forwards raw mono Float32 frames to the main
 // thread. All resampling/encoding happens on the main thread (kept testable).
 class CaptureProcessor extends AudioWorkletProcessor {

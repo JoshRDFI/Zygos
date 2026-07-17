@@ -17,7 +17,7 @@ export function createMicAdapter(
       const url = new URL("./worklet/capture-processor.js", import.meta.url);
       await ctx.audioWorklet.addModule(url);
       const source = ctx.createMediaStreamSource(stream);
-      node = new AudioWorkletNode(ctx, "capture-processor");
+      node = new AudioWorkletNode(ctx, "capture-processor", { numberOfOutputs: 0 });
       const rate = ctx.sampleRate;
       node.port.onmessage = (e: MessageEvent) => onFrames(e.data as Float32Array, rate);
       source.connect(node);
@@ -27,7 +27,7 @@ export function createMicAdapter(
       node?.port.close();
       node?.disconnect();
       stream?.getTracks().forEach((t) => t.stop());
-      void ctx?.close();
+      void ctx?.close().catch(() => {});
       node = null;
       stream = null;
       ctx = null;
