@@ -3,6 +3,7 @@ import { createSession } from "../client/rest";
 import { WsClient } from "../client/wsClient";
 import { useChatStore } from "../stores/chatStore";
 import VoiceControls from "../components/VoiceControls";
+import { useVoiceStore } from "../voice/voiceStore";
 
 export default function ChatSurface() {
   const messages = useChatStore((s) => s.messages);
@@ -17,14 +18,16 @@ export default function ChatSurface() {
     createSession().then((id) => {
       if (disposed) return;
       client = new WsClient(id);
-      for (const t of ["turn.start", "token", "turn.end", "error"]) {
+      for (const t of ["turn.start", "token", "turn.end", "error", "partial", "final"]) {
         client.on(`chat:${t}`, onFrame);
       }
+      useVoiceStore.getState().attach(client);
       client.connect();
       clientRef.current = client;
     });
     return () => {
       disposed = true;
+      useVoiceStore.getState().detach();
       client?.close();
     };
   }, [onFrame]);

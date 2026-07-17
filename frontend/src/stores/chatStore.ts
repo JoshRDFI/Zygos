@@ -42,6 +42,13 @@ export const useChatStore = create<ChatState>((set) => ({
         const text = `⚠ ${String(f.payload.message ?? "error")}`;
         return { messages: [...s.messages, { role: "assistant", text, streaming: false }] };
       }
+      if (f.type === "final") {
+        const text = String(f.payload.text ?? "");
+        if (!text) return s;
+        return { messages: [...s.messages, { role: "user", text, streaming: false }] };
+      }
+      // "partial" frames (interim STT) are ignored this increment — faster-whisper
+      // is final-only; a future streaming engine would render them here.
       return s;
     }),
   reset: () => set({ messages: [] }),

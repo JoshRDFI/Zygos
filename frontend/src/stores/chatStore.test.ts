@@ -23,3 +23,10 @@ test("error frame surfaces an assistant message", () => {
   expect(last.role).toBe("assistant");
   expect(last.text).toContain("generation failed");
 });
+
+test("a committed STT final becomes a user message", () => {
+  const s = useChatStore.getState();
+  s.onFrame({ channel: "chat", type: "final", payload: { text: "hello from voice" } });
+  const last = useChatStore.getState().messages.at(-1)!;
+  expect(last).toEqual({ role: "user", text: "hello from voice", streaming: false });
+});
