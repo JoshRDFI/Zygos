@@ -1,9 +1,10 @@
 import type { Frame } from "./types";
 
 export interface WebSocketLike {
-  send(data: string): void;
+  binaryType: string;
+  send(data: string | ArrayBufferView): void;
   close(): void;
-  onmessage: ((e: { data: string }) => void) | null;
+  onmessage: ((e: { data: string | ArrayBuffer }) => void) | null;
   onopen: (() => void) | null;
   readyState: number;
 }
@@ -26,11 +27,13 @@ export function parseFrame(raw: string): Frame | null {
 }
 
 type Handler = (f: Frame) => void;
+type BinaryHandler = (data: ArrayBuffer) => void;
 
 export class WsClient {
   socketFactory: (url: string) => WebSocketLike = (url) => new WebSocket(url) as WebSocketLike;
   private socket: WebSocketLike | null = null;
   private handlers = new Map<string, Set<Handler>>();
+  private binaryHandlers = new Set<BinaryHandler>();
   private readonly url: string;
 
   constructor(sessionId: string, wsUrl?: string) {
@@ -39,9 +42,14 @@ export class WsClient {
 
   connect(): void {
     const socket = this.socketFactory(this.url);
+    socket.binaryType = "arraybuffer";
     socket.onmessage = (e) => {
-      const frame = parseFrame(e.data);
-      if (frame) this.dispatch(frame);
+      if (typeof e.data === "string") {
+        const frame = parseFrame(e.data);
+        if (frame) this.dispatch(frame);
+      } else {
+        this.binaryHandlers.forEach((h) => h(e.data as ArrayBuffer));
+      }
     };
     this.socket = socket;
   }
@@ -56,9 +64,20 @@ export class WsClient {
     return () => set!.delete(handler);
   }
 
+  onBinary(handler: BinaryHandler): () => void {
+    this.binaryHandlers.add(handler);
+    return () => this.binaryHandlers.delete(handler);
+  }
+
   send(frame: Frame): void {
     if (this.socket && this.socket.readyState === 1) {
       this.socket.send(JSON.stringify(frame));
+    }
+  }
+
+  sendBinary(bytes: Uint8Array): void {
+    if (this.socket && this.socket.readyState === 1) {
+      this.socket.send(bytes);
     }
   }
 
