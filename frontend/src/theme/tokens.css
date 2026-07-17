@@ -1,14 +1,49 @@
-/* tokens: fallback defaults; full themes defined in Task 2 */
-:root {
-  --bg: #14161a;
-  --surface: #1b1e24;
-  --surface-2: #22262e;
-  --border: #2c313a;
-  --text: #e6e8ec;
-  --text-muted: #9aa1ac;
-  --accent: #6ea8fe;
-  --accent-fg: #0b0d10;
-  --font-sans: system-ui, sans-serif;
-  --font-mono: ui-monospace, monospace;
+/* Design tokens. A theme is a named token set; mode is orthogonal.
+   Color in the app comes ONLY from these variables (via Tailwind). */
+
+/* instrument — muted, dark-first, precise */
+:root[data-theme="instrument"][data-mode="dark"] {
+  --bg: #14161a; --surface: #1b1e24; --surface-2: #22262e; --border: #2c313a;
+  --text: #e6e8ec; --text-muted: #9aa1ac; --accent: #6ea8fe; --accent-fg: #0b0d10;
+  --font-sans: "Inter", system-ui, sans-serif; --font-mono: ui-monospace, "JetBrains Mono", monospace;
   --font-serif: Georgia, serif;
+}
+:root[data-theme="instrument"][data-mode="light"] {
+  --bg: #f4f5f7; --surface: #ffffff; --surface-2: #eceef1; --border: #d6d9de;
+  --text: #1a1d22; --text-muted: #5b626c; --accent: #2563c9; --accent-fg: #ffffff;
+  --font-sans: "Inter", system-ui, sans-serif; --font-mono: ui-monospace, "JetBrains Mono", monospace;
+  --font-serif: Georgia, serif;
+}
+
+/* study — warm, editorial, light-first */
+:root[data-theme="study"][data-mode="light"] {
+  --bg: #f3ede2; --surface: #fbf7ef; --surface-2: #ece3d3; --border: #d9cdb8;
+  --text: #2a2620; --text-muted: #6f6656; --accent: #9a5b34; --accent-fg: #fbf7ef;
+  --font-sans: "Inter", system-ui, sans-serif; --font-mono: ui-monospace, monospace;
+  --font-serif: "Iowan Old Style", Georgia, serif;
+}
+:root[data-theme="study"][data-mode="dark"] {
+  --bg: #211d17; --surface: #2a251d; --surface-2: #332d23; --border: #443c2f;
+  --text: #ece3d3; --text-muted: #b3a88f; --accent: #d08a4f; --accent-fg: #211d17;
+  --font-sans: "Inter", system-ui, sans-serif; --font-mono: ui-monospace, monospace;
+  --font-serif: "Iowan Old Style", Georgia, serif;
+}
+
+/* quiet-os — near-neutral, system-native */
+:root[data-theme="quiet-os"][data-mode="light"] {
+  --bg: #fafafa; --surface: #ffffff; --surface-2: #f0f0f0; --border: #e2e2e2;
+  --text: #1c1c1c; --text-muted: #6b6b6b; --accent: #3a3a3a; --accent-fg: #ffffff;
+  --font-sans: system-ui, sans-serif; --font-mono: ui-monospace, monospace; --font-serif: Georgia, serif;
+}
+:root[data-theme="quiet-os"][data-mode="dark"] {
+  --bg: #161616; --surface: #1e1e1e; --surface-2: #262626; --border: #333333;
+  --text: #ededed; --text-muted: #a0a0a0; --accent: #cfcfcf; --accent-fg: #161616;
+  --font-sans: system-ui, sans-serif; --font-mono: ui-monospace, monospace; --font-serif: Georgia, serif;
+}
+
+/* Fallback if attributes are missing (matches instrument/dark). */
+:root {
+  --bg: #14161a; --surface: #1b1e24; --surface-2: #22262e; --border: #2c313a;
+  --text: #e6e8ec; --text-muted: #9aa1ac; --accent: #6ea8fe; --accent-fg: #0b0d10;
+  --font-sans: system-ui, sans-serif; --font-mono: ui-monospace, monospace; --font-serif: Georgia, serif;
 }
