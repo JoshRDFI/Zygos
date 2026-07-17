@@ -30,7 +30,7 @@ decision requires an accepted RFC before implementation begins.
 | RFC-0008: Tool-Calling Protocol and Tool Authoring | Design RFC — native function-calling normalized at the provider seam + the agentic loop; amends RFC-0001 §2/§7 | ✅ Implemented (2026-07-13, M8) |
 | RFC-0009: Model Routing and Multimodal Capabilities | Design RFC — per-turn best-model routing + VISION/IMAGE_GENERATION contracts; amends RFC-0001 §2 | ✏️ Draft (2026-07-13) |
 | RFC-0010: User Personalization and Assistant Identity | Design RFC — bounded preferences store + NL onboarding; fills the RFC-0007 `build_messages` system-prompt seam | ✏️ Draft (2026-07-13) |
-| RFC-0011: React UI — Frontend Architecture and Application Skeleton | Design RFC — self-hosted React+TS+Tailwind+Vite `frontend/`; chat-centric shell + token themes (`instrument`/`study`/`quiet-os`); broad-skeleton first increment; first live consumer of the RFC-0005 audio channels | 🔍 Review (2026-07-16) |
+| RFC-0011: React UI — Frontend Architecture and Application Skeleton | Design RFC — self-hosted React+TS+Tailwind+Vite `frontend/`; chat-centric shell + token themes (`instrument`/`study`/`quiet-os`); broad-skeleton first increment; first live consumer of the RFC-0005 audio channels | ✅ Accepted (2026-07-16) |
 | React UI | React + Tailwind + Vite frontend; WebSocket streaming | Planned — governed by RFC-0011 |
 | Voice interaction (STT + TTS) | Local-first transcription and synthesis over the WS audio channel; **required before 2.0 is called complete** | Planned (own RFC) |
 | Scheduler & autonomy | SchedulerService with human-in-the-loop guards | Planned |

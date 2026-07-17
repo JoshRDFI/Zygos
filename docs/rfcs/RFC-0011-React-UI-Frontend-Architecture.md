@@ -1,6 +1,6 @@
 # RFC-0011: React UI — Frontend Architecture and Application Skeleton
 
-- **Status:** Review (2026-07-16)
+- **Status:** Accepted (2026-07-16)
 - **Author:** Zygos maintainers
 - **Created:** 2026-07-16
 - **Governs:** the `frontend/` web application — its technology stack, project
