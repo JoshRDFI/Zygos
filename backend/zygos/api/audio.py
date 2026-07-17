@@ -96,10 +96,14 @@ async def end_audio_turn(session) -> None:
 async def cancel_audio_turn(session) -> None:
     audio = session.audio
     if audio is not None:
+        # Stop the events() reader and wait for it to unwind BEFORE draining:
+        # Transcription.cancel now reads the connection to drain to a terminal,
+        # and two concurrent recv() on one StreamReader would corrupt framing.
+        audio.consumer.cancel()
+        await asyncio.gather(audio.consumer, return_exceptions=True)
         try:
             await audio.transcription.cancel()
         except Exception:  # noqa: BLE001 - a dead sidecar must not kill the session
             logger.debug("cancel_audio_turn: transcription.cancel() failed", exc_info=True)
         audio.pusher.cancel()
-        audio.consumer.cancel()
         session.audio = None

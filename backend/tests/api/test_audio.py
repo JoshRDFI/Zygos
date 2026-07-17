@@ -152,3 +152,44 @@ async def test_start_audio_turn_ensures_stt_ready_restarting_dead_sidecar():
         await cancel_audio_turn(session)
     finally:
         await svc.aclose()
+
+
+class _FakeTranscription:
+    def __init__(self, order):
+        self._order = order
+
+    async def cancel(self):
+        self._order.append("drain")
+
+
+async def test_cancel_audio_turn_stops_consumer_before_draining():
+    """cancel_audio_turn must stop the events() reader before draining."""
+    order = []
+
+    async def consumer_body():
+        try:
+            await asyncio.Event().wait()  # blocks like events() in recv()
+        except asyncio.CancelledError:
+            order.append("consumer-cancelled")
+            raise
+
+    async def pusher_body():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            raise
+
+    consumer = asyncio.create_task(consumer_body())
+    pusher = asyncio.create_task(pusher_body())
+    await asyncio.sleep(0)  # let them park
+
+    class _Session:
+        pass
+
+    session = _Session()
+    session.audio = AudioTurn(_FakeTranscription(order), asyncio.Queue(), pusher, consumer)
+
+    await cancel_audio_turn(session)
+
+    assert order == ["consumer-cancelled", "drain"]  # reader stopped, THEN drain
+    assert session.audio is None

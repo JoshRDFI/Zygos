@@ -62,6 +62,7 @@ class Transcription:
     async def cancel(self) -> None:
         if self._started and not self._done:
             await self._conn.send_control({"type": "cancel"})
+            await _drain_to_terminal(self._conn)
         self._done = True
 
     async def events(self):
