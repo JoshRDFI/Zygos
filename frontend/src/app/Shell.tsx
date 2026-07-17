@@ -7,6 +7,8 @@ import SettingsSurface from "../surfaces/SettingsSurface";
 import ChatSurface from "../surfaces/ChatSurface";
 import InspectSurface from "../surfaces/InspectSurface";
 import DoctorSurface from "../surfaces/DoctorSurface";
+import ModelsSurface from "../surfaces/ModelsSurface";
+import ToolsSurface from "../surfaces/ToolsSurface";
 import { useApplyTheme } from "../theme/useApplyTheme";
 
 export default function Shell() {
@@ -20,10 +22,10 @@ export default function Shell() {
           <Routes>
             <Route path="/" element={<ChatSurface />} />
             <Route path="/files" element={<StubSurface name="Files" />} />
-            <Route path="/tools" element={<StubSurface name="Tools" />} />
+            <Route path="/tools" element={<ToolsSurface />} />
             <Route path="/memory" element={<StubSurface name="Memory" />} />
             <Route path="/inspect" element={<InspectSurface />} />
-            <Route path="/models" element={<StubSurface name="Models" />} />
+            <Route path="/models" element={<ModelsSurface />} />
             <Route path="/doctor" element={<DoctorSurface />} />
             <Route path="/settings" element={<SettingsSurface />} />
           </Routes>
