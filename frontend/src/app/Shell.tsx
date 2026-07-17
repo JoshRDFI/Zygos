@@ -4,6 +4,7 @@ import LeftRail from "./LeftRail";
 import ContextPanel from "./ContextPanel";
 import StubSurface from "../surfaces/StubSurface";
 import SettingsSurface from "../surfaces/SettingsSurface";
+import ChatSurface from "../surfaces/ChatSurface";
 import { useApplyTheme } from "../theme/useApplyTheme";
 
 export default function Shell() {
@@ -15,7 +16,7 @@ export default function Shell() {
         <LeftRail />
         <main className="flex-1 min-w-0 overflow-y-auto">
           <Routes>
-            <Route path="/" element={<StubSurface name="Chat" />} />
+            <Route path="/" element={<ChatSurface />} />
             <Route path="/files" element={<StubSurface name="Files" />} />
             <Route path="/tools" element={<StubSurface name="Tools" />} />
             <Route path="/memory" element={<StubSurface name="Memory" />} />
