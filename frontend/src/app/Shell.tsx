@@ -5,6 +5,8 @@ import ContextPanel from "./ContextPanel";
 import StubSurface from "../surfaces/StubSurface";
 import SettingsSurface from "../surfaces/SettingsSurface";
 import ChatSurface from "../surfaces/ChatSurface";
+import InspectSurface from "../surfaces/InspectSurface";
+import DoctorSurface from "../surfaces/DoctorSurface";
 import { useApplyTheme } from "../theme/useApplyTheme";
 
 export default function Shell() {
@@ -20,9 +22,9 @@ export default function Shell() {
             <Route path="/files" element={<StubSurface name="Files" />} />
             <Route path="/tools" element={<StubSurface name="Tools" />} />
             <Route path="/memory" element={<StubSurface name="Memory" />} />
-            <Route path="/inspect" element={<StubSurface name="Inspect" />} />
+            <Route path="/inspect" element={<InspectSurface />} />
             <Route path="/models" element={<StubSurface name="Models" />} />
-            <Route path="/doctor" element={<StubSurface name="Doctor" />} />
+            <Route path="/doctor" element={<DoctorSurface />} />
             <Route path="/settings" element={<SettingsSurface />} />
           </Routes>
         </main>
