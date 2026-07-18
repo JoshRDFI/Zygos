@@ -125,6 +125,9 @@ export const useVoiceStore = create<VoiceState>()(
 
       toggleMic: () => {
         if (!get().voiceEnabled || !rig) return;
+        // mutual exclusion: manual capture cannot run while always-on drives the
+        // shared CaptureController (the VAD's onSpeechEnd would end the manual turn)
+        if (get().alwaysOn) return;
         if (get().micOn) {
           rig.capture.stop();
           rig.mic.stop();

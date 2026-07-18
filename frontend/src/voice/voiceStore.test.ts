@@ -260,4 +260,37 @@ test("audio.unavailable reverts a pending always-on", () => {
   expect(fakeMicVad.stop).toHaveBeenCalled();
 });
 
+test("setVoiceEnabled(false) tears down always-on (stops mic-VAD, clears alwaysOn)", () => {
+  const client = makeFakeClient();
+  const s = useVoiceStore.getState();
+  s.setVoiceEnabled(true);
+  s.attach(client);
+  s.toggleAlwaysOn();
+  expect(useVoiceStore.getState().alwaysOn).toBe(true);
+  useVoiceStore.getState().setVoiceEnabled(false);
+  expect(fakeMicVad.stop).toHaveBeenCalled();
+  expect(useVoiceStore.getState().alwaysOn).toBe(false);
+});
+
+test("tts.duck with empty payload ducks to the default 0.2 gain", () => {
+  const client = makeFakeClient();
+  const s = useVoiceStore.getState();
+  s.setVoiceEnabled(true);
+  s.attach(client);
+  client.emit("audio.out:tts.duck", {}); // no gain field
+  expect(fakePlayback.duck).toHaveBeenCalledWith(0.2);
+});
+
+test("toggleMic is a no-op while always-on is active (symmetric mutual exclusion)", () => {
+  const client = makeFakeClient();
+  const s = useVoiceStore.getState();
+  s.setVoiceEnabled(true);
+  s.attach(client);
+  s.toggleAlwaysOn();
+  expect(useVoiceStore.getState().alwaysOn).toBe(true);
+  useVoiceStore.getState().toggleMic();
+  expect(useVoiceStore.getState().micOn).toBe(false);
+  expect(fakeMic.start).not.toHaveBeenCalled();
+});
+
 afterEach(() => resetVoiceDeps());
