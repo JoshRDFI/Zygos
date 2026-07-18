@@ -23,6 +23,8 @@ function makeFakeClient() {
 let fakeMic: { start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> };
 let micFrames: ((f: Float32Array, r: number) => void) | null;
 let fakePlayback: { setEnabled: ReturnType<typeof vi.fn>; begin: ReturnType<typeof vi.fn>; enqueue: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn>; duck: ReturnType<typeof vi.fn>; unduck: ReturnType<typeof vi.fn>; interrupt: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn> };
+let fakeMicVad: { start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> };
+let vadCb: import("./micVadAdapter").MicVadCallbacks | null;
 
 beforeEach(() => {
   localStorage.clear();
@@ -30,10 +32,16 @@ beforeEach(() => {
   useVoiceStore.setState({ voiceEnabled: false, micOn: false, speakerOn: false, warning: null });
   fakeMic = { start: vi.fn(() => Promise.resolve()), stop: vi.fn() };
   micFrames = null;
-  fakePlayback = { setEnabled: vi.fn(), begin: vi.fn(), enqueue: vi.fn(), end: vi.fn(), duck: vi.fn(), unduck: vi.fn(), interrupt: vi.fn(), dispose: vi.fn() };
+  fakePlayback = {
+    setEnabled: vi.fn(), begin: vi.fn(), enqueue: vi.fn(), end: vi.fn(),
+    duck: vi.fn(), unduck: vi.fn(), interrupt: vi.fn(), dispose: vi.fn(),
+  };
+  fakeMicVad = { start: vi.fn(() => Promise.resolve()), stop: vi.fn() };
+  vadCb = null;
   setVoiceDeps({
     createMicAdapter: (onFrames) => { micFrames = onFrames; return fakeMic; },
     createPlayback: () => fakePlayback,
+    createMicVadAdapter: (cb) => { vadCb = cb; return fakeMicVad; },
   });
 });
 
@@ -153,6 +161,103 @@ test("setVoiceEnabled(false) disables mic and speaker", () => {
 test("voiceEnabled persists to localStorage['zygos.voice']", () => {
   useVoiceStore.getState().setVoiceEnabled(true);
   expect(localStorage.getItem("zygos.voice")).toMatch(/"voiceEnabled":true/);
+});
+
+test("toggleAlwaysOn on starts the mic-VAD and sets alwaysOn", () => {
+  const client = makeFakeClient();
+  const s = useVoiceStore.getState();
+  s.setVoiceEnabled(true);
+  s.attach(client);
+  s.toggleAlwaysOn();
+  expect(useVoiceStore.getState().alwaysOn).toBe(true);
+  expect(fakeMicVad.start).toHaveBeenCalled();
+});
+
+test("vad onset/speech emit audio.vad frames; speech also interrupts playback", () => {
+  const client = makeFakeClient();
+  const s = useVoiceStore.getState();
+  s.setVoiceEnabled(true);
+  s.attach(client);
+  s.toggleAlwaysOn();
+  vadCb!.onSpeechStart();
+  for (let i = 0; i < 8; i++) vadCb!.onFrame(true); // default confirmFrames=8
+  const vadStates = client.sent.filter((f) => f.type === "audio.vad").map((f) => f.payload.state);
+  expect(vadStates).toContain("onset");
+  expect(vadStates).toContain("speech");
+  expect(fakePlayback.interrupt).toHaveBeenCalled();
+});
+
+test("onSpeechEnd streams the utterance as a bracketed STT turn + emits silence", () => {
+  const client = makeFakeClient();
+  const s = useVoiceStore.getState();
+  s.setVoiceEnabled(true);
+  s.attach(client);
+  s.toggleAlwaysOn();
+  vadCb!.onSpeechStart();
+  vadCb!.onSpeechEnd(new Float32Array(320)); // 20ms @16k
+  const types = client.sent.map((f) => f.type);
+  expect(types).toContain("audio.start");
+  expect(types).toContain("audio.endpoint");
+  expect(types).toContain("audio.vad"); // the silence signal
+  expect(client.sentBinary.some((b) => b[0] === 0x00)).toBe(true);
+});
+
+test("tts.duck / tts.unduck drive playback gain", () => {
+  const client = makeFakeClient();
+  const s = useVoiceStore.getState();
+  s.setVoiceEnabled(true);
+  s.attach(client);
+  client.emit("audio.out:tts.duck", { gain: 0.2 });
+  client.emit("audio.out:tts.unduck", { gain: 1.0 });
+  expect(fakePlayback.duck).toHaveBeenCalledWith(0.2);
+  expect(fakePlayback.unduck).toHaveBeenCalled();
+});
+
+test("enabling always-on stops a running manual mic (mutual exclusion)", () => {
+  const client = makeFakeClient();
+  const s = useVoiceStore.getState();
+  s.setVoiceEnabled(true);
+  s.attach(client);
+  s.toggleMic();
+  expect(useVoiceStore.getState().micOn).toBe(true);
+  s.toggleAlwaysOn();
+  expect(useVoiceStore.getState().micOn).toBe(false);
+  expect(useVoiceStore.getState().alwaysOn).toBe(true);
+});
+
+test("detach stops the mic-VAD and clears alwaysOn", () => {
+  const client = makeFakeClient();
+  const s = useVoiceStore.getState();
+  s.setVoiceEnabled(true);
+  s.attach(client);
+  s.toggleAlwaysOn();
+  useVoiceStore.getState().detach();
+  expect(fakeMicVad.stop).toHaveBeenCalled();
+  expect(useVoiceStore.getState().alwaysOn).toBe(false);
+});
+
+test("mic-VAD start failure reverts always-on and warns", async () => {
+  fakeMicVad.start = vi.fn(() => Promise.reject(new Error("no mic")));
+  const client = makeFakeClient();
+  const s = useVoiceStore.getState();
+  s.setVoiceEnabled(true);
+  s.attach(client);
+  s.toggleAlwaysOn();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(useVoiceStore.getState().alwaysOn).toBe(false);
+  expect(useVoiceStore.getState().warning).toMatch(/unavailable/i);
+});
+
+test("audio.unavailable reverts a pending always-on", () => {
+  const client = makeFakeClient();
+  const s = useVoiceStore.getState();
+  s.setVoiceEnabled(true);
+  s.attach(client);
+  s.toggleAlwaysOn();
+  client.emit("control:audio.unavailable", { reason: "voice_in_use", message: "busy" });
+  expect(useVoiceStore.getState().alwaysOn).toBe(false);
+  expect(fakeMicVad.stop).toHaveBeenCalled();
 });
 
 afterEach(() => resetVoiceDeps());
