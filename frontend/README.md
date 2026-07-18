@@ -19,9 +19,8 @@ Self-hosted React + TypeScript + Vite + Tailwind UI for the Zygos runtime.
 
 Live: Chat (streaming), Inspect, Doctor, Models/Tools lists, and the **voice
 audio round-trip** — Mic (click-to-toggle capture → STT), Speaker (TTS
-playback), and a Voice master toggle. Placeholder: Files, Memory, model
-selection, and the **Always-on** control (browser VAD + duck-then-stop
-barge-in are increment 1c).
+playback), Voice master toggle, and **Always-on** (hands-free with browser VAD
++ duck-then-stop barge-in). Placeholder: Files, Memory, model selection.
 
 ## Voice round-trip smoke test (increment 1b)
 
@@ -44,3 +43,25 @@ round-trip is a manual check:
    voice, so the second shows the "voice in use" warning and auto-reverts.
 5. **Default-off.** With `voice.enabled` unset the backend is unchanged and the
    voice controls send nothing.
+
+## Voice barge-in smoke test (increment 1c)
+
+Silero VAD runs as WASM/onnx in a real browser (absent from jsdom), so the live
+barge-in path is a manual check. Assets are self-hosted under `public/vad`
+(populated by `npm run vendor:vad`, run automatically on install/dev/build).
+
+1. **Backend with real engines** — as in the 1b smoke test: `.[voice]` installed,
+   `voice.enabled=true`, `voice.stt.engine=faster_whisper`, `voice.tts.engine=kokoro`.
+2. **Frontend** — `npm run dev`; open `http://localhost:5173`. **Use headphones**
+   so the assistant's own audio does not re-trigger the mic.
+3. **Hands-free turn.** Click **Voice**, then **Speaker**, then **Always-on**
+   (Mic disables; "listening…" shows). Speak a sentence and pause → it transcribes
+   and drives a reply with no Mic click.
+4. **Barge-in.** While the assistant is speaking, talk over it → the reply first
+   **ducks** (quieter), then **stops** within a few hundred ms (buffered audio is
+   flushed), and your new utterance drives the next reply. This is the first live
+   exercise of the `ba6a75fb` drain-to-terminal fix.
+5. **False alarm.** A brief cough/noise **ducks** but does **not** stop the
+   assistant — it restores to full volume on its own.
+6. **Teardown.** Navigate away from Chat and back, or toggle **Voice** off → the
+   mic-VAD stops cleanly (no lingering mic indicator).
