@@ -5,8 +5,11 @@ export interface AudioBufferLike {
 }
 export interface BufferSourceLike {
   buffer: AudioBufferLike | null;
+  onended: (() => void) | null;
   connect(target: unknown): void;
+  disconnect(): void;
   start(when: number): void;
+  stop(): void;
 }
 export interface AudioCtxLike {
   readonly sampleRate: number;
@@ -19,6 +22,7 @@ const RATE = 24000;
 
 export class PlaybackScheduler {
   private cursor = 0;
+  private live = new Set<BufferSourceLike>();
   constructor(private readonly ctx: AudioCtxLike, private readonly target: unknown) {}
 
   enqueue(int16: ArrayBuffer): void {
@@ -29,9 +33,21 @@ export class PlaybackScheduler {
     const src = this.ctx.createBufferSource();
     src.buffer = buffer;
     src.connect(this.target);
+    this.live.add(src);
+    src.onended = () => { this.live.delete(src); };
     const startAt = Math.max(this.ctx.currentTime, this.cursor);
     src.start(startAt);
     this.cursor = startAt + samples.length / RATE;
+  }
+
+  interrupt(): void {
+    for (const src of this.live) {
+      try { src.stop(); } catch { /* already stopped */ }
+      try { src.disconnect(); } catch { /* already disconnected */ }
+      src.onended = null;
+    }
+    this.live.clear();
+    this.cursor = 0;
   }
 
   reset(): void {
