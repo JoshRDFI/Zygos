@@ -6,12 +6,23 @@ import { useVoiceStore } from "../voice/voiceStore";
 
 beforeEach(() => {
   localStorage.clear();
-  useVoiceStore.setState({ voiceEnabled: false, micOn: false, speakerOn: false, warning: null });
+  useVoiceStore.setState({ voiceEnabled: false, micOn: false, speakerOn: false, alwaysOn: false, warning: null });
 });
 
-test("Always-on remains a disabled placeholder (1c)", () => {
+test("Always-on is gated by Voice master and toggles aria-pressed", async () => {
   render(<VoiceControls />);
   expect(screen.getByRole("button", { name: "Always-on" })).toBeDisabled();
+  await userEvent.click(screen.getByRole("button", { name: "Voice" }));
+  const always = screen.getByRole("button", { name: "Always-on" });
+  expect(always).toBeEnabled();
+  expect(always).toHaveAttribute("aria-pressed", "false");
+});
+
+test("enabling always-on (via store) disables the Mic button and shows a listening indicator", () => {
+  useVoiceStore.setState({ voiceEnabled: true, alwaysOn: true });
+  render(<VoiceControls />);
+  expect(screen.getByRole("button", { name: "Mic" })).toBeDisabled();
+  expect(screen.getByText(/listening/i)).toBeInTheDocument();
 });
 
 test("Voice master gates Mic and Speaker", async () => {
