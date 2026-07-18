@@ -5,6 +5,9 @@ export interface PlaybackController {
   begin(): void;
   enqueue(body: ArrayBuffer): void;
   end(): void;
+  duck(gain: number): void;
+  unduck(): void;
+  interrupt(): void;
   dispose(): void;
 }
 
@@ -25,6 +28,10 @@ export function createPlayback(): PlaybackController {
     return sched!;
   }
 
+  function rampGain(value: number): void {
+    if (ctx && gain) gain.gain.setTargetAtTime(value, ctx.currentTime, 0.015); // ~50ms, click-free
+  }
+
   return {
     setEnabled(next: boolean): void {
       enabled = next;
@@ -34,13 +41,23 @@ export function createPlayback(): PlaybackController {
       }
     },
     begin(): void {
-      if (enabled) ensure().reset();
+      if (enabled) { ensure().reset(); rampGain(1.0); } // fresh utterance starts at full volume
     },
     enqueue(body: ArrayBuffer): void {
       if (enabled) ensure().enqueue(body);
     },
     end(): void {
       sched?.reset();
+    },
+    duck(gain: number): void {
+      rampGain(gain); // tts.duck {gain:0.2}
+    },
+    unduck(): void {
+      rampGain(1.0); // tts.unduck {gain:1.0}
+    },
+    interrupt(): void {
+      sched?.interrupt();
+      rampGain(1.0); // stop_speech sends no unduck — restore locally
     },
     dispose(): void {
       enabled = false;

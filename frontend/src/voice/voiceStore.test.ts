@@ -22,7 +22,7 @@ function makeFakeClient() {
 
 let fakeMic: { start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> };
 let micFrames: ((f: Float32Array, r: number) => void) | null;
-let fakePlayback: { setEnabled: ReturnType<typeof vi.fn>; begin: ReturnType<typeof vi.fn>; enqueue: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn> };
+let fakePlayback: { setEnabled: ReturnType<typeof vi.fn>; begin: ReturnType<typeof vi.fn>; enqueue: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn>; duck: ReturnType<typeof vi.fn>; unduck: ReturnType<typeof vi.fn>; interrupt: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn> };
 
 beforeEach(() => {
   localStorage.clear();
@@ -30,7 +30,7 @@ beforeEach(() => {
   useVoiceStore.setState({ voiceEnabled: false, micOn: false, speakerOn: false, warning: null });
   fakeMic = { start: vi.fn(() => Promise.resolve()), stop: vi.fn() };
   micFrames = null;
-  fakePlayback = { setEnabled: vi.fn(), begin: vi.fn(), enqueue: vi.fn(), end: vi.fn(), dispose: vi.fn() };
+  fakePlayback = { setEnabled: vi.fn(), begin: vi.fn(), enqueue: vi.fn(), end: vi.fn(), duck: vi.fn(), unduck: vi.fn(), interrupt: vi.fn(), dispose: vi.fn() };
   setVoiceDeps({
     createMicAdapter: (onFrames) => { micFrames = onFrames; return fakeMic; },
     createPlayback: () => fakePlayback,
