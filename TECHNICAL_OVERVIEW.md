@@ -23,8 +23,10 @@ Every capability below carries one of these tags:
 - **`[v2 · planned]`** — designed, often with an accepted RFC, but not yet built.
 
 So a `[v2 · built]` subsystem is real code with tests, now driven by a live turn loop over
-WebSocket (start it with `zygos serve`). What remains before v2 is a finished product is the
-graphical web UI and voice.
+WebSocket (start it with `zygos serve`). The **React web UI and voice I/O are now built**
+too — early, with a few surfaces (files, memory, model picker) still placeholders. What
+remains before v2 is a finished product is the fuller UI, learning and workflows (M6/M7),
+the scheduler, and a single-command installer.
 
 ## What Zygos is, technically
 
@@ -49,9 +51,9 @@ Two design commitments run through everything:
 v2 is layered, and the dependency rule points **one way only**:
 
 ```
-frontend (React + Tailwind + Vite)          [v2 · planned]
+frontend (React + Tailwind + Vite)          [v2 · built] (early — some surfaces are placeholders)
         │  HTTP / WebSocket
-adapters — web server / CLI                  web [v2 · planned] · CLI [v2 · built]
+adapters — web server / CLI                  web [v2 · built] · CLI [v2 · built]
         │  imports (downward only)
 runtime — composition root, session loop, state objects
 services — interfaces + default implementations
@@ -122,15 +124,24 @@ named, snapshotable objects rather than hidden fields. A **capability registry**
 **runtime manifest** answer "what can this runtime do, and is it healthy?", surfaced by
 `zygos inspect` / `zygos doctor`. A per-session **`trace` channel** now streams these
 events live over the WebSocket as a turn runs. `[v2 · built]` The guiding principle: *state
-the console cannot see is an architecture bug*. The graphical **Introspection Console** that
-renders all of this for auditing — verifying what context was used and what left your
-machine — arrives with the web UI. `[v2 · planned]`
+the console cannot see is an architecture bug*. The web UI already renders the read-only
+slice of this — **Inspect** (runtime manifest), **Doctor** (live health), **Models**, and
+**Tools** panels driven off `GET /runtime` and `/runtime/health`. `[v2 · built]` The fuller
+graphical **Introspection Console** — per-turn reasoning trajectory, memory retrieved, and
+what left your machine — is expanding from that base. `[v2 · planned]`
 
 ### Voice — on your machine
-The service and transport layers are shaped for voice from the start (a `VoiceService`
-interface and audio channels on the WebSocket protocol). Local-first engines
-(Whisper-family transcription, Piper/Kokoro-class synthesis) with optional cloud
-fallback are scoped in the voice RFC. `[v2 · planned]`
+Voice runs end to end. The service and transport layers were shaped for it from the start
+(a `VoiceService` interface and binary audio channels on the WebSocket protocol), and the
+engines now sit behind that seam: **local Whisper-family transcription (faster-whisper) and
+Kokoro synthesis**, selected by config like any other plugin — **opt-in and defaulting to a
+silent `fake` engine**, so voice adds no dependencies or model downloads unless you turn it
+on. In the web UI you speak to Zygos hands-free: a browser voice-activity detector (Silero,
+served locally — no CDN) brackets your utterances for transcription, and **barge-in** lets
+you talk over a reply — the assistant ducks, then stops, when your speech is confirmed
+([RFC-0005](./docs/rfcs/RFC-0005-Voice-Interaction-STT-and-TTS.md), delivered through the
+RFC-0011 web UI). The engines and the pure audio logic are unit-tested; the real-engine
+browser round-trip is validated by a documented manual smoke test. `[v2 · built]`
 
 ## How it runs
 
@@ -145,7 +156,8 @@ chat-and-tools conversation over the socket. The wire protocol is locked in
 `chat`/`tools`/`trace`/`control` channels, plus reserved binary audio channels) and
 tool-calling in
 [RFC-0008](./docs/rfcs/RFC-0008-Tool-Calling-Protocol-and-Tool-Authoring.md). `[v2 · built]`
-the turn loop and tools; `[v2 · planned]` the graphical UI, voice, and the scheduler.
+the turn loop, tools, the React web UI, and voice; `[v2 · planned]` the scheduler, learning
+(M6), and workflows (M7).
 
 Zygos is deployed as a **self-hosted web application** — targets are your own machine or
 a droplet-class VM, no Electron wrapper and no managed-platform assumption. A single

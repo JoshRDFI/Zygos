@@ -49,12 +49,17 @@ service's concrete class. The nine service contracts are:
 | `ConfigService` | `load`, `validate`, `get` | config loader/schema (Pydantic) |
 | `PluginService` | `resolve(kind, name) -> type` | — (new) |
 | `SchedulerService` | `schedule`, `cancel`, `list` | — (interface only; implementation deferred to the scheduler and autonomy milestone) |
-| `VoiceService` | `transcribe_stream(audio) -> text events`, `synthesize_stream(text) -> audio` | — (interface only; engines arrive in the voice RFC) |
+| `VoiceService` | `transcribe_stream(audio) -> text events`, `synthesize_stream(text) -> audio` | — (new; engines built per RFC-0005 — faster-whisper STT, Kokoro TTS, opt-in, default `fake`) |
 
-`VoiceService` is defined from the start so that the transport and service layers are
-voice-shaped before concrete STT/TTS engines are selected. Local-first engines
-(Whisper-family for transcription, Piper/Kokoro-class for synthesis) with optional cloud
-fallbacks are scoped in the dedicated voice RFC.
+`VoiceService` was defined from the start so that the transport and service layers were
+voice-shaped before concrete STT/TTS engines were selected. Those engines are now built
+per [RFC-0005](./docs/rfcs/RFC-0005-Voice-Interaction-STT-and-TTS.md): local-first
+faster-whisper transcription and Kokoro synthesis, run through the sidecar seam as
+config-declared plugins. They are **opt-in** — the default is a silent `fake` engine, so
+voice pulls no extra dependencies or model weights unless enabled — and each is
+byte-identical to the fake on its non-voice path. Optional cloud fallbacks remain scoped
+in the RFC. The engines drive the live web UI (RFC-0011): mic capture → STT, TTS playback,
+a browser Silero VAD for hands-free turn-taking, and duck-then-stop barge-in.
 
 ---
 
@@ -246,12 +251,18 @@ flows over that single connection:
     timeout or a dropped socket resolves to **deny** — the deny-floor. (Cycle 3)
   - `trace` — a per-session bridge mirrors emitted bus events for live inspection.
   - `control` — `cancel` / `ping` / `hello`; a mid-turn `user_message` is a barge-in.
-- **Binary frames** — prefixed with a 1-byte channel tag for `audio.in` and `audio.out`
-  (PCM or Opus; codec negotiated in a `control` handshake). **Reserved — the frame taxonomy
-  is frozen; the voice milestone fills these in.**
-- **Barge-in** — a mid-turn `user_message` (or a `control` cancel) trips the active turn;
-  a `control` frame will likewise cancel in-flight TTS once audio lands. Because all
-  channels share one socket, barge-in requires no cross-socket coordination.
+- **Binary frames** — prefixed with a 1-byte channel tag: `0x00` for `audio.in` (mic → STT,
+  PCM s16 mono LE @ 16 kHz) and `0x01` for `audio.out` (TTS → speaker, PCM s16 @ 24 kHz).
+  **Built (RFC-0005 / RFC-0011).** Capture is bracketed by `control` frames `audio.start` /
+  `audio.endpoint`; `control:audio.output {enabled}` toggles the speaker; and the `audio.out`
+  channel carries `tts.begin` / `tts.end` plus `tts.duck {gain}` / `tts.unduck {gain}` for
+  barge-in attenuation. The codec is PCM today; Opus negotiation remains a reserved extension.
+- **Barge-in** — a mid-turn `user_message` (or a `control` cancel) trips the active turn.
+  For voice, the browser sends `control:audio.vad {state: onset|speech|silence}`: an onset
+  **ducks** in-flight TTS (a reversible gain drop), confirmed **speech stops** the turn, and
+  silence (or a timeout) restores full volume — a two-stage duck-then-stop that drains each
+  utterance to exactly one terminal frame so turns never desync. Because all channels share
+  one socket, barge-in requires no cross-socket coordination.
 
 One connection means one auth handshake and no cross-socket ordering problems — a
 property that matters on self-hosted, single-user deployments.
@@ -284,18 +295,25 @@ server.
 
 ## Current Implementation Status
 
-Milestones 1–5 and Milestone 8 are complete as of 2026-07-13: config schema/loader
-and config-declared plugin resolver (M1), provider router + `ModelService` (M2), the
-adaptive reasoning engine plus the RFC-0002 event bus and RFC-0003 capability registry
-(M3), layered `MemoryService` (M4), and `ToolService` with the starter tool suite (M5) —
-together with RFC-0006 embedding + hybrid retrieval, and **M8**, the FastAPI/WebSocket
-adapter with a live per-session turn loop and native tool-calling (RFC-0007 session
-protocol + RFC-0008 tool-calling), M8's first consumer of `MemoryService` and
-`ToolService`. M8 ran as four cycles: server/lifecycle/inspection, WebSocket/session/chat
-turn loop, the tool-calling library, and live tool-calling in the turn loop. The backend
-suite has 580 tests passing. Next are voice (RFC-0005) and the React UI, then M6 (learning)
-and M7 (workflows) — which land after M8 in the build order. See [ROADMAP.md](./ROADMAP.md)
-for the full milestone plan.
+Milestones 1–5 and Milestone 8 are complete: config schema/loader and config-declared
+plugin resolver (M1), provider router + `ModelService` (M2), the adaptive reasoning engine
+plus the RFC-0002 event bus and RFC-0003 capability registry (M3), layered `MemoryService`
+(M4), and `ToolService` with the starter tool suite (M5) — together with RFC-0006 embedding
++ hybrid retrieval, and **M8**, the FastAPI/WebSocket adapter with a live per-session turn
+loop and native tool-calling (RFC-0007 session protocol + RFC-0008 tool-calling), M8's first
+consumer of `MemoryService` and `ToolService`. M8 ran as four cycles: server/lifecycle/inspection,
+WebSocket/session/chat turn loop, the tool-calling library, and live tool-calling in the turn loop.
+
+Since M8, **voice** and the **React web UI** have landed (as of 2026-07-17):
+[RFC-0005](./docs/rfcs/RFC-0005-Voice-Interaction-STT-and-TTS.md) engines — faster-whisper STT
+and Kokoro TTS behind the `VoiceService` seam (opt-in, default `fake`), a single-session voice
+gate, and duck-then-stop barge-in; and [RFC-0011](./docs/rfcs/RFC-0011-React-UI-Frontend-Architecture.md)'s
+`frontend/` (React + TS + Vite + Tailwind) delivering the shell, token themes, live chat over
+the turn loop, read-only Inspect/Doctor/Models/Tools panels, and live voice controls (mic → STT,
+TTS playback, browser Silero VAD for hands-free + barge-in). Files/Memory surfaces and model
+selection are still placeholders. The backend suite has 735 tests passing; the frontend adds a
+Vitest suite (71 tests). Next are M6 (learning) and M7 (workflows), the scheduler, and a
+single-command installer. See [ROADMAP.md](./ROADMAP.md) for the full milestone plan.
 
 ---
 

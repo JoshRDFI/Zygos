@@ -20,17 +20,20 @@ Zygos comes in two runtimes: **v1**, the stable TypeScript CLI, now maintained o
 [`v1` branch](https://github.com/JoshRDFI/Zygos/tree/v1) (deprecated — final bug fixes
 only), and **v2**, a Python migration toward a self-hosted web app with voice, in active
 development on this (`main`) branch. The v2 runtime now **runs as a self-hosted server
-with a live chat-and-tools turn loop over WebSocket** (start it with `zygos serve`); the
-graphical web UI and voice are still in active development. This README describes where
-Zygos is headed; the table marks what runs now versus what's still being built.
+with a live chat-and-tools turn loop over WebSocket** (start it with `zygos serve`), and a
+**React web app** front of it carries live chat, read-only inspection panels, and **voice
+in and out** (local Whisper/Kokoro engines, opt-in). Both are early — a few surfaces
+(files, memory, model picker) are still placeholders — and the graphical UI keeps growing.
+This README describes where Zygos is headed; the table marks what runs now versus what's
+still being built.
 
 |                | Today — v1 (TypeScript CLI)                     | In development — v2 (Python, self-hosted web app)   |
 |----------------|-------------------------------------------------|----------------------------------------------------|
 | **Models**     | Local (Ollama, vLLM) + public (OpenAI, Anthropic) | Same, routed by capability                        |
 | **Your data**  | Local SQLite — history & context on your machine | Layered memory with local semantic recall          |
 | **Tools**      | Tool framework (registry, permission checks, fallback) | Starter file / HTTP / shell tools, called by the model in the live turn loop with permission prompts |
-| **Interface**  | Command line                                     | WebSocket server + turn loop **built**; web UI & voice *(in development)* |
-| **Inspection** | Provider & route metrics                          | Runtime manifest & health today; full introspection console *(in development)* |
+| **Interface**  | Command line                                     | WebSocket server + turn loop **built**; React web UI with live chat and **voice I/O built** (early — some surfaces are placeholders) |
+| **Inspection** | Provider & route metrics                          | Runtime manifest & health, surfaced in the web UI's Inspect / Doctor / Models / Tools panels; a fuller introspection console *(expanding)* |
 | **Status**     | Stable; frozen (bug fixes only)                  | In active development — see the [roadmap](./ROADMAP.md) |
 
 ## Why Zygos
@@ -55,8 +58,11 @@ Zygos is headed; the table marks what runs now versus what's still being built.
   service is planned)*
 - **No lock-in.** Swap models, memory backends, tools, and providers without rebuilding —
   components bind to capabilities, not vendors. *(today)*
-- **Voice, on your machine.** Local-first speech in and out, with optional cloud fallback.
-  *(in development)*
+- **Voice, on your machine.** Local-first speech in and out — talk to Zygos hands-free and
+  interrupt it mid-reply, with the assistant ducking then stopping when you speak over it.
+  Local Whisper-family transcription and Kokoro synthesis run behind the same replaceable
+  seam as everything else, opt-in and defaulting off. *(built — live in the web UI; real
+  engines are opt-in, with optional cloud fallback planned)*
 
 ## What "private" means here
 
