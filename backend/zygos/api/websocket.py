@@ -18,7 +18,7 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from zygos.api.audio import cancel_audio_turn, end_audio_turn, feed_audio, start_audio_turn
-from zygos.api.duck import arm_duck, clear_duck_state, release_duck, stop_speech
+from zygos.api.duck import arm_duck, release_duck, stop_speech
 from zygos.api.frames import AUDIO_TAG_IN, CHAT, CONTROL, TOOLS, Frame, decode, encode
 from zygos.api.session import Session
 from zygos.api.turn import TurnDeps, run_turn
@@ -151,14 +151,10 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
         logger.exception("websocket handler error (session=%s)", session_id)
     finally:
         if session._conn is conn:  # only if not superseded by a replacement
-            if session.active_task is not None and not session.active_task.done():
-                if session.active_cancel is not None:
-                    session.active_cancel.trip()
             if session.audio is not None:
                 session.audio.consumer.cancel()
                 session.audio.pusher.cancel()
                 session.audio = None
-            clear_duck_state(session)
             session.speaking = False
             session.connected = False
             gate = getattr(deps, "voice_gate", None)
@@ -170,9 +166,10 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
             session.pending_permissions.clear()
             session._writer = None
             # Reap the abandoned session: with the app-lifetime singleton client,
-            # WS-close == page-gone. Guarded by `session._conn is conn`, so a
-            # superseding reconnect (which reassigns session._conn) never reaps the
-            # live session. Assumption holds until a reconnect feature adds a grace
-            # period.
+            # WS-close == page-gone. delete() also trips any active turn and clears
+            # the duck window, so this is the sole owner of that teardown. Guarded
+            # by `session._conn is conn`, so a superseding reconnect (which reassigns
+            # session._conn) never reaps the live session. Assumption holds until a
+            # reconnect feature adds a grace period.
             registry.delete(session.id)
         writer.cancel()

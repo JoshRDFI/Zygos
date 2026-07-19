@@ -73,8 +73,15 @@ def test_delete_trips_active_turn_and_removes():
     import asyncio
     loop = asyncio.new_event_loop()
     s.active_task = loop.create_task(_never_done())
+    s.ducked = True
+    duck_timeout = loop.create_task(_never_done())
+    s.duck_timeout = duck_timeout
     assert reg.delete(s.id) is True
     assert token.is_set is True
+    # delete() is the sole teardown of the abandoned session on WS disconnect,
+    # so it must also clear any open duck window.
+    assert s.ducked is False
+    assert s.duck_timeout is None
     assert reg.get(s.id) is None
     assert reg.delete(s.id) is False
     s.active_task.cancel()
