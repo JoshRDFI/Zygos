@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -34,6 +35,22 @@ function renderShell() {
 test("Shell starts the session once on mount", async () => {
   renderShell();
   await vi.waitFor(() => expect(createSession).toHaveBeenCalledTimes(1));
+});
+
+test("Shell starts the session once under StrictMode double-invoke", async () => {
+  render(
+    <StrictMode>
+      <MemoryRouter initialEntries={["/"]}>
+        <Shell />
+      </MemoryRouter>
+    </StrictMode>,
+  );
+  await vi.waitFor(() => expect(createSession).toHaveBeenCalledTimes(1));
+  // StrictMode mounts the effect, tears it down, and mounts it again; the
+  // in-flight startPromise guard must swallow the second start(). Let any second
+  // invocation settle, then confirm the session was still created only once.
+  await Promise.resolve();
+  expect(createSession).toHaveBeenCalledTimes(1);
 });
 
 test("renders the Zygos wordmark and all seven rail surfaces", () => {
