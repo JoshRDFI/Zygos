@@ -103,6 +103,21 @@ test("start() attaches voice exactly once", async () => {
   expect(attach).toHaveBeenCalledWith(fake);
 });
 
+test("stop() during an in-flight start abandons it (no rig, no attach, stays idle)", async () => {
+  let resolveCreate: (id: string) => void = () => {};
+  createSession.mockImplementationOnce(() => new Promise<string>((res) => { resolveCreate = res; }));
+  const attach = vi.spyOn(useVoiceStore.getState(), "attach");
+  useSessionStore.getState().start();      // in-flight (createSession pending)
+  useSessionStore.getState().stop();       // stop before it resolves
+  resolveCreate("late-session");           // in-flight promise now settles
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(getSessionClient()).toBeNull();
+  expect(attach).not.toHaveBeenCalled();
+  expect(useSessionStore.getState().status).toBe("idle");
+  expect(useSessionStore.getState().sessionId).toBeNull();
+});
+
 test("getSessionClient() is null before start; stop() tears down", async () => {
   useSessionStore.getState().stop();
   expect(getSessionClient()).toBeNull();

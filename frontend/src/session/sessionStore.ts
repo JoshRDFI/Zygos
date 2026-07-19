@@ -14,6 +14,7 @@ interface SessionRig {
 }
 let rig: SessionRig | null = null;
 let startPromise: Promise<void> | null = null;
+let epoch = 0;
 
 interface SessionDeps {
   createSession: () => Promise<string>;
@@ -48,10 +49,12 @@ export const useSessionStore = create<SessionState>((set) => ({
 
   start: () => {
     if (rig || startPromise) return; // already started or starting (StrictMode-safe)
+    const myEpoch = epoch;
     set({ status: "connecting" });
     startPromise = deps
       .createSession()
       .then((id) => {
+        if (myEpoch !== epoch) return; // stop() ran while this start was in-flight; abandon it
         const client = deps.createClient(id);
         const onFrame = useChatStore.getState().onFrame;
         const offs = CHAT_TYPES.map((t) => client.on(`chat:${t}`, onFrame));
@@ -63,12 +66,14 @@ export const useSessionStore = create<SessionState>((set) => ({
         set({ sessionId: id });
       })
       .catch(() => {
+        if (myEpoch !== epoch) return; // stop() ran while this start was in-flight; abandon it
         startPromise = null; // allow a retry
         set({ status: "error" });
       });
   },
 
   stop: () => {
+    epoch += 1; // invalidate any in-flight start() so its .then()/.catch() abandons
     useVoiceStore.getState().detach();
     rig?.client.close();
     rig?.offs.forEach((off) => off());
