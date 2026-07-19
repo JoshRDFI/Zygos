@@ -4,6 +4,28 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Zygos</title>
+    <!-- Stamp the persisted theme before first paint to avoid a flash of the
+         static default. Mirrors computeThemeAttrs() in src/theme/initTheme.ts. -->
+    <script>
+      (function () {
+        try {
+          var THEMES = ["instrument", "study", "quiet-os"], MODES = ["light", "dark", "system"];
+          var theme = "instrument", mode = "dark";
+          var raw = localStorage.getItem("zygos.theme");
+          if (raw) {
+            var st = (JSON.parse(raw) || {}).state || {};
+            if (THEMES.indexOf(st.theme) !== -1) theme = st.theme;
+            if (MODES.indexOf(st.mode) !== -1) mode = st.mode;
+          }
+          if (mode === "system") {
+            mode = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          }
+          var el = document.documentElement;
+          el.setAttribute("data-theme", theme);
+          el.setAttribute("data-mode", mode);
+        } catch (e) { /* keep the static defaults on <html> */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
