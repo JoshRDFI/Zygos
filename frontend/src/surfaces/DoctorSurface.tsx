@@ -1,11 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getHealth } from "../client/rest";
 import type { RuntimeHealth } from "../client/types";
 
 export default function DoctorSurface() {
   const [h, setH] = useState<RuntimeHealth | null>(null);
+  const [failed, setFailed] = useState(false);
+  const seq = useRef(0);
 
-  const load = (probe: boolean) => { getHealth(probe).then(setH).catch(() => setH(null)); };
+  const load = (probe: boolean) => {
+    const mine = ++seq.current; // ignore results from a superseded request
+    getHealth(probe)
+      .then((res) => { if (mine === seq.current) { setH(res); setFailed(false); } })
+      .catch(() => { if (mine === seq.current) { setH(null); setFailed(true); } });
+  };
   useEffect(() => { load(false); }, []);
 
   return (
@@ -19,7 +26,11 @@ export default function DoctorSurface() {
           Probe embedder
         </button>
       </div>
-      {!h ? (
+      {failed ? (
+        <div role="alert" className="text-text-muted">
+          Couldn&apos;t load runtime health — check that the backend is running, then probe to retry.
+        </div>
+      ) : !h ? (
         <div className="text-text-muted">Loading health…</div>
       ) : (
         <>
