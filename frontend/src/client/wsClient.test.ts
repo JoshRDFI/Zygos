@@ -16,6 +16,7 @@ class FakeSocket {
   sent: Array<string | ArrayBufferView> = [];
   onmessage: ((e: { data: string | ArrayBuffer }) => void) | null = null;
   onopen: (() => void) | null = null;
+  onclose: (() => void) | null = null;
   send(d: string | ArrayBufferView) { this.sent.push(d); }
   close() { this.readyState = 3; }
   emit(frame: Frame) { this.onmessage?.({ data: JSON.stringify(frame) }); }
@@ -150,6 +151,39 @@ test("frames sent after the socket is closed are dropped, not queued", () => {
   fake.readyState = 1;
   fake.onopen?.();
   expect(fake.sent).toHaveLength(0);
+});
+
+test("onOpen fires on socket open and still flushes the pre-open queue", () => {
+  const client = new WsClient("sess-1");
+  const fake = new FakeSocket();
+  fake.readyState = 0; // CONNECTING
+  client.socketFactory = () => fake;
+  client.connect();
+
+  const opened = vi.fn();
+  client.onOpen(opened);
+  client.send({ channel: "chat", type: "user_message", payload: { text: "buffered" } });
+
+  fake.readyState = 1;
+  fake.onopen!(); // open -> flush + notify
+  expect(opened).toHaveBeenCalledTimes(1);
+  expect(fake.sent).toHaveLength(1); // queued frame flushed
+});
+
+test("onClose fires on socket close; unsubscribe stops delivery", () => {
+  const client = new WsClient("sess-1");
+  const fake = new FakeSocket();
+  client.socketFactory = () => fake;
+  client.connect();
+
+  const closed = vi.fn();
+  const off = client.onClose(closed);
+  fake.onclose!();
+  expect(closed).toHaveBeenCalledTimes(1);
+
+  off();
+  fake.onclose!();
+  expect(closed).toHaveBeenCalledTimes(1); // no further delivery after unsubscribe
 });
 
 test("text frames still dispatch after binary support added", () => {

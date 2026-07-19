@@ -6,6 +6,7 @@ export interface WebSocketLike {
   close(): void;
   onmessage: ((e: { data: string | ArrayBuffer }) => void) | null;
   onopen: (() => void) | null;
+  onclose: (() => void) | null;
   readyState: number;
 }
 
@@ -38,6 +39,8 @@ export class WsClient {
   private socket: WebSocketLike | null = null;
   private handlers = new Map<string, Set<Handler>>();
   private binaryHandlers = new Set<BinaryHandler>();
+  private openHandlers = new Set<() => void>();
+  private closeHandlers = new Set<() => void>();
   private preOpenQueue: Array<string | ArrayBufferView> = [];
   private readonly url: string;
 
@@ -57,7 +60,11 @@ export class WsClient {
         this.binaryHandlers.forEach((h) => h(e.data as ArrayBuffer));
       }
     };
-    socket.onopen = () => this.flushPreOpen();
+    socket.onopen = () => {
+      this.flushPreOpen();
+      this.openHandlers.forEach((h) => h());
+    };
+    socket.onclose = () => this.closeHandlers.forEach((h) => h());
     this.socket = socket;
   }
 
@@ -74,6 +81,16 @@ export class WsClient {
   onBinary(handler: BinaryHandler): () => void {
     this.binaryHandlers.add(handler);
     return () => this.binaryHandlers.delete(handler);
+  }
+
+  onOpen(handler: () => void): () => void {
+    this.openHandlers.add(handler);
+    return () => this.openHandlers.delete(handler);
+  }
+
+  onClose(handler: () => void): () => void {
+    this.closeHandlers.add(handler);
+    return () => this.closeHandlers.delete(handler);
   }
 
   send(frame: Frame): void {
