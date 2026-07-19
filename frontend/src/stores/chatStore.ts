@@ -1,6 +1,9 @@
 import { create } from "zustand";
 import type { Frame } from "../client/types";
 
+// The chat-channel frame types the session subscribes to and onFrame consumes.
+export const CHAT_FRAME_TYPES = ["turn.start", "token", "turn.end", "error", "partial", "final"] as const;
+
 export type ChatMessage = { role: "user" | "assistant"; text: string; streaming: boolean };
 
 interface ChatState {

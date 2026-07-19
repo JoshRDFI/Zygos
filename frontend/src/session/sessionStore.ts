@@ -1,10 +1,8 @@
 import { create } from "zustand";
 import { createSession as restCreateSession } from "../client/rest";
 import { WsClient } from "../client/wsClient";
-import { useChatStore } from "../stores/chatStore";
+import { CHAT_FRAME_TYPES, useChatStore } from "../stores/chatStore";
 import { useVoiceStore } from "../voice/voiceStore";
-
-const CHAT_TYPES = ["turn.start", "token", "turn.end", "error", "partial", "final"];
 
 export type SessionStatus = "idle" | "connecting" | "connected" | "disconnected" | "error";
 
@@ -57,16 +55,18 @@ export const useSessionStore = create<SessionState>((set) => ({
         if (myEpoch !== epoch) return; // stop() ran while this start was in-flight; abandon it
         const client = deps.createClient(id);
         const onFrame = useChatStore.getState().onFrame;
-        const offs = CHAT_TYPES.map((t) => client.on(`chat:${t}`, onFrame));
+        const offs = CHAT_FRAME_TYPES.map((t) => client.on(`chat:${t}`, onFrame));
         offs.push(client.onOpen(() => set({ status: "connected" })));
         offs.push(client.onClose(() => set({ status: "disconnected" })));
         useVoiceStore.getState().attach(client);
         client.connect();
         rig = { client, offs };
+        startPromise = null;
         set({ sessionId: id });
       })
-      .catch(() => {
+      .catch((err) => {
         if (myEpoch !== epoch) return; // stop() ran while this start was in-flight; abandon it
+        console.error("session start failed", err);
         startPromise = null; // allow a retry
         set({ status: "error" });
       });

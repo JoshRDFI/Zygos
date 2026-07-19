@@ -73,6 +73,7 @@ test("status transitions connected on open and disconnected on close", async () 
 });
 
 test("createSession rejection sets error and is retryable", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
   createSession.mockImplementationOnce(() => Promise.reject(new Error("boom")));
   useSessionStore.getState().start();
   await Promise.resolve();
