@@ -1,43 +1,23 @@
-import { useEffect, useRef, useState } from "react";
-import { createSession } from "../client/rest";
-import { WsClient } from "../client/wsClient";
+import { useState } from "react";
 import { useChatStore } from "../stores/chatStore";
+import { useSessionStore, getSessionClient } from "../session/sessionStore";
 import VoiceControls from "../components/VoiceControls";
-import { useVoiceStore } from "../voice/voiceStore";
 
 export default function ChatSurface() {
   const messages = useChatStore((s) => s.messages);
   const addUser = useChatStore((s) => s.addUser);
-  const onFrame = useChatStore((s) => s.onFrame);
+  const status = useSessionStore((s) => s.status);
+  const start = useSessionStore((s) => s.start);
   const [draft, setDraft] = useState("");
-  const clientRef = useRef<WsClient | null>(null);
 
-  useEffect(() => {
-    let disposed = false;
-    let client: WsClient | null = null;
-    createSession().then((id) => {
-      if (disposed) return;
-      client = new WsClient(id);
-      for (const t of ["turn.start", "token", "turn.end", "error", "partial", "final"]) {
-        client.on(`chat:${t}`, onFrame);
-      }
-      useVoiceStore.getState().attach(client);
-      client.connect();
-      clientRef.current = client;
-    });
-    return () => {
-      disposed = true;
-      useVoiceStore.getState().detach();
-      client?.close();
-    };
-  }, [onFrame]);
+  const offline = status === "disconnected" || status === "error";
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const text = draft.trim();
     if (!text) return;
     addUser(text);
-    clientRef.current?.send({ channel: "chat", type: "user_message", payload: { text } });
+    getSessionClient()?.send({ channel: "chat", type: "user_message", payload: { text } });
     setDraft("");
   };
 
@@ -51,6 +31,20 @@ export default function ChatSurface() {
           </div>
         ))}
       </div>
+      {offline && (
+        <div role="status" className="px-3 py-1 text-xs text-text-muted border-t border-border">
+          {status === "error" ? (
+            <>
+              Couldn&apos;t start a session.{" "}
+              <button type="button" onClick={() => start()} className="underline text-accent">
+                Retry
+              </button>
+            </>
+          ) : (
+            "Disconnected — reload to reconnect."
+          )}
+        </div>
+      )}
       <form onSubmit={submit} className="border-t border-border p-3 flex items-center gap-2">
         <VoiceControls />
         <input
@@ -59,7 +53,11 @@ export default function ChatSurface() {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
         />
-        <button type="submit" className="px-4 py-2 rounded bg-accent text-accent-fg font-medium">
+        <button
+          type="submit"
+          disabled={offline}
+          className="px-4 py-2 rounded bg-accent text-accent-fg font-medium disabled:opacity-50"
+        >
           Send
         </button>
       </form>
