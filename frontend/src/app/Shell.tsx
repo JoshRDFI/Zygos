@@ -11,9 +11,11 @@ import ToolsSurface from "../surfaces/ToolsSurface";
 import FilesSurface from "../surfaces/FilesSurface";
 import MemorySurface from "../surfaces/MemorySurface";
 import { useApplyTheme } from "../theme/useApplyTheme";
+import { useEnsureSession } from "../session/useEnsureSession";
 
 export default function Shell() {
   useApplyTheme();
+  useEnsureSession();
   return (
     <div className="h-full flex flex-col bg-bg text-text">
       <Header />

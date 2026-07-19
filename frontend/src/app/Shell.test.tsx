@@ -5,21 +5,36 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import Shell from "./Shell";
 import { SURFACES } from "./LeftRail";
 import { useLayoutStore } from "./layoutStore";
-import * as rest from "../client/rest";
-import { WsClient } from "../client/wsClient";
+import { useSessionStore, setSessionDeps, resetSessionDeps } from "../session/sessionStore";
+
+let createSession: ReturnType<typeof vi.fn>;
+
+function makeFakeClient() {
+  return {
+    send: vi.fn(), sendBinary: vi.fn(), connect: vi.fn(), close: vi.fn(),
+    on: () => () => {}, onBinary: () => () => {}, onOpen: () => () => {}, onClose: () => () => {},
+  };
+}
 
 beforeEach(() => {
   useLayoutStore.setState({ contextPanelOpen: false });
-  // ChatSurface (mounted at "/") creates a session and connects a WsClient on
-  // mount; keep that from touching the network in jsdom.
-  vi.spyOn(rest, "createSession").mockResolvedValue("sess-test");
-  vi.spyOn(WsClient.prototype, "connect").mockImplementation(function (this: WsClient) {});
+  useSessionStore.getState().stop();
+  createSession = vi.fn(() => Promise.resolve("sess-test"));
+  setSessionDeps({
+    createSession,
+    createClient: () => makeFakeClient() as unknown as import("../client/wsClient").WsClient,
+  });
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { resetSessionDeps(); vi.restoreAllMocks(); });
 
 function renderShell() {
   return render(<MemoryRouter initialEntries={["/"]}><Shell /></MemoryRouter>);
 }
+
+test("Shell starts the session once on mount", async () => {
+  renderShell();
+  await vi.waitFor(() => expect(createSession).toHaveBeenCalledTimes(1));
+});
 
 test("renders the Zygos wordmark and all seven rail surfaces", () => {
   renderShell();
