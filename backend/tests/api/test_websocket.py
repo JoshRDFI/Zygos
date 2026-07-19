@@ -405,3 +405,22 @@ async def test_barge_in_does_not_hang_when_turn_parked_on_permission():
     assert new_task is not parked  # a fresh turn was started
     if new_task is not None:
         await asyncio.wait_for(new_task, timeout=1.0)  # let it finish, no leak
+
+
+import time
+
+
+def test_session_reaped_from_registry_on_disconnect():
+    app = _app()
+    client = TestClient(app)
+    sid = client.post("/sessions").json()["id"]
+    with client.websocket_connect(f"/ws/session/{sid}") as ws:
+        ws.send_text(json.dumps({"channel": "control", "type": "ping", "payload": {}}))
+        json.loads(ws.receive_text())
+        assert app.state.registry.get(sid) is not None  # alive while connected
+    # after the socket closes, the WS teardown reaps the session (poll the loop)
+    for _ in range(100):
+        if app.state.registry.get(sid) is None:
+            break
+        time.sleep(0.01)
+    assert app.state.registry.get(sid) is None

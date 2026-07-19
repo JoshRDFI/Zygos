@@ -169,4 +169,10 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
                     fut.set_result("deny")
             session.pending_permissions.clear()
             session._writer = None
+            # Reap the abandoned session: with the app-lifetime singleton client,
+            # WS-close == page-gone. Guarded by `session._conn is conn`, so a
+            # superseding reconnect (which reassigns session._conn) never reaps the
+            # live session. Assumption holds until a reconnect feature adds a grace
+            # period.
+            registry.delete(session.id)
         writer.cancel()
