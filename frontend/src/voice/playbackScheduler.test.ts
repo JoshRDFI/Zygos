@@ -2,23 +2,32 @@ import { expect, test } from "vitest";
 import { PlaybackScheduler, type AudioCtxLike, type BufferSourceLike } from "./playbackScheduler";
 import { float32ToInt16LE } from "./pcm";
 
+type SpySource = BufferSourceLike & { connectedTo: unknown };
+
 function fakeCtx(now = 0) {
   const starts: number[] = [];
-  const ctx: AudioCtxLike & { starts: number[]; now: number; stopped: number } = {
+  const sources: SpySource[] = [];
+  const ctx: AudioCtxLike & { starts: number[]; sources: SpySource[]; now: number; stopped: number } = {
     starts,
+    sources,
     now,
     stopped: 0,
     get currentTime() { return this.now; },
     sampleRate: 24000,
     createBuffer: (_ch, length) => ({ getChannelData: () => new Float32Array(length) }),
-    createBufferSource: (): BufferSourceLike => ({
-      buffer: null,
-      onended: null,
-      connect: () => {},
-      disconnect: () => {},
-      start: (when: number) => starts.push(when),
-      stop: () => { ctx.stopped += 1; },
-    }),
+    createBufferSource: (): BufferSourceLike => {
+      const src: SpySource = {
+        buffer: null,
+        onended: null,
+        connectedTo: null,
+        connect: (target: unknown) => { src.connectedTo = target; },
+        disconnect: () => {},
+        start: (when: number) => starts.push(when),
+        stop: () => { ctx.stopped += 1; },
+      };
+      sources.push(src);
+      return src;
+    },
   };
   return ctx;
 }
@@ -63,4 +72,29 @@ test("interrupt ignores sources that already ended", () => {
   sched.enqueue(chunk);
   sched.interrupt();
   expect(ctx.stopped).toBe(1);
+});
+
+test("onended drops the source from the live set so a later interrupt skips it", () => {
+  const ctx = fakeCtx(0);
+  const sched = new PlaybackScheduler(ctx, {});
+  sched.enqueue(float32ToInt16LE(new Float32Array(24000)).buffer as ArrayBuffer);
+  ctx.sources[0].onended!(); // playback finished naturally
+  sched.interrupt();
+  expect(ctx.stopped).toBe(0); // the ended source was already removed, not stopped again
+});
+
+test("enqueue ignores empty chunks (no source scheduled)", () => {
+  const ctx = fakeCtx(0);
+  const sched = new PlaybackScheduler(ctx, {});
+  sched.enqueue(new ArrayBuffer(0));
+  expect(ctx.sources).toHaveLength(0);
+  expect(ctx.starts).toHaveLength(0);
+});
+
+test("connects each source to the provided target node", () => {
+  const target = { id: "gain-node" };
+  const ctx = fakeCtx(0);
+  const sched = new PlaybackScheduler(ctx, target);
+  sched.enqueue(float32ToInt16LE(new Float32Array(24000)).buffer as ArrayBuffer);
+  expect(ctx.sources[0].connectedTo).toBe(target);
 });

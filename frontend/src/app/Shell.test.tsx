@@ -27,6 +27,11 @@ test("renders the Zygos wordmark and all seven rail surfaces", () => {
   for (const s of SURFACES) expect(screen.getByRole("link", { name: s.label })).toBeInTheDocument();
 });
 
+test("routes /settings to the Settings surface", () => {
+  render(<MemoryRouter initialEntries={["/settings"]}><Shell /></MemoryRouter>);
+  expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+});
+
 test("context panel is closed by default and opens on toggle", async () => {
   renderShell();
   expect(screen.queryByRole("heading", { name: "Context" })).not.toBeInTheDocument();

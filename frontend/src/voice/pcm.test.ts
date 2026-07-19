@@ -32,6 +32,22 @@ test("resampleTo16k handles 48k and empty input", () => {
   expect(resampleTo16k(new Float32Array(0), 44100).length).toBe(0);
 });
 
+test("resampleTo16k linearly interpolates at a fractional 44.1k ratio", () => {
+  const n = 441;
+  const input = new Float32Array(n);
+  for (let i = 0; i < n; i++) input[i] = i / (n - 1); // 0..1 ramp
+  const out = resampleTo16k(input, 44100);
+  expect(out.length).toBe(160); // round(441 * 16000/44100)
+  expect(out[0]).toBeCloseTo(0, 5);
+  expect(out[out.length - 1]).toBeGreaterThan(out[0]);
+  // linear interpolation preserves monotonicity and stays within the input range
+  for (let i = 1; i < out.length; i++) expect(out[i]).toBeGreaterThanOrEqual(out[i - 1]);
+  for (const v of out) {
+    expect(v).toBeGreaterThanOrEqual(0);
+    expect(v).toBeLessThanOrEqual(1);
+  }
+});
+
 test("tagFrame prefixes one byte; readTag splits it back", () => {
   const body = new Uint8Array([1, 2, 3]);
   const framed = tagFrame(TAG_IN, body);

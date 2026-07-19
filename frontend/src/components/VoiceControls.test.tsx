@@ -34,6 +34,14 @@ test("Voice master gates Mic and Speaker", async () => {
   expect(screen.getByRole("button", { name: "Speaker" })).toBeEnabled();
 });
 
+test("reflects on-state through aria-pressed=true", () => {
+  useVoiceStore.setState({ voiceEnabled: true, micOn: true, speakerOn: true, alwaysOn: false });
+  render(<VoiceControls />);
+  expect(screen.getByRole("button", { name: "Voice" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Mic" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Speaker" })).toHaveAttribute("aria-pressed", "true");
+});
+
 test("warning renders when set in the store", () => {
   useVoiceStore.setState({ warning: "Voice is active elsewhere." });
   render(<VoiceControls />);
