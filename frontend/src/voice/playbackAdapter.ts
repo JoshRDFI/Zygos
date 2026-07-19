@@ -5,7 +5,7 @@ export interface PlaybackController {
   begin(): void;
   enqueue(body: ArrayBuffer): void;
   end(): void;
-  duck(gain: number): void;
+  duck(value: number): void;
   unduck(): void;
   interrupt(): void;
   dispose(): void;
@@ -49,8 +49,8 @@ export function createPlayback(): PlaybackController {
     end(): void {
       sched?.reset();
     },
-    duck(gain: number): void {
-      rampGain(gain); // tts.duck {gain:0.2}
+    duck(value: number): void {
+      rampGain(value); // tts.duck {gain:0.2}
     },
     unduck(): void {
       rampGain(1.0); // tts.unduck {gain:1.0}

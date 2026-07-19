@@ -1,6 +1,6 @@
 // Copies the VAD runtime assets out of node_modules into public/vad so they are
 // served from our own origin (no CDN) — keeps voice fully offline/data-local.
-import { mkdirSync, copyFileSync, readdirSync, existsSync } from "node:fs";
+import { mkdirSync, copyFileSync, readdirSync, existsSync, statSync, utimesSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,7 +12,6 @@ const ortDist = join(root, "node_modules", "onnxruntime-web", "dist");
 for (const d of [vadDist, ortDist]) {
   if (!existsSync(d)) throw new Error(`missing dependency dir: ${d} (run npm install first)`);
 }
-mkdirSync(dest, { recursive: true });
 
 const vadFiles = readdirSync(vadDist).filter(
   (f) => f.endsWith(".onnx") || f.endsWith(".worklet.bundle.min.js"),
@@ -24,7 +23,33 @@ const ortFiles = readdirSync(ortDist).filter(
 if (vadFiles.length === 0) throw new Error(`no vad-web assets (.onnx/worklet) in ${vadDist}`);
 if (!ortFiles.some((f) => f.endsWith(".wasm"))) throw new Error(`no onnxruntime wasm in ${ortDist}`);
 
-for (const f of vadFiles) copyFileSync(join(vadDist, f), join(dest, f));
-for (const f of ortFiles) copyFileSync(join(ortDist, f), join(dest, f));
+// Only create the destination once we know there is something valid to vendor.
+mkdirSync(dest, { recursive: true });
 
-console.log(`vendored ${vadFiles.length} vad + ${ortFiles.length} ort files -> public/vad`);
+let copied = 0;
+let skipped = 0;
+function vendor(srcDir, f) {
+  const src = join(srcDir, f);
+  const dst = join(dest, f);
+  const s = statSync(src);
+  if (existsSync(dst)) {
+    const d = statSync(dst);
+    // These assets total ~81MB; skip the copy when size + mtime already match the
+    // source (mtime is preserved below) so postinstall/predev/prebuild stay fast.
+    // Sub-millisecond tolerance: utimesSync rounds/truncates the source's sub-ms
+    // mtime inconsistently across filesystems, so compare within 1ms. A genuine
+    // asset swap (new package build) shifts the mtime by seconds, far beyond this.
+    if (d.size === s.size && Math.abs(d.mtimeMs - s.mtimeMs) < 1) {
+      skipped++;
+      return;
+    }
+  }
+  copyFileSync(src, dst);
+  utimesSync(dst, s.atime, s.mtime); // preserve mtime so the next run can skip
+  copied++;
+}
+
+for (const f of vadFiles) vendor(vadDist, f);
+for (const f of ortFiles) vendor(ortDist, f);
+
+console.log(`vendored ${copied} + skipped ${skipped} (of ${vadFiles.length} vad + ${ortFiles.length} ort) -> public/vad`);
