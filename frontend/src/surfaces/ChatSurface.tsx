@@ -16,8 +16,10 @@ export default function ChatSurface() {
     e.preventDefault();
     const text = draft.trim();
     if (!text) return;
+    const client = getSessionClient();
+    if (!client) return; // session still establishing — keep the draft, add nothing
     addUser(text);
-    getSessionClient()?.send({ channel: "chat", type: "user_message", payload: { text } });
+    client.send({ channel: "chat", type: "user_message", payload: { text } });
     setDraft("");
   };
 

@@ -54,3 +54,14 @@ test("error status shows Retry which restarts the session", async () => {
   await userEvent.click(screen.getByRole("button", { name: /retry/i }));
   expect(createSession).toHaveBeenCalledTimes(1);
 });
+
+test("submitting before the session client exists adds nothing to the transcript and keeps the draft", async () => {
+  createSession.mockImplementationOnce(() => new Promise<string>(() => {})); // never resolves -> rig stays null
+  useSessionStore.getState().start();
+  await vi.waitFor(() => expect(useSessionStore.getState().status).toBe("connecting"));
+  render(<ChatSurface />);
+  await userEvent.type(screen.getByRole("textbox"), "too early");
+  await userEvent.click(screen.getByRole("button", { name: "Send" }));
+  expect(screen.queryByText("too early")).not.toBeInTheDocument();
+  expect((screen.getByRole("textbox") as HTMLInputElement).value).toBe("too early");
+});
