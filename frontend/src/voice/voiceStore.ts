@@ -38,7 +38,18 @@ interface Rig {
   offs: Array<() => void>;
 }
 let rig: Rig | null = null;
-let pending: "mic" | "speaker" | "alwayson" | null = null;
+
+// Shared release of the mic capture + always-on VAD, so detach, setVoiceEnabled
+// and handleUnavailable don't each carry their own copy of the teardown sequence.
+function stopCapture(get: () => VoiceState): void {
+  if (!rig) return;
+  if (get().micOn) {
+    rig.capture.stop();
+    rig.mic.stop();
+  }
+  rig.micVad?.stop();
+  rig.micVad = null;
+}
 
 interface VoiceState {
   voiceEnabled: boolean;
@@ -90,33 +101,20 @@ export const useVoiceStore = create<VoiceState>()(
 
       detach: () => {
         if (!rig) return;
-        if (get().micOn) {
-          rig.capture.stop();
-          rig.mic.stop();
-        }
-        rig.micVad?.stop();
+        stopCapture(get);
         rig.playback.dispose();
         rig.offs.forEach((off) => off());
         rig = null;
-        pending = null;
         set({ micOn: false, speakerOn: false, alwaysOn: false });
       },
 
       setVoiceEnabled: (b) => {
         if (!b) {
-          if (rig && get().micOn) {
-            rig.capture.stop();
-            rig.mic.stop();
-          }
-          if (rig && get().alwaysOn) {
-            rig.micVad?.stop();
-            rig.micVad = null;
-          }
+          stopCapture(get);
           if (rig && get().speakerOn) {
             rig.playback.setEnabled(false);
             rig.client.send({ channel: "control", type: "audio.output", payload: { enabled: false } });
           }
-          pending = null;
           set({ voiceEnabled: false, micOn: false, speakerOn: false, alwaysOn: false, warning: null });
         } else {
           set({ voiceEnabled: true });
@@ -131,16 +129,13 @@ export const useVoiceStore = create<VoiceState>()(
         if (get().micOn) {
           rig.capture.stop();
           rig.mic.stop();
-          pending = null;
           set({ micOn: false });
           return;
         }
-        pending = "mic";
         set({ micOn: true, warning: null });
         rig.capture.start();
         rig.mic.start().catch(() => {
           if (rig) rig.capture.stop();
-          pending = null;
           set({ micOn: false, warning: "Microphone unavailable or permission denied." });
         });
       },
@@ -148,7 +143,6 @@ export const useVoiceStore = create<VoiceState>()(
       toggleSpeaker: () => {
         if (!get().voiceEnabled || !rig) return;
         const next = !get().speakerOn;
-        pending = next ? "speaker" : null;
         rig.client.send({ channel: "control", type: "audio.output", payload: { enabled: next } });
         rig.playback.setEnabled(next);
         set({ speakerOn: next, warning: next ? null : get().warning });
@@ -159,7 +153,6 @@ export const useVoiceStore = create<VoiceState>()(
         if (get().alwaysOn) {
           rig.micVad?.stop();
           rig.micVad = null;
-          pending = null;
           set({ alwaysOn: false });
           return;
         }
@@ -189,34 +182,26 @@ export const useVoiceStore = create<VoiceState>()(
           },
         });
         rig.micVad = micVad;
-        pending = "alwayson";
         set({ alwaysOn: true, warning: null });
         micVad.start().catch(() => {
           if (rig) {
             rig.micVad?.stop();
             rig.micVad = null;
           }
-          pending = null;
           set({ alwaysOn: false, warning: "Microphone or voice detector unavailable." });
         });
       },
 
       handleUnavailable: (payload) => {
+        // voice_in_use denies this session the whole voice service, so unwind
+        // every optimistically-set acquire (mic, always-on, speaker) — not just
+        // the most recent one — to keep the UI in sync with the backend gate.
         const message = String(payload?.message ?? "Voice is unavailable in this session.");
-        if (pending === "mic" && rig) {
-          rig.capture.stop();
-          rig.mic.stop();
-          set({ micOn: false });
-        } else if (pending === "speaker" && rig) {
+        stopCapture(get);
+        if (rig && get().speakerOn) {
           rig.playback.setEnabled(false);
-          set({ speakerOn: false });
-        } else if (pending === "alwayson" && rig) {
-          rig.micVad?.stop();
-          rig.micVad = null;
-          set({ alwaysOn: false });
         }
-        pending = null;
-        set({ warning: message });
+        set({ micOn: false, alwaysOn: false, speakerOn: false, warning: message });
       },
     }),
     { name: "zygos.voice", partialize: (s) => ({ voiceEnabled: s.voiceEnabled }) },

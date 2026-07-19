@@ -123,6 +123,25 @@ test("audio.unavailable reverts the pending toggle and warns", () => {
   expect(useVoiceStore.getState().warning).toBe("Voice is active elsewhere.");
 });
 
+test("audio.unavailable reverts ALL optimistic voice state, not just the last request", () => {
+  // voice_in_use denies the whole voice service for this session, so a single
+  // unavailable must unwind every in-flight acquire, not only the last `pending`.
+  const client = makeFakeClient();
+  const s = useVoiceStore.getState();
+  s.setVoiceEnabled(true);
+  s.attach(client);
+  s.toggleSpeaker();   // speaker acquire in flight
+  s.toggleAlwaysOn();  // always-on acquire in flight (clobbers a single pending slot)
+  expect(useVoiceStore.getState().speakerOn).toBe(true);
+  expect(useVoiceStore.getState().alwaysOn).toBe(true);
+  client.emit("control:audio.unavailable", { reason: "voice_in_use", message: "busy" });
+  expect(useVoiceStore.getState().speakerOn).toBe(false);
+  expect(useVoiceStore.getState().alwaysOn).toBe(false);
+  expect(fakePlayback.setEnabled).toHaveBeenLastCalledWith(false);
+  expect(fakeMicVad.stop).toHaveBeenCalled();
+  expect(useVoiceStore.getState().warning).toBe("busy");
+});
+
 test("inbound 0x01 binary routes to playback.enqueue", () => {
   const client = makeFakeClient();
   const s = useVoiceStore.getState();
