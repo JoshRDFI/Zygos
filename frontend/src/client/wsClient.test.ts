@@ -13,10 +13,10 @@ test("frameKey and parseFrame", () => {
 class FakeSocket {
   readyState = 1;
   binaryType = "";
-  sent: string[] = [];
+  sent: Array<string | ArrayBufferView> = [];
   onmessage: ((e: { data: string | ArrayBuffer }) => void) | null = null;
   onopen: (() => void) | null = null;
-  send(d: string) { this.sent.push(d); }
+  send(d: string | ArrayBufferView) { this.sent.push(d); }
   close() { this.readyState = 3; }
   emit(frame: Frame) { this.onmessage?.({ data: JSON.stringify(frame) }); }
 }
@@ -46,7 +46,7 @@ test("send encodes frames; unsubscribe stops delivery", () => {
   client.socketFactory = () => fake;
   client.connect();
   client.send({ channel: "chat", type: "user_message", payload: { text: "hi" } });
-  expect(JSON.parse(fake.sent[0])).toEqual({ channel: "chat", type: "user_message", payload: { text: "hi" } });
+  expect(JSON.parse(fake.sent[0] as string)).toEqual({ channel: "chat", type: "user_message", payload: { text: "hi" } });
 
   const seen = vi.fn();
   const off = client.on("chat:token", seen);
@@ -89,6 +89,67 @@ test("sendBinary sends bytes only when open; onBinary receives ArrayBuffer messa
   sock.readyState = 3;
   client.sendBinary(new Uint8Array([5]));
   expect(sock.sent).toHaveLength(1); // no-op when not open
+});
+
+test("frames sent while CONNECTING are queued and flushed in order on open", () => {
+  const client = new WsClient("sess-1");
+  const fake = new FakeSocket();
+  fake.readyState = 0; // CONNECTING — socket not open yet
+  client.socketFactory = () => fake;
+  client.connect();
+
+  client.send({ channel: "chat", type: "user_message", payload: { text: "first" } });
+  client.sendBinary(new Uint8Array([9]));
+  client.send({ channel: "chat", type: "user_message", payload: { text: "second" } });
+  expect(fake.sent).toHaveLength(0); // nothing sent while connecting
+
+  fake.readyState = 1;
+  fake.onopen!(); // socket opens -> flush buffered sends in order
+  expect(fake.sent).toHaveLength(3);
+  expect(JSON.parse(fake.sent[0] as string).payload.text).toBe("first");
+  expect(fake.sent[1]).toEqual(new Uint8Array([9]));
+  expect(JSON.parse(fake.sent[2] as string).payload.text).toBe("second");
+});
+
+test("connect() clears frames buffered against a previous never-opened socket", () => {
+  const dead = new FakeSocket(); dead.readyState = 0;
+  const fresh = new FakeSocket(); fresh.readyState = 0;
+  const sockets = [dead, fresh];
+  let i = 0;
+  const client = new WsClient("sess-1");
+  client.socketFactory = () => sockets[i++];
+
+  client.connect(); // dead socket, stuck CONNECTING
+  client.send({ channel: "chat", type: "user_message", payload: { text: "stale" } });
+  client.connect(); // reconnect on a fresh socket — the stale queue must not carry over
+
+  fresh.readyState = 1;
+  fresh.onopen!();
+  expect(fresh.sent).toHaveLength(0);
+});
+
+test("preOpenQueue is bounded while the socket stays CONNECTING", () => {
+  const client = new WsClient("sess-1");
+  const fake = new FakeSocket(); fake.readyState = 0;
+  client.socketFactory = () => fake;
+  client.connect();
+
+  for (let n = 0; n < 5000; n++) client.sendBinary(new Uint8Array([n & 0xff]));
+  fake.readyState = 1;
+  fake.onopen!();
+  expect(fake.sent.length).toBeLessThanOrEqual(4096); // capped, not unbounded
+});
+
+test("frames sent after the socket is closed are dropped, not queued", () => {
+  const client = new WsClient("sess-1");
+  const fake = new FakeSocket();
+  fake.readyState = 3; // CLOSED
+  client.socketFactory = () => fake;
+  client.connect();
+  client.send({ channel: "chat", type: "user_message", payload: { text: "gone" } });
+  fake.readyState = 1;
+  fake.onopen?.();
+  expect(fake.sent).toHaveLength(0);
 });
 
 test("text frames still dispatch after binary support added", () => {

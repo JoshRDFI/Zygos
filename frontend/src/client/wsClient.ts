@@ -29,11 +29,16 @@ export function parseFrame(raw: string): Frame | null {
 type Handler = (f: Frame) => void;
 type BinaryHandler = (data: ArrayBuffer) => void;
 
+// Cap the pre-open buffer so a socket stuck in CONNECTING (unreachable backend)
+// while audio streams can't grow memory without bound; keep the most recent.
+const MAX_PREOPEN = 4096;
+
 export class WsClient {
   socketFactory: (url: string) => WebSocketLike = (url) => new WebSocket(url) as WebSocketLike;
   private socket: WebSocketLike | null = null;
   private handlers = new Map<string, Set<Handler>>();
   private binaryHandlers = new Set<BinaryHandler>();
+  private preOpenQueue: Array<string | ArrayBufferView> = [];
   private readonly url: string;
 
   constructor(sessionId: string, wsUrl?: string) {
@@ -41,6 +46,7 @@ export class WsClient {
   }
 
   connect(): void {
+    this.preOpenQueue = []; // never replay frames buffered against a prior socket
     const socket = this.socketFactory(this.url);
     socket.binaryType = "arraybuffer";
     socket.onmessage = (e) => {
@@ -51,6 +57,7 @@ export class WsClient {
         this.binaryHandlers.forEach((h) => h(e.data as ArrayBuffer));
       }
     };
+    socket.onopen = () => this.flushPreOpen();
     this.socket = socket;
   }
 
@@ -70,20 +77,39 @@ export class WsClient {
   }
 
   send(frame: Frame): void {
-    if (this.socket && this.socket.readyState === 1) {
-      this.socket.send(JSON.stringify(frame));
+    // Serialize only when the frame can actually be sent or buffered.
+    if (this.socket && (this.socket.readyState === 0 || this.socket.readyState === 1)) {
+      this.dispatchSend(JSON.stringify(frame));
     }
   }
 
   sendBinary(bytes: Uint8Array): void {
-    if (this.socket && this.socket.readyState === 1) {
-      this.socket.send(bytes);
-    }
+    this.dispatchSend(bytes);
   }
 
   close(): void {
     this.socket?.close();
     this.socket = null;
+    this.preOpenQueue = [];
+  }
+
+  // Send now if open; buffer if the socket is still connecting (so a message
+  // typed before onopen isn't silently dropped); drop otherwise (closing/closed).
+  private dispatchSend(data: string | ArrayBufferView): void {
+    if (!this.socket) return;
+    if (this.socket.readyState === 1) {
+      this.socket.send(data);
+    } else if (this.socket.readyState === 0) {
+      this.preOpenQueue.push(data);
+      if (this.preOpenQueue.length > MAX_PREOPEN) this.preOpenQueue.shift();
+    }
+  }
+
+  private flushPreOpen(): void {
+    if (!this.socket || this.socket.readyState !== 1) return;
+    const queued = this.preOpenQueue;
+    this.preOpenQueue = [];
+    for (const data of queued) this.socket.send(data);
   }
 
   private dispatch(frame: Frame): void {
