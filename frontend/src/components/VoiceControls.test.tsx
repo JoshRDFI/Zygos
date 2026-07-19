@@ -3,10 +3,14 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test } from "vitest";
 import VoiceControls from "./VoiceControls";
 import { useVoiceStore } from "../voice/voiceStore";
+import { useSessionStore } from "../session/sessionStore";
 
 beforeEach(() => {
   localStorage.clear();
   useVoiceStore.setState({ voiceEnabled: false, micOn: false, speakerOn: false, alwaysOn: false, warning: null });
+  // Voice controls are usable only while the session is live; default the tests
+  // that exercise the enabled state to a connected session.
+  useSessionStore.setState({ status: "connected" });
 });
 
 test("Always-on is gated by Voice master and toggles aria-pressed", async () => {
@@ -40,6 +44,25 @@ test("reflects on-state through aria-pressed=true", () => {
   expect(screen.getByRole("button", { name: "Voice" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByRole("button", { name: "Mic" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByRole("button", { name: "Speaker" })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("session offline disables Mic, Always-on, and Speaker even when Voice is on", () => {
+  useVoiceStore.setState({ voiceEnabled: true });
+  useSessionStore.setState({ status: "disconnected" });
+  render(<VoiceControls />);
+  expect(screen.getByRole("button", { name: "Mic" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Always-on" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Speaker" })).toBeDisabled();
+  // Voice master stays clickable — it is a local preference, not a socket action.
+  expect(screen.getByRole("button", { name: "Voice" })).toBeEnabled();
+});
+
+test("session reconnecting (not yet connected) keeps socket controls disabled", () => {
+  useVoiceStore.setState({ voiceEnabled: true });
+  useSessionStore.setState({ status: "connecting" });
+  render(<VoiceControls />);
+  expect(screen.getByRole("button", { name: "Mic" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Speaker" })).toBeDisabled();
 });
 
 test("warning renders when set in the store", () => {

@@ -1,4 +1,5 @@
 import { useVoiceStore } from "../voice/voiceStore";
+import { useSessionStore } from "../session/sessionStore";
 
 const BASE = "px-2 py-2 rounded border text-xs";
 const ON = "border-accent text-accent";
@@ -15,6 +16,10 @@ export default function VoiceControls() {
   const toggleMic = useVoiceStore((s) => s.toggleMic);
   const toggleSpeaker = useVoiceStore((s) => s.toggleSpeaker);
   const toggleAlwaysOn = useVoiceStore((s) => s.toggleAlwaysOn);
+  // Mic/Always-on/Speaker send over the session socket; when it isn't connected
+  // (idle, connecting, disconnected, error) those sends silently drop, so gate
+  // them on a live connection. Voice master is a local preference and stays free.
+  const online = useSessionStore((s) => s.status === "connected");
 
   const cls = (active: boolean, enabled: boolean) =>
     `${BASE} ${!enabled ? DISABLED : active ? ON : OFF}`;
@@ -29,24 +34,24 @@ export default function VoiceControls() {
         Voice
       </button>
       <button
-        type="button" aria-label="Mic" aria-pressed={micOn} disabled={!voiceEnabled || alwaysOn}
+        type="button" aria-label="Mic" aria-pressed={micOn} disabled={!voiceEnabled || alwaysOn || !online}
         onClick={toggleMic}
-        className={cls(micOn, voiceEnabled && !alwaysOn)}
+        className={cls(micOn, voiceEnabled && !alwaysOn && online)}
       >
         Mic
       </button>
       <button
-        type="button" aria-label="Always-on" aria-pressed={alwaysOn} disabled={!voiceEnabled}
+        type="button" aria-label="Always-on" aria-pressed={alwaysOn} disabled={!voiceEnabled || !online}
         title="Continuous listening with barge-in"
         onClick={toggleAlwaysOn}
-        className={cls(alwaysOn, voiceEnabled)}
+        className={cls(alwaysOn, voiceEnabled && online)}
       >
         Always-on
       </button>
       <button
-        type="button" aria-label="Speaker" aria-pressed={speakerOn} disabled={!voiceEnabled}
+        type="button" aria-label="Speaker" aria-pressed={speakerOn} disabled={!voiceEnabled || !online}
         onClick={toggleSpeaker}
-        className={cls(speakerOn, voiceEnabled)}
+        className={cls(speakerOn, voiceEnabled && online)}
       >
         Speaker
       </button>
