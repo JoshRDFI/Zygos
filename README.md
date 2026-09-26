@@ -64,6 +64,26 @@ still being built.
   seam as everything else, opt-in and defaulting off. *(built — live in the web UI; real
   engines are opt-in, with optional cloud fallback planned)*
 
+#### GPU TTS (optional)
+
+Kokoro runs on CPU by default. With an NVIDIA GPU you can move it to CUDA
+(≈0.2 s per short reply vs ≈0.8 s on CPU):
+
+    cd backend && .venv/bin/python -m zygos.cli voice setup-gpu
+
+This builds a separate sidecar venv at `.zygos/venvs/voice-gpu` (~2.4 GB of CUDA
+runtime; your main venv is untouched) and self-checks it — re-run the command any
+time to repair the venv if it gets into a broken state. Then set:
+
+    voice:
+      tts:
+        device: cuda
+
+**VRAM sizing:** Kokoro on CUDA uses ≈1.4 GB; your chat model must fit in the rest.
+If CUDA can't be used, TTS falls back to CPU and `zygos doctor` / `GET /runtime`
+say why. If the GPU worker hangs at startup, the CPU fallback kicks in only after
+`voice.tts.readiness_timeout_s` (default 60 s).
+
 ## What "private" means here
 
 Privacy on Zygos means **your data — your conversations, history, memory, and documents —

@@ -141,7 +141,10 @@ served locally — no CDN) brackets your utterances for transcription, and **bar
 you talk over a reply — the assistant ducks, then stops, when your speech is confirmed
 ([RFC-0005](./docs/rfcs/RFC-0005-Voice-Interaction-STT-and-TTS.md), delivered through the
 RFC-0011 web UI). The engines and the pure audio logic are unit-tested; the real-engine
-browser round-trip is validated by a documented manual smoke test. `[v2 · built]`
+browser round-trip is validated by a documented manual smoke test. Voice sidecars default
+to CPU; TTS can opt into CUDA from a separate Zygos-managed GPU venv (`zygos voice
+setup-gpu`), with health reporting the active vs requested device (RFC-0005 §2a).
+`[v2 · built]`
 
 ## How it runs
 

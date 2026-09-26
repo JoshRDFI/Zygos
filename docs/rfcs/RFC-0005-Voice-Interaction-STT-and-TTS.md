@@ -119,8 +119,9 @@ server; Kokoro via `kokoro-onnx`/ONNX runtime; Piper via its binary). Every
 sidecar defaults to **`device=cpu`** for portability and install size; GPU is an
 opt-in per §2a.
 
-The process boundary does three concrete jobs — note that CPU-only inference is
-already off the GPU, so isolation from Ollama is *not* the boundary's job here:
+The process boundary does three concrete jobs — note that CPU-only inference (the
+default) is already off the GPU, so isolation from Ollama is *not* the boundary's
+job in that case — for opt-in GPU sidecars see §2a:
 
 - **Keep CPU-bound inference off the runtime event loop.** Transcription and
   synthesis run in another process; the runtime stays responsive.

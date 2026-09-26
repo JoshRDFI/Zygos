@@ -59,7 +59,10 @@ config-declared plugins. They are **opt-in** — the default is a silent `fake` 
 voice pulls no extra dependencies or model weights unless enabled — and each is
 byte-identical to the fake on its non-voice path. Optional cloud fallbacks remain scoped
 in the RFC. The engines drive the live web UI (RFC-0011): mic capture → STT, TTS playback,
-a browser Silero VAD for hands-free turn-taking, and duck-then-stop barge-in.
+a browser Silero VAD for hands-free turn-taking, and duck-then-stop barge-in. Voice
+sidecars default to CPU; TTS can opt into CUDA from a separate Zygos-managed GPU venv
+(`zygos voice setup-gpu`), with health reporting the active vs requested device
+(RFC-0005 §2a).
 
 ---
 
