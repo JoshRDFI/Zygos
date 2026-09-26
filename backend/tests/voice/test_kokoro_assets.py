@@ -84,3 +84,13 @@ def test_download_cleanup_on_urlretrieve_failure(tmp_path, monkeypatch):
     assert not list(tmp_path.rglob("*.part"))
     # Verify dest was not created
     assert not dest.exists()
+
+
+def test_default_model_is_fp16():
+    # int8 synthesizes ~2x SLOWER than real time on CPUs without VNNI/AVX-512
+    # (measured RTF 2.25 on a Zen 2 Ryzen 3700X); fp16 measured RTF 0.43 on the
+    # same CPU at half fp32's size. sha256 cross-checked against both the
+    # kokoro-onnx model-files-v1.0 release and its origin (taylorchu v0.2.0).
+    assert MODEL.filename == "kokoro-v1.0.fp16.onnx"
+    assert MODEL.url.endswith("/model-files-v1.0/kokoro-v1.0.fp16.onnx")
+    assert MODEL.sha256 == "c1610a859f3bdea01107e73e50100685af38fff88f5cd8e5c56df109ec880204"

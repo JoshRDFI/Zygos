@@ -3,7 +3,8 @@
 ONE place to bump the pinned version. On a software update, the update path must
 re-verify these and refresh to a newer pinned version if appropriate (ties into
 check-for-updates, Archon 8494c00c). Fetch-on-first-run, sha256-verified; never
-bundled. Quantized (int8) model by default (~89 MB).
+bundled. fp16 model by default (~177 MB): int8 is smaller but synthesizes slower
+than real time on CPUs without VNNI/AVX-512 (RTF 2.25 vs fp16 0.43 on a Zen 2).
 
 Stability: Experimental.
 """
@@ -27,9 +28,10 @@ class Asset:
 # --- PINNED (bump here on update; re-verify sha256) --------------------------
 PINNED_VERSION = "model-files-v1.0"
 MODEL = Asset(
-    filename="kokoro-v1.0.int8.onnx",
-    url="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.int8.onnx",
-    sha256="6e742170d309016e5891a994e1ce1559c702a2ccd0075e67ef7157974f6406cb",
+    filename="kokoro-v1.0.fp16.onnx",
+    url="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.fp16.onnx",
+    # cross-checked: identical to taylorchu/kokoro-onnx v0.2.0 kokoro-quant.onnx
+    sha256="c1610a859f3bdea01107e73e50100685af38fff88f5cd8e5c56df109ec880204",
 )
 VOICES = Asset(
     filename="voices-v1.0.bin",
