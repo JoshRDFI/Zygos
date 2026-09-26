@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from zygos.runtime.context import ExecutionContext
 from zygos.voice.contract import SttHealth, TtsHealth
-from zygos.voice.device import DEFAULT_GPU_VENV, resolve_worker_launch, venv_python
+from zygos.voice.device import DEFAULT_GPU_VENV, SETUP_HINT, resolve_worker_launch, venv_python
 from zygos.voice.errors import VoiceError
 from zygos.voice.plugin import SttPlugin, Transcription, TtsPlugin
 from zygos.voice.types import AudioFormat, SttEngineSpec, TtsEngineSpec
@@ -76,11 +76,15 @@ def build_tts_plugin(tts: TtsConfig) -> TtsPlugin:
             )
 
         fallback = kokoro_spec(sys.executable, "cpu") if launch.device == "cuda" else None
+        # Only the managed venv has a fix that setup-gpu can apply; a
+        # user-supplied worker_python failing isn't something setup-gpu repairs.
+        retry_hint = SETUP_HINT if tts.worker_python is None and launch.device == "cuda" else None
         return TtsPlugin(kokoro_spec(launch.python, launch.device),
                          readiness_timeout_s=tts.readiness_timeout_s,
                          fallback_spec=fallback,
                          requested_device=tts.device,
-                         launch_reason=launch.fallback_reason)
+                         launch_reason=launch.fallback_reason,
+                         retry_hint=retry_hint)
     raise VoiceError(f"unknown TTS engine {tts.engine!r}")
 
 

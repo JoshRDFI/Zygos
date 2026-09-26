@@ -123,6 +123,29 @@ async def test_launch_reason_takes_precedence_over_worker_reason():
         await p.aclose()
 
 
+async def test_retry_reason_includes_hint_when_given():
+    p = TtsPlugin(SILENT, readiness_timeout_s=0.3, fallback_spec=CPU_FALLBACK,
+                  retry_hint="run: zygos voice setup-gpu")
+    try:
+        await p.start()
+        reason = p.health().fallback_reason
+        assert reason.startswith("GPU worker failed to start:")
+        assert reason.endswith("; run: zygos voice setup-gpu")
+    finally:
+        await p.aclose()
+
+
+async def test_retry_reason_omits_hint_when_absent():
+    p = TtsPlugin(SILENT, readiness_timeout_s=0.3, fallback_spec=CPU_FALLBACK)
+    try:
+        await p.start()
+        reason = p.health().fallback_reason
+        assert reason.startswith("GPU worker failed to start:")
+        assert "setup-gpu" not in reason
+    finally:
+        await p.aclose()
+
+
 async def test_retry_reason_takes_precedence_over_worker_reason():
     fb = _device_spec("cpu", reason="worker says cpu", spec_device="cpu")
     p = TtsPlugin(SILENT, readiness_timeout_s=0.3, fallback_spec=fb)

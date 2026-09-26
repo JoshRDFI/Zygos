@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -6,6 +7,7 @@ from zygos.config.schema import SttConfig, TtsConfig
 from zygos.runtime.context import root_context
 from zygos.runtime.events import InProcessEventBus
 from zygos.voice.contract import SpeechToText
+from zygos.voice.device import DEFAULT_GPU_VENV, SETUP_HINT, venv_python
 from zygos.voice.service import VoiceService, build_stt_plugin, build_tts_plugin
 
 
@@ -174,3 +176,25 @@ def test_build_tts_plugin_kokoro_cuda_without_venv_runs_cpu_with_reason(tmp_path
     assert plugin._fallback_spec is None
     h = plugin.health()
     assert h.requested_device == "cuda" and "setup-gpu" in h.fallback_reason
+
+
+def test_build_tts_plugin_kokoro_managed_venv_cuda_sets_retry_hint(tmp_path, monkeypatch):
+    # A broken/half-built managed venv fails readiness at start(); the retry
+    # reason should point at the fix (setup-gpu) since this launch used the
+    # managed venv (worker_python not overridden).
+    monkeypatch.chdir(tmp_path)
+    managed_py = Path(venv_python(DEFAULT_GPU_VENV))
+    managed_py.parent.mkdir(parents=True)
+    managed_py.write_text("")
+    plugin = build_tts_plugin(TtsConfig(engine="kokoro", device="cuda"))
+    assert plugin._spec.device == "cuda"
+    assert plugin._retry_hint == SETUP_HINT
+
+
+def test_build_tts_plugin_kokoro_cuda_worker_python_override_no_retry_hint(tmp_path):
+    # A user-supplied worker_python isn't the managed venv setup-gpu builds, so
+    # a retry hint pointing at setup-gpu would be misleading.
+    py = tmp_path / "python"
+    py.write_text("")
+    plugin = build_tts_plugin(TtsConfig(engine="kokoro", device="cuda", worker_python=str(py)))
+    assert plugin._retry_hint is None

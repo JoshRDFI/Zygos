@@ -215,7 +215,8 @@ class TtsPlugin:
     def __init__(self, spec: TtsEngineSpec, *, readiness_timeout_s: float = 60.0,
                  fallback_spec: TtsEngineSpec | None = None,
                  requested_device: str | None = None,
-                 launch_reason: str | None = None) -> None:
+                 launch_reason: str | None = None,
+                 retry_hint: str | None = None) -> None:
         self._spec = spec
         self._handle = SidecarHandle(spec)
         self._started = False
@@ -224,6 +225,7 @@ class TtsPlugin:
         self._requested_device = requested_device or spec.device
         self._active_device = spec.device
         self._fallback_reason = launch_reason
+        self._retry_hint = retry_hint
 
     @property
     def name(self) -> str:
@@ -251,7 +253,10 @@ class TtsPlugin:
             await self._handle.aclose()
             self._spec, self._fallback_spec = self._fallback_spec, None
             self._handle = SidecarHandle(self._spec)
-            self._fallback_reason = self._fallback_reason or f"GPU worker failed to start: {exc}"
+            reason = f"GPU worker failed to start: {exc}"
+            if self._retry_hint:
+                reason = f"{reason}; {self._retry_hint}"
+            self._fallback_reason = self._fallback_reason or reason
             device, worker_reason = await self._start_handle()
         self._active_device = device or self._spec.device
         self._fallback_reason = self._fallback_reason or worker_reason
