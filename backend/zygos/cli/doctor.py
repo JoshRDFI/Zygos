@@ -14,6 +14,7 @@ from zygos.config.loader import primary_route_credentialed
 from zygos.errors import PluginError
 from zygos.providers.types import GenerationRequest, Message
 from zygos.runtime.bootstrap import RuntimeAssembly
+from zygos.voice.contract import SttHealth, TtsHealth
 
 GpuQuery = Callable[[], "str | None"]
 _NVIDIA_SMI = ["nvidia-smi", "--query-gpu=name,memory.total,memory.free",
@@ -55,9 +56,22 @@ def parse_gpu(raw: str | None) -> str | None:
     return f"{name}: {total} MiB total, {free} MiB free"
 
 
-def _device_check(direction: str, health) -> DoctorCheck:
+def _device_check(direction: str, health: SttHealth | TtsHealth) -> DoctorCheck:
     name = f"voice_{direction}_device"
     if health.device == health.requested_device:
+        if (not health.alive and health.requested_device != "cpu"
+                and health.fallback_reason is None):
+            # The CLI doctor never starts voice (only api/app.py does), so the
+            # launch spec's device is unconfirmed: a broken GPU venv, driver/CUDA
+            # mismatch, or ORT silently landing on CPU would all look identical
+            # here until something actually starts the worker.
+            return DoctorCheck(
+                name, True,
+                f"{health.engine}: requested {health.requested_device} — not verified "
+                "(voice not started); check GET /runtime on a running server, or run: "
+                "zygos voice setup-gpu to re-verify",
+                warn=True,
+            )
         return DoctorCheck(name, True, f"{health.engine} on {health.device}")
     return DoctorCheck(
         name, True,

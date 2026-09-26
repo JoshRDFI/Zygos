@@ -22,7 +22,7 @@ def _check(report, name):
 
 
 async def test_voice_device_ok_when_requested_equals_active(tmp_path):
-    rt = _runtime_with_voice(tmp_path, TtsHealth(engine="kokoro", device="cuda", alive=False,
+    rt = _runtime_with_voice(tmp_path, TtsHealth(engine="kokoro", device="cuda", alive=True,
                                                  requested_device="cuda"))
     try:
         report = await run_doctor(rt, gpu_query=lambda: None)
@@ -30,6 +30,24 @@ async def test_voice_device_ok_when_requested_equals_active(tmp_path):
         assert c.ok and not c.warn and "cuda" in c.detail
         assert _check(report, "voice_stt_device").ok
         assert report.ok
+    finally:
+        await rt.aclose()
+
+
+async def test_voice_device_unverified_before_start_is_warn(tmp_path):
+    # CLI doctor never calls voice_service.start(); with device: cuda and a venv
+    # that exists but is broken (setup-gpu failed, driver/CUDA mismatch, or ORT
+    # silently on CPU), the launch-spec device equals requested_device even
+    # though nothing has actually confirmed it runs on cuda.
+    rt = _runtime_with_voice(tmp_path, TtsHealth(engine="kokoro", device="cuda", alive=False,
+                                                 requested_device="cuda"))
+    try:
+        report = await run_doctor(rt, gpu_query=lambda: None)
+        c = _check(report, "voice_tts_device")
+        assert c.ok and c.warn
+        assert "not verified" in c.detail
+        assert "setup-gpu" in c.detail
+        assert report.ok                       # warnings never fail doctor
     finally:
         await rt.aclose()
 
