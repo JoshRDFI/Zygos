@@ -1,6 +1,8 @@
 # RFC-0005: Voice Interaction — Local Speech-to-Text and Text-to-Speech
 
 - **Status:** Accepted (2026-07-13)
+- **Amended:** 2026-09-26 — GPU policy update: voice runs where it fits; opt-in
+  GPU sidecars (§2a).
 - **Author:** Zygos maintainers
 - **Created:** 2026-07-09
 - **Governs:** the concrete voice **engines** behind the `speech_to_text` and
@@ -51,24 +53,28 @@ voice-shaped from the start" and RFC-0003 split `speech` into `speech_to_text`
 and `text_to_speech` "so a deployment can mix engines per direction," each
 deferring the concrete engines to this RFC. This is that RFC.
 
-The design is driven by a single confirmed constraint: **GPU VRAM contention.**
-Sharing one GPU between the LLM (via Ollama) and voice models causes eviction and
-thrash — Ollama's multi-second cold reload makes the assistant unusable whenever
-a voice model touches the GPU. The same failure occurs on the maintainer's
-RTX 5080 (Windows/WSL) and on Apple Silicon. The resolution is architectural, not
-a tuning knob: **voice inference runs CPU-only, in its own processes, outside the
-LLM's model manager.** GPU acceleration becomes an optional, hardware-gated
-enhancement — never a requirement.
+The design was originally driven by one confirmed constraint: **GPU VRAM
+contention.** Sharing one GPU between the LLM (via Ollama) and voice models caused
+eviction and thrash — Ollama's multi-second cold reload made the assistant unusable
+whenever a voice model touched the GPU (observed on the maintainer's RTX 5080 and on
+Apple Silicon). That was a **sizing** problem, not an inherent one: with smaller chat
+models there is room for both (measured 2026-09-26: Kokoro TTS on CUDA costs ≈1.4 GB
+VRAM and qwen3:8b stayed 100 % on GPU beside it, 8.3 / 16.3 GB).
+
+The policy is therefore: **voice runs where it fits.** CPU is the default — for
+portability (no GPU required) and install size (no ~2.4 GB CUDA runtime) — and GPU is
+a first-class, opt-in device for either direction when VRAM allows (§2a). Voice always
+runs in its own processes, outside the LLM's model manager.
 
 ## Problem Statement
 
 1. **The engines do not exist.** RFC-0001 and RFC-0003 defined the *interfaces*
    (`VoiceService`, the two capabilities) and deferred every concrete engine
    decision. Nothing today can transcribe or synthesize.
-2. **Naïve GPU voice breaks the assistant.** Any design that lets a voice model
-   share the GPU with the LLM reintroduces the confirmed VRAM-contention failure.
-   The process and device model must make GPU contention *structurally*
-   impossible in the default configuration.
+2. **GPU voice must be sized, not assumed.** A voice model that does not fit beside
+   the LLM reintroduces VRAM contention. The *default* configuration must not require
+   a GPU or risk contention; opt-in GPU voice is sized by the user (§2a), with
+   automated budgeting deferred to the hardware-scanner RFC (Archon `20203394`).
 3. **Native inference must not destabilize the runtime.** whisper.cpp, ONNX
    runtime, and Piper are native code. A segfault or a multi-second model load
    must not crash or stall the async runtime event loop.
@@ -110,7 +116,8 @@ plugin, `VoiceService` reports it unavailable and the UI hides that direction.
 Each voice plugin **owns and supervises one sidecar process** that hosts its
 engine. Sidecars are small Python workers (whisper.cpp via bindings or its bundled
 server; Kokoro via `kokoro-onnx`/ONNX runtime; Piper via its binary). Every
-sidecar pins **`device=cpu`** by default.
+sidecar defaults to **`device=cpu`** for portability and install size; GPU is an
+opt-in per §2a.
 
 The process boundary does three concrete jobs — note that CPU-only inference is
 already off the GPU, so isolation from Ollama is *not* the boundary's job here:
@@ -119,12 +126,34 @@ already off the GPU, so isolation from Ollama is *not* the boundary's job here:
   synthesis run in another process; the runtime stays responsive.
 - **Crash-isolate native code.** A native crash restarts *that* sidecar; the
   runtime survives and health reflects the blip.
-- **Own device selection independently.** A sidecar can later be flipped to GPU
-  as a hardware-gated enhancement without the runtime knowing or caring.
+- **Own device selection independently.** A sidecar can run on GPU (§2a) from its
+  own interpreter without the runtime's environment carrying GPU packages.
 
 Supervision (spawn, health, restart-with-backoff, shutdown) lives in the plugin,
 reusing the PluginService lifecycle from RFC-0001. Sidecar liveness and last-error
 are snapshotable state per RFC-0002, surfaced through RFC-0003 health.
+
+### 2a. GPU sidecars (opt-in) — amendment 2026-09-26
+
+- **Config:** `voice.tts.device: cpu | cuda` (default `cpu`); optional
+  `voice.tts.worker_python` overrides the sidecar interpreter. STT adopts the same
+  surface later; the policy covers both directions.
+- **Separate sidecar venv.** GPU runtimes (e.g. `onnxruntime-gpu`) share an import
+  package with their CPU builds, which other extras depend on (fastembed →
+  `onnxruntime`). They are therefore never co-installed in the main environment: a
+  Zygos-managed venv at `.zygos/venvs/voice-gpu`, built by `zygos voice setup-gpu`,
+  holds zygos (editable, `[voice]`) plus the GPU runtime, and the sidecar is launched
+  from that interpreter.
+- **Launch resolution.** `device: cuda` with the GPU interpreter present → launch it
+  with the GPU device; interpreter missing → launch from the main interpreter on CPU
+  and record why.
+- **Reported, never silent, fallback.** The worker reports the provider it actually
+  obtained in its readiness reply; if the GPU worker fails to start, the plugin
+  restarts on CPU. Health carries the **active** device, the **requested** device, and
+  a **fallback reason**. Voice is never failed for a GPU problem.
+- **VRAM sizing.** Kokoro TTS on CUDA ≈ 1.4 GB (fp16 model, same asset as CPU). The
+  chat model must fit in the remainder. `zygos doctor` reports GPU total/free VRAM;
+  automated budgeting belongs to the hardware-scanner RFC (Archon `20203394`).
 
 ### 3. Runtime↔sidecar IPC contract
 
@@ -247,7 +276,8 @@ health and is reported by `zygos doctor`.
 ### 8. Health, inspection, and hardware gating
 
 - Each voice plugin reports: binary present · model present · sidecar alive ·
-  device (cpu/gpu) · a latency sample. `zygos doctor --probe` exercises a real
+  device — **active** and **requested**, plus a fallback reason when they differ
+  (§2a) · a latency sample. `zygos doctor --probe` exercises a real
   transcribe/synthesize round-trip. The runtime manifest lists the active engine
   **per direction**.
 - This RFC **declares the gating inputs it needs** — real-time-TTS feasibility
@@ -258,9 +288,11 @@ health and is reported by `zygos doctor`.
 
 ## Alternatives Considered
 
-- **Voice models sharing the GPU with the LLM.** Rejected: this is the confirmed
-  root-cause failure (VRAM contention, Ollama cold-reload thrash). CPU-only, out
-  of the model manager, is the whole point.
+- **Voice models sharing the GPU with the LLM — by default.** Rejected as a
+  *default*: it requires a GPU and risks contention on machines that cannot fit both.
+  (Originally rejected outright as the root cause of Ollama cold-reload thrash;
+  reversed 2026-09-26 for the opt-in case once smaller models removed the sizing
+  problem — see §2a.)
 - **In-process voice (threads / process pool inside the runtime).** Rejected:
   native crashes can still take down the runtime, model loads stall the event
   loop, and it blurs the "voice is a swappable plugin" boundary.
