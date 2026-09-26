@@ -18,13 +18,21 @@ _DRAIN_TERMINALS = frozenset({"end", "final", "error", "cancelled"})
 
 async def _await_ready(conn: IpcConnection, name: str,
                        timeout_s: float) -> tuple[str | None, str | None]:
-    """Readiness handshake. Returns the (device, reason) the worker reported, if any."""
-    await conn.send_control({"type": "health"})
+    """Readiness handshake. Returns the (device, reason) the worker reported, if any.
+
+    A worker that dies hard mid-startup (CUDA abort/segfault/OOM kill) can surface
+    as EOFError *or* OSError (BrokenPipeError/ConnectionResetError, e.g. Linux UDS
+    when the health frame is unread in the dead worker's receive queue) from either
+    send_control or recv, depending on timing — both must map to the same
+    VoiceError so a caller with a CPU fallback can retry instead of failing voice
+    startup outright.
+    """
     try:
+        await conn.send_control({"type": "health"})
         _kind, body = await asyncio.wait_for(conn.recv(), timeout_s)
     except asyncio.TimeoutError as exc:
         raise VoiceError(f"{name} not ready within {timeout_s}s") from exc
-    except EOFError as exc:
+    except (EOFError, OSError) as exc:
         raise VoiceError(f"{name} exited before reporting ready") from exc
     if not (isinstance(body, dict) and body.get("type") == "health_ok"):
         raise VoiceError(f"{name} unexpected readiness reply: {body!r}")

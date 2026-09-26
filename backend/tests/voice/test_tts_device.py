@@ -14,6 +14,8 @@ _SUPPORT = Path(__file__).parent / "support"
 FAKE = TtsEngineSpec(name="fake", argv=(sys.executable, "-m", "zygos.voice.sidecar.fake_tts"))
 SILENT = TtsEngineSpec(name="kokoro", device="cuda",
                        argv=(sys.executable, str(_SUPPORT / "silent_worker.py")))
+CRASHING = TtsEngineSpec(name="kokoro", device="cuda",
+                         argv=(sys.executable, str(_SUPPORT / "crash_worker.py")))
 CPU_FALLBACK = TtsEngineSpec(name="kokoro", device="cpu",
                              argv=(sys.executable, "-m", "zygos.voice.sidecar.fake_tts"))
 
@@ -70,6 +72,22 @@ async def test_gpu_readiness_failure_retries_on_cpu_fallback():
         assert (h.device, h.requested_device) == ("cpu", "cuda")
         assert h.fallback_reason.startswith("GPU worker failed to start:")
         assert p._spec is CPU_FALLBACK        # crash restarts will reuse the winner
+    finally:
+        await p.aclose()
+
+
+async def test_gpu_worker_hard_crash_before_readiness_retries_on_cpu_fallback():
+    # Review Focus: crash_worker connects then os._exit(1) without running its
+    # event loop, so send_control/recv on the dead conn can raise EOFError *or*
+    # OSError (BrokenPipeError/ConnectionResetError) depending on OS timing.
+    # Either must be treated as a readiness failure and retried on CPU.
+    p = TtsPlugin(CRASHING, readiness_timeout_s=5.0, fallback_spec=CPU_FALLBACK)
+    try:
+        await p.start()
+        h = p.health()
+        assert h.alive is True
+        assert (h.device, h.requested_device) == ("cpu", "cuda")
+        assert h.fallback_reason.startswith("GPU worker failed to start:")
     finally:
         await p.aclose()
 
