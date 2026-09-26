@@ -8,7 +8,9 @@
   those preferences reach generation. Covers the authoritative **preferences store**,
   the first-run **onboarding compile-and-review flow** (natural-language description →
   structured preferences + a reviewed persona snippet), the **identity system-prompt
-  injection** into the turn loop, and default/degradation behavior.
+  injection** into the turn loop, the per-turn **interaction-modality context** (telling
+  the model when a turn was spoken and/or will be read aloud), and default/degradation
+  behavior.
 - **Depends on:**
   [RFC-0001](RFC-0001-Service-Architecture.md) (the `Message` typing §7 the identity
   system message uses, and `ModelService` §2 which performs the one-shot compile call),
@@ -20,7 +22,8 @@
   synergistic: because the identity lives in `build_messages`, it applies to whichever
   per-turn authoring model writes the turn — B works standalone with a single model),
   [RFC-0005](RFC-0005-Voice-Interaction-STT-and-TTS.md) (TTS greeting/address is a
-  consumer of the same preferences), and the React UI RFC (the settings page is the
+  consumer of the same preferences; the STT→turn and turn→TTS paths are what the §3a
+  modality context describes to the model), and the React UI RFC (the settings page is the
   runtime editor for the store). None is built here; this RFC only exposes the store
   they consume.
 - **Amends:** nothing. It **fills** the `build_messages()` system-message seam that
@@ -44,6 +47,11 @@ is never stored, only the reviewed result. Every turn, `build_messages()` prepen
 message. Because it lives in `build_messages`, the identity applies no matter which
 per-turn authoring model (RFC-0009) writes the turn. With preferences unset, nothing is
 injected and behavior is exactly as today.
+
+Alongside identity, `build_messages()` adds a short, runtime-authored **modality context**
+on voice turns: when the user's words arrived as a speech-to-text transcript and/or the
+reply will be spoken by TTS. It is derived from the turn itself, not stored as a
+preference, and typed turns with spoken output off get nothing — unchanged from today.
 
 ## Motivation
 
@@ -72,6 +80,12 @@ feature warm and personal without turning it into unmoderated system-prompt auth
    system prompt; there is no personalization at generation time.
 4. **Raw prompt authoring is undesirable.** Letting a user type the system prompt is a
    large, quality/safety-sensitive surface; there is no guided, bounded alternative.
+5. **The model doesn't know a turn is spoken.** A voice turn reaches the model as a bare
+   user string, indistinguishable from typing. In the live voice smoke test (2026-09-26)
+   the user said "Can you hear…?" and the model — seeing only text and a tool list with no
+   audio tool — answered "I can't hear anything, as I don't have access to audio input."
+   It also formats spoken replies with markdown lists/headings that TTS reads aloud, and it
+   has no cue that the input may contain recognition errors.
 
 ## Proposed Design
 
@@ -143,6 +157,71 @@ The template renders names/address deterministically and appends the approved `p
 snippet. Because this is in `build_messages`, the identity applies for **every** turn and
 **every** per-turn authoring model (RFC-0009) — one seam, all models.
 
+### 3a. Interaction-modality context (voice turns)
+
+A voice turn needs the model to know two independent facts, each derived **per turn**
+from the turn loop — not from the preferences store, because they describe *how this turn
+is happening*, not who the user is:
+
+```python
+@dataclass(frozen=True)
+class TurnModality:
+    spoken_input: bool = False   # text is an STT transcript (turn started from audio.in)
+    spoken_output: bool = False  # reply will be synthesized (session.speak and TTS available)
+
+def render_modality(m: TurnModality) -> str | None:
+    # None when both are False -> no message injected (default-preserving)
+    ...
+```
+
+- `spoken_input` is set by the caller that starts the turn: the audio path (the STT
+  `final` handler in `api/audio.py`) passes `True`; typed `user_message` passes `False`.
+  `run_turn` gains the modality as a parameter rather than inferring it.
+- `spoken_output` mirrors the gate `run_turn` already uses before `speak_reply`
+  (`session.speak` and `voice_service.tts_available`). Typed-in/spoken-out is valid (the
+  Speaker toggle on while typing) and gets only the output half.
+
+`render_modality` is a **fixed, runtime-authored template** — no user text, no model
+call. Indicative content (exact wording is an implementation detail, tested for presence
+of each clause, not verbatim):
+
+- *spoken_input:* "The user is speaking to you. Their words reach you as a speech-to-text
+  transcript, so treat them as heard speech and allow for recognition errors (misheard or
+  missing words); interpret charitably and ask for clarification only when the meaning is
+  genuinely unclear."
+- *spoken_output:* "Your reply will be read aloud by text-to-speech. Write it as natural
+  conversational speech: no markdown, headings, bullet lists, tables, code blocks, or raw
+  URLs; keep it concise; spell out anything that would read badly aloud."
+
+Message order in `build_messages`: **identity → modality → memory → user**. Identity is
+stable across turns, modality varies per turn, memory is relevance-gated; putting the
+per-turn and relevance-gated parts last keeps the stable prefix cache-friendly.
+
+```python
+def build_messages(prefs: Personalization, modality: TurnModality,
+                   context: tuple[str, ...], text: str) -> tuple[Message, ...]:
+    messages: list[Message] = []
+    for system in (render_identity(prefs), render_modality(modality)):
+        if system:
+            messages.append(Message(role="system", content=system))
+    if context:
+        messages.append(Message(role="system", content=f"Relevant memory:\n{'\\n'.join(context)}"))
+    messages.append(Message(role="user", content=text))
+    return tuple(messages)
+```
+
+**Seam coverage — reasoning path.** Today `build_messages` is used only on the tools and
+direct-generate paths; when `reasoning_enabled` is on, `run_turn` hands
+`ReasoningInput(prompt=text, context=context)` to the reasoning service and never calls
+`build_messages`. Both the identity (§3) and modality (§3a) messages must reach that path
+too, or reasoning turns silently lose them. The build therefore carries the rendered
+system messages into `ReasoningInput` (e.g. a `system: tuple[str, ...]` field threaded to
+the prelude/coda generation requests) — the same content, one rendering site.
+
+**Honesty note.** The modality message tells the model the true mechanics (speech arrives
+as a transcript; the reply is synthesized). It must not claim the model can perceive
+audio itself (tone, non-speech sounds) — it cannot.
+
 ### 4. Consumers (named, not built here)
 
 - **Voice (RFC-0005):** the TTS greeting/address reads `user_name`/`address` from the
@@ -168,6 +247,16 @@ This RFC exposes the store and `render_identity`; consumers bind to them.
 - **Skip the compile flow; forms only.** Rejected as the sole path: describing what you
   want in plain language is friendlier than filling fields; but direct field editing is
   kept as the non-guided alternative.
+- **Store voice mode as a preference / always inject a voice note.** Rejected: whether a
+  turn is spoken changes turn by turn (the user can type, then talk); a stored flag would
+  be wrong half the time. Deriving it per turn is exact.
+- **Strip markdown from the reply before TTS instead of prompting.** Rejected as the sole
+  fix: it removes symbols but not list-shaped, visually structured prose, and does nothing
+  for the "can you hear me" misunderstanding. A sanitizer may still be added as
+  defense-in-depth in the TTS path (RFC-0005), independent of this RFC.
+- **Mark spoken input inside the user message (e.g. a `[spoken]` prefix).** Rejected:
+  pollutes the stored transcript/memory with transport metadata; a system message keeps
+  the user's words verbatim.
 
 ## Migration Plan
 
@@ -180,9 +269,17 @@ Additive and **default-preserving**, single build cycle:
 3. Add `compile_personalization` + the first-run/re-runnable onboarding-and-review flow
    (CLI/chat pre-UI).
 4. Expose the store for the voice and settings-page consumers (seam only).
+5. Add `TurnModality` + `render_modality`; thread the modality from the turn's caller
+   (audio STT-final path vs typed `user_message`) into `run_turn` and `build_messages`.
+6. Carry the rendered identity + modality system messages into the reasoning path
+   (`ReasoningInput`) so reasoning-enabled turns receive them too.
+
+Steps 5–6 do not depend on steps 1–4 (an empty store renders no identity), so the
+modality context can land first if voice needs it before onboarding is built.
 
 Existing installs are unaffected until a user personalizes: with an empty store,
-`build_messages` output is byte-for-byte today's.
+`build_messages` output for **typed turns with spoken output off** is byte-for-byte
+today's. Voice turns intentionally change (they gain the modality message).
 
 ## Risks
 
@@ -196,6 +293,12 @@ Existing installs are unaffected until a user personalizes: with an empty store,
 - **Determinism regressions in `build_messages`.** Mitigated by `render_identity`
   returning `None` when unset, holding today's behavior exactly, and testing the
   injected-vs-empty paths independently.
+- **Models ignore the spoken-output guidance** (small local models still emit lists).
+  Mitigated partially; a TTS-side markdown sanitizer is the backstop (see Alternatives).
+  The modality message is still required for the input-side misunderstanding.
+- **Modality drift across paths.** A new turn-starting path that forgets to pass
+  `TurnModality` silently defaults to typed. Mitigated by making it a required
+  `run_turn` parameter (no default) and testing both callers.
 
 ## Acceptance Criteria
 
@@ -214,6 +317,15 @@ Existing installs are unaffected until a user personalizes: with an empty store,
 6. Direct field editing (bypassing compile) writes the same store.
 7. The store and `render_identity` are reachable by the voice and settings-page consumers
    (seam present), without those consumers being built here.
+8. A turn started from an STT final carries `spoken_input=True`; a typed `user_message`
+   carries `False`; `spoken_output` is `True` exactly when the reply would be synthesized.
+   Both callers are tested.
+9. `build_messages` injects the modality message (after identity, before memory) when
+   either flag is set, containing the input clause and/or output clause as applicable,
+   and injects **nothing** when both are false — the typed/no-speaker output is identical
+   to today (proven by test).
+10. Reasoning-enabled turns receive the same identity and modality system content as the
+    tools/direct paths (proven by test against a fake reasoning service).
 
 ## Architectural Impact
 
@@ -221,7 +333,8 @@ Existing installs are unaffected until a user personalizes: with an empty store,
   call. No new service-to-service dependencies; consumers (voice, UI) bind to a narrow
   store interface.
 - **Hidden state.** None hidden: preferences are explicit in the store, inspectable, and
-  the injected identity is a plain system message visible in the thread/trace. The raw
+  the injected identity and modality are plain system messages visible in the
+  thread/trace. Modality is derived per turn and never stored. The raw
   description is deliberately not retained.
 - **Service boundaries.** Respects them: fills the RFC-0007 `build_messages` seam rather
   than routing personalization around the turn loop; does not touch the memory or
@@ -236,4 +349,5 @@ Existing installs are unaffected until a user personalizes: with an empty store,
   a new long-lived subsystem. The compile step reuses `ModelService`.
 - **Removability.** Yes: with an empty store the RFC is inert and the runtime core behaves
   exactly as before; the store and the `prefs` parameter can be removed without affecting
-  unrelated services.
+  unrelated services. With voice off, the modality context is inert too; removing it
+  means dropping one parameter and one template.
