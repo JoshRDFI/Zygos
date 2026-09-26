@@ -29,6 +29,10 @@ def _build_parser() -> argparse.ArgumentParser:
     serve = subcommands.add_parser("serve", help="Run the HTTP/WebSocket server")
     serve.add_argument("--host", default=None, help="Bind host (default: config.server.host)")
     serve.add_argument("--port", type=int, default=None, help="Bind port (default: config.server.port)")
+    voice = subcommands.add_parser("voice", help="Voice tooling")
+    voice_cmds = voice.add_subparsers(dest="voice_command", required=True)
+    setup_gpu = voice_cmds.add_parser("setup-gpu", help="Build the GPU TTS sidecar venv")
+    setup_gpu.add_argument("--force", action="store_true", help="Delete and rebuild the venv")
     return parser
 
 
@@ -83,6 +87,10 @@ async def _amain(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
+        if args.command == "voice":
+            from zygos.voice import gpu_setup
+
+            return gpu_setup.setup_gpu(force=args.force)
         if args.command == "serve":
             from zygos.api.app import run_server
 
