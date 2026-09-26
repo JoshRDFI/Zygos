@@ -213,3 +213,14 @@ def test_tts_config_defaults_to_fake():
     from zygos.config.schema import TtsConfig
 
     assert TtsConfig().engine == "fake"
+
+
+def test_tts_config_device_and_worker_python():
+    import pydantic
+    import pytest
+    from zygos.config.schema import TtsConfig
+
+    assert TtsConfig().device == "cpu" and TtsConfig().worker_python is None
+    assert TtsConfig(device="cuda", worker_python="/x/python").device == "cuda"
+    with pytest.raises(pydantic.ValidationError):
+        TtsConfig(device="gpu")

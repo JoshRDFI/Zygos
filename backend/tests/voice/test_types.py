@@ -25,3 +25,10 @@ def test_engine_spec_is_frozen():
     import pytest
     with pytest.raises(Exception):
         spec.name = "other"  # frozen
+
+
+def test_health_ok_msg_optional_device_and_reason():
+    from zygos.voice.types import HealthOkMsg
+    assert HealthOkMsg().device is None and HealthOkMsg().reason is None
+    m = HealthOkMsg.model_validate({"type": "health_ok", "device": "cuda"})
+    assert m.device == "cuda"

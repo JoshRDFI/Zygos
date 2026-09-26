@@ -126,7 +126,8 @@ class SttPlugin:
 
     def health(self) -> SttHealth:
         st = self._handle.snapshot()
-        return SttHealth(engine=st.engine, device=st.device, alive=st.alive, last_error=st.last_error)
+        return SttHealth(engine=st.engine, device=st.device, alive=st.alive,
+                         last_error=st.last_error, requested_device=st.device)
 
     async def aclose(self) -> None:
         await self._handle.aclose()

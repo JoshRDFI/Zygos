@@ -30,3 +30,16 @@ def test_text_to_speech_now_has_a_contract():
     # Cycle 2 adds the TTS contract; a conforming engine registers.
     from zygos.voice.contract import TextToSpeech
     assert CAPABILITY_CONTRACTS[Capability.TEXT_TO_SPEECH] is TextToSpeech
+
+
+def test_stt_health_device_fields_default():
+    from zygos.voice.contract import SttHealth
+    h = SttHealth(engine="e", device="cpu", alive=True)
+    assert h.requested_device == "cpu" and h.fallback_reason is None
+
+
+def test_tts_health_carries_requested_and_reason():
+    from zygos.voice.contract import TtsHealth
+    h = TtsHealth(engine="kokoro", device="cpu", alive=True,
+                  requested_device="cuda", fallback_reason="no venv")
+    assert (h.device, h.requested_device, h.fallback_reason) == ("cpu", "cuda", "no venv")

@@ -14,6 +14,8 @@ class SttHealth(BaseModel):
     device: str
     alive: bool
     last_error: str | None = None
+    requested_device: str = "cpu"          # what config asked for; `device` is ACTIVE
+    fallback_reason: str | None = None     # None iff requested_device == device
 
 
 @runtime_checkable
@@ -42,6 +44,8 @@ class TtsHealth(BaseModel):
     device: str
     alive: bool
     last_error: str | None = None
+    requested_device: str = "cpu"          # what config asked for; `device` is ACTIVE
+    fallback_reason: str | None = None     # None iff requested_device == device
 
 
 @runtime_checkable

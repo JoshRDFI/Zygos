@@ -54,6 +54,8 @@ class FinalMsg(BaseModel):
 
 class HealthOkMsg(BaseModel):
     type: Literal["health_ok"] = "health_ok"
+    device: str | None = None   # provider the worker actually obtained (RFC-0005 §2a)
+    reason: str | None = None   # why it differs from the requested device, if it does
 
 
 class ErrorMsg(BaseModel):

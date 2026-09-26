@@ -20,6 +20,16 @@ async def test_start_completes_after_health_ok():
         await p.aclose()
 
 
+async def test_stt_health_reports_requested_equal_active():
+    p = SttPlugin(FAKE, readiness_timeout_s=5.0)
+    try:
+        await p.start()
+        h = p.health()
+        assert h.device == "cpu" and h.requested_device == "cpu" and h.fallback_reason is None
+    finally:
+        await p.aclose()
+
+
 async def test_start_times_out_when_worker_never_reports_ready():
     spec = SttEngineSpec(name="silent", argv=(sys.executable, str(_SILENT)))
     p = SttPlugin(spec, readiness_timeout_s=0.3)

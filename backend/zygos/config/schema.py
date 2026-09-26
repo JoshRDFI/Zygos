@@ -167,7 +167,9 @@ class TtsConfig(BaseModel):
     engine: Literal["fake", "kokoro"] = "fake"
     voice: str = "af_heart"          # Kokoro flagship graded voice, lang_code 'a'
     lang: str = "en-us"              # kokoro-onnx tokenizer language (espeak)
-    device: str = "cpu"              # informational for health; CPU-first this cycle
+    device: Literal["cpu", "cuda"] = "cpu"   # cuda → GPU sidecar venv (RFC-0005 §2a)
+    # sidecar interpreter override; None → .zygos/venvs/voice-gpu when device=cuda
+    worker_python: str | None = None
     # None -> resolved to a Zygos-owned model cache dir at build time
     download_root: str | None = None
     # max wait for the worker to report health_ok (model load) at startup
