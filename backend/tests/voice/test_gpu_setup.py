@@ -109,3 +109,29 @@ def test_success_prints_config_hint(tmp_path):
 
 def test_backend_dir_has_pyproject():
     assert (gpu_setup.backend_dir() / "pyproject.toml").is_file()
+
+
+def test_reusing_message_uses_absolute_path(tmp_path, monkeypatch):
+    # DEFAULT_GPU_VENV is intentionally cwd-relative; the printed message must
+    # still be diagnosable when setup-gpu is invoked from an unexpected cwd.
+    monkeypatch.chdir(tmp_path)
+    lines = []
+    gpu_setup.setup_gpu(venv_dir="relvenv", run=_Rec(), exists=lambda p: True,
+                        remove=lambda p: None, out=lines.append)
+    assert any(str(tmp_path / "relvenv") in ln for ln in lines)
+
+
+def test_removing_message_uses_absolute_path(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    lines = []
+    gpu_setup.setup_gpu(venv_dir="relvenv", force=True, run=_Rec(), exists=lambda p: True,
+                        remove=lambda p: None, out=lines.append)
+    assert any(str(tmp_path / "relvenv") in ln and "removing" in ln for ln in lines)
+
+
+def test_success_message_includes_absolute_venv_path(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    lines = []
+    gpu_setup.setup_gpu(venv_dir="relvenv", run=_Rec(), exists=lambda p: False,
+                        remove=lambda p: None, out=lines.append)
+    assert any(str(tmp_path / "relvenv") in ln and "voice.tts.device: cuda" in ln for ln in lines)

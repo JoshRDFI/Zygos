@@ -43,14 +43,15 @@ def setup_gpu(
     out: Callable[[str], None] = print,
 ) -> int:
     py = venv_python(venv_dir)
+    abs_venv_dir = os.path.abspath(venv_dir)
     steps: list[tuple[str, list[str], dict[str, str] | None]] = []
     if force and exists(venv_dir):
-        out(f"removing {venv_dir}")
+        out(f"removing {abs_venv_dir}")
         remove(venv_dir)
     if force or not exists(py):
         steps.append(("create venv", [sys.executable, "-m", "venv", venv_dir], None))
     else:
-        out(f"reusing {venv_dir}")
+        out(f"reusing {abs_venv_dir}")
     steps += [
         ("install zygos[voice]", [py, "-m", "pip", "install", "-e", f"{backend_dir()}[voice]"], None),
         # `pip install -e .[voice]` can pull the CPU `onnxruntime` back in as a
@@ -76,5 +77,5 @@ def setup_gpu(
         if code != 0:
             out(f"setup-gpu failed at '{label}' (exit {code})")
             return code
-    out("GPU venv ready. To use it, set in your config:  voice.tts.device: cuda")
+    out(f"GPU venv ready at {abs_venv_dir}. To use it, set in your config:  voice.tts.device: cuda")
     return 0

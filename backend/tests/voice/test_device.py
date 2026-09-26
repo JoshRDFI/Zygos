@@ -54,6 +54,21 @@ def test_worker_python_override_missing_names_that_path_not_managed():
     assert SETUP_HINT not in got.fallback_reason   # user-supplied path: setup-gpu won't fix it
 
 
+def test_managed_venv_missing_reason_uses_absolute_path(tmp_path, monkeypatch):
+    # DEFAULT_GPU_VENV is intentionally cwd-relative; the printed reason must
+    # still be diagnosable when the doctor/CLI runs from an unexpected cwd.
+    monkeypatch.chdir(tmp_path)
+    got = resolve_worker_launch("cuda", None, "relvenv/bin/python", exists=_exists(), main_python=MAIN)
+    assert str(tmp_path / "relvenv" / "bin" / "python") in got.fallback_reason
+
+
+def test_worker_python_override_missing_reason_uses_absolute_path(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    got = resolve_worker_launch("cuda", "relworker/python", VENV_PY,
+                                exists=_exists(VENV_PY), main_python=MAIN)
+    assert str(tmp_path / "relworker" / "python") in got.fallback_reason
+
+
 def test_onnx_providers():
     assert onnx_providers("cuda") == ["CUDAExecutionProvider", "CPUExecutionProvider"]
     assert onnx_providers("cpu") == ["CPUExecutionProvider"]

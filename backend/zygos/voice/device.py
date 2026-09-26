@@ -55,9 +55,9 @@ def resolve_worker_launch(
     if exists(candidate):
         return WorkerLaunch(python=candidate, device="cuda", fallback_reason=None)
     if worker_python:
-        reason = f"worker_python not found at {worker_python}; running on CPU"
+        reason = f"worker_python not found at {os.path.abspath(worker_python)}; running on CPU"
     else:
-        reason = f"GPU venv not found at {default_venv_python}; {SETUP_HINT}"
+        reason = f"GPU venv not found at {os.path.abspath(default_venv_python)}; {SETUP_HINT}"
     return WorkerLaunch(python=main_python, device="cpu", fallback_reason=reason)
 
 
