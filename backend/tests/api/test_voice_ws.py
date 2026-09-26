@@ -331,3 +331,38 @@ def test_delete_session_releases_voice_ownership(tmp_path):
     assert gate.owner == sid
     assert client.delete(f"/sessions/{sid}").status_code == 200
     assert gate.owner is None
+
+
+def test_disconnect_mid_utterance_cancels_and_drains_transcription(tmp_path):
+    # Regression (live smoke test 2026-09-26): WS teardown cancelled the audio
+    # tasks but never told the STT worker, so its in-flight result stayed on the
+    # SHARED sidecar connection and the next session's first audio.start read it
+    # as its own final (stale transcript; real audio dropped; desync perpetuates).
+    # Teardown must route through cancel_audio_turn: cancel + drain-to-terminal.
+    rt = _voice_runtime(tmp_path)
+    app = create_app(rt)
+    cancelled: list[bool] = []
+    real_begin = rt.voice_service.begin_transcription
+
+    def spying_begin(ctx):
+        tr = real_begin(ctx)
+        real_cancel = tr.cancel
+
+        async def cancel():
+            await real_cancel()
+            cancelled.append(True)
+
+        tr.cancel = cancel
+        return tr
+
+    rt.voice_service.begin_transcription = spying_begin
+    with TestClient(app) as client:
+        sid = client.post("/sessions").json()["id"]
+        with client.websocket_connect(f"/ws/session/{sid}") as ws:
+            ws.send_text(json.dumps({"channel": "control", "type": "audio.start", "payload": {}}))
+            ws.send_bytes(bytes([AUDIO_TAG_IN]) + b"\x00" * 2048)
+            # the worker is mid-utterance once it has streamed a partial back
+            _drive_until(ws, lambda f: f["channel"] == "chat" and f["type"] == "partial", [])
+        # disconnected mid-utterance (no audio.endpoint)
+        _wait_until(lambda: bool(cancelled), timeout=3.0)
+        assert cancelled, "WS teardown left the transcription un-cancelled on the shared sidecar"

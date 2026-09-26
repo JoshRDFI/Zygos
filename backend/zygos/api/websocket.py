@@ -150,26 +150,32 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
     except Exception:  # noqa: BLE001 - never let a handler crash escape
         logger.exception("websocket handler error (session=%s)", session_id)
     finally:
-        if session._conn is conn:  # only if not superseded by a replacement
-            if session.audio is not None:
-                session.audio.consumer.cancel()
-                session.audio.pusher.cancel()
-                session.audio = None
-            session.speaking = False
-            session.connected = False
-            gate = getattr(deps, "voice_gate", None)
-            if gate is not None:
-                gate.release(session.id)
-            for fut in list(session.pending_permissions.values()):
-                if not fut.done():
-                    fut.set_result("deny")
-            session.pending_permissions.clear()
-            session._writer = None
-            # Reap the abandoned session: with the app-lifetime singleton client,
-            # WS-close == page-gone. delete() also trips any active turn and clears
-            # the duck window, so this is the sole owner of that teardown. Guarded
-            # by `session._conn is conn`, so a superseding reconnect (which reassigns
-            # session._conn) never reaps the live session. Assumption holds until a
-            # reconnect feature adds a grace period.
-            registry.delete(session.id)
-        writer.cancel()
+        try:
+            if session._conn is conn:  # only if not superseded by a replacement
+                try:
+                    # Cancel + drain, not just task-cancel: an un-cancelled worker would
+                    # leave this utterance's result on the SHARED sidecar connection for
+                    # the next session's transcription to read as its own. Shielded: the
+                    # handler itself can be cancelled here (shutdown, ASGI test clients),
+                    # and the drain must still finish; the teardown below always runs.
+                    await asyncio.shield(cancel_audio_turn(session))
+                finally:
+                    session.speaking = False
+                    session.connected = False
+                    gate = getattr(deps, "voice_gate", None)
+                    if gate is not None:
+                        gate.release(session.id)
+                    for fut in list(session.pending_permissions.values()):
+                        if not fut.done():
+                            fut.set_result("deny")
+                    session.pending_permissions.clear()
+                    session._writer = None
+                    # Reap the abandoned session: with the app-lifetime singleton client,
+                    # WS-close == page-gone. delete() also trips any active turn and clears
+                    # the duck window, so this is the sole owner of that teardown. Guarded
+                    # by `session._conn is conn`, so a superseding reconnect (which reassigns
+                    # session._conn) never reaps the live session. Assumption holds until a
+                    # reconnect feature adds a grace period.
+                    registry.delete(session.id)
+        finally:
+            writer.cancel()
