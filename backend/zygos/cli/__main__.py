@@ -63,7 +63,7 @@ def render_manifest(manifest: Manifest) -> str:
 def render_doctor(report: DoctorReport) -> str:
     lines = ["zygos doctor:"]
     for check in report.checks:
-        mark = "ok  " if check.ok else "FAIL"
+        mark = "FAIL" if not check.ok else ("warn" if check.warn else "ok  ")
         lines.append(f"  [{mark}] {check.name}: {check.detail}")
     lines.append("healthy" if report.ok else "PROBLEMS FOUND")
     return "\n".join(lines)
