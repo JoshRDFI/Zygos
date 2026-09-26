@@ -146,3 +146,31 @@ def test_build_tts_plugin_kokoro_defaults_download_root():
 
 def test_build_tts_plugin_fake_still_works():
     assert build_tts_plugin(TtsConfig()).name == "fake"
+
+
+def test_build_tts_plugin_kokoro_cpu_sets_device_env_and_no_fallback():
+    plugin = build_tts_plugin(TtsConfig(engine="kokoro"))
+    assert plugin._spec.env["ZYGOS_TTS_DEVICE"] == "cpu"
+    assert plugin._spec.argv[0] == sys.executable
+    assert plugin._fallback_spec is None
+    assert plugin.health().requested_device == "cpu"
+
+
+def test_build_tts_plugin_kokoro_cuda_with_venv_uses_it_and_has_cpu_fallback(tmp_path):
+    py = tmp_path / "python"
+    py.write_text("")
+    plugin = build_tts_plugin(TtsConfig(engine="kokoro", device="cuda", worker_python=str(py)))
+    assert plugin._spec.argv[0] == str(py)
+    assert plugin._spec.device == "cuda" and plugin._spec.env["ZYGOS_TTS_DEVICE"] == "cuda"
+    fb = plugin._fallback_spec
+    assert fb.argv[0] == sys.executable and fb.device == "cpu" and fb.env["ZYGOS_TTS_DEVICE"] == "cpu"
+    assert fb.env["ZYGOS_TTS_VOICE"] == plugin._spec.env["ZYGOS_TTS_VOICE"]
+
+
+def test_build_tts_plugin_kokoro_cuda_without_venv_runs_cpu_with_reason(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)   # no .zygos/venvs/voice-gpu here
+    plugin = build_tts_plugin(TtsConfig(engine="kokoro", device="cuda"))
+    assert plugin._spec.argv[0] == sys.executable and plugin._spec.device == "cpu"
+    assert plugin._fallback_spec is None
+    h = plugin.health()
+    assert h.requested_device == "cuda" and "setup-gpu" in h.fallback_reason

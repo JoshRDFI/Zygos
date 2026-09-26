@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from zygos.runtime.context import ExecutionContext
 from zygos.voice.contract import SttHealth, TtsHealth
+from zygos.voice.device import DEFAULT_GPU_VENV, resolve_worker_launch, venv_python
 from zygos.voice.errors import VoiceError
 from zygos.voice.plugin import SttPlugin, Transcription, TtsPlugin
 from zygos.voice.types import AudioFormat, SttEngineSpec, TtsEngineSpec
@@ -57,18 +58,29 @@ def build_tts_plugin(tts: TtsConfig) -> TtsPlugin:
         return TtsPlugin(_TTS_ENGINES["fake"], readiness_timeout_s=tts.readiness_timeout_s)
     if tts.engine == "kokoro":
         download_root = tts.download_root or str(Path(_DEFAULT_KOKORO_DOWNLOAD_ROOT))
-        spec = TtsEngineSpec(
-            name="kokoro",
-            argv=(sys.executable, "-m", "zygos.voice.sidecar.kokoro"),
-            device=tts.device,
-            concurrent_safe=False,
-            env={
-                "ZYGOS_TTS_VOICE": tts.voice,
-                "ZYGOS_TTS_LANG": tts.lang,
-                "ZYGOS_TTS_DOWNLOAD_ROOT": download_root,
-            },
-        )
-        return TtsPlugin(spec, readiness_timeout_s=tts.readiness_timeout_s)
+        launch = resolve_worker_launch(tts.device, tts.worker_python,
+                                       venv_python(DEFAULT_GPU_VENV))
+        base_env = {
+            "ZYGOS_TTS_VOICE": tts.voice,
+            "ZYGOS_TTS_LANG": tts.lang,
+            "ZYGOS_TTS_DOWNLOAD_ROOT": download_root,
+        }
+
+        def kokoro_spec(python: str, device: str) -> TtsEngineSpec:
+            return TtsEngineSpec(
+                name="kokoro",
+                argv=(python, "-m", "zygos.voice.sidecar.kokoro"),
+                device=device,
+                concurrent_safe=False,
+                env={**base_env, "ZYGOS_TTS_DEVICE": device},
+            )
+
+        fallback = kokoro_spec(sys.executable, "cpu") if launch.device == "cuda" else None
+        return TtsPlugin(kokoro_spec(launch.python, launch.device),
+                         readiness_timeout_s=tts.readiness_timeout_s,
+                         fallback_spec=fallback,
+                         requested_device=tts.device,
+                         launch_reason=launch.fallback_reason)
     raise VoiceError(f"unknown TTS engine {tts.engine!r}")
 
 

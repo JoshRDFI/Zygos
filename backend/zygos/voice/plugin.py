@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from zygos.runtime.context import ExecutionContext
 from zygos.voice.contract import SttHealth, TtsHealth
@@ -10,7 +11,24 @@ from zygos.voice.sidecar import SidecarHandle
 from zygos.voice.types import AudioFormat, SttEngineSpec, TranscriptEvent, TtsEngineSpec
 
 
+_log = logging.getLogger(__name__)
+
 _DRAIN_TERMINALS = frozenset({"end", "final", "error", "cancelled"})
+
+
+async def _await_ready(conn: IpcConnection, name: str,
+                       timeout_s: float) -> tuple[str | None, str | None]:
+    """Readiness handshake. Returns the (device, reason) the worker reported, if any."""
+    await conn.send_control({"type": "health"})
+    try:
+        _kind, body = await asyncio.wait_for(conn.recv(), timeout_s)
+    except asyncio.TimeoutError as exc:
+        raise VoiceError(f"{name} not ready within {timeout_s}s") from exc
+    except EOFError as exc:
+        raise VoiceError(f"{name} exited before reporting ready") from exc
+    if not (isinstance(body, dict) and body.get("type") == "health_ok"):
+        raise VoiceError(f"{name} unexpected readiness reply: {body!r}")
+    return body.get("device"), body.get("reason")
 
 
 async def _drain_to_terminal(conn: IpcConnection, *, poll_s: float = 0.05,
@@ -107,15 +125,7 @@ class SttPlugin:
 
     async def start(self) -> None:
         await self._handle.start()
-        conn = self._handle.connection
-        await conn.send_control({"type": "health"})
-        try:
-            _kind, body = await asyncio.wait_for(conn.recv(), self._readiness_timeout_s)
-        except asyncio.TimeoutError as exc:
-            raise VoiceError(
-                f"{self._spec.name} not ready within {self._readiness_timeout_s}s") from exc
-        if not (isinstance(body, dict) and body.get("type") == "health_ok"):
-            raise VoiceError(f"{self._spec.name} unexpected readiness reply: {body!r}")
+        await _await_ready(self._handle.connection, self._spec.name, self._readiness_timeout_s)
         self._started = True
 
     async def ensure_alive(self) -> None:
@@ -194,11 +204,18 @@ class Synthesis:
 class TtsPlugin:
     """Concrete TTS engine adapter. Satisfies the TextToSpeech contract."""
 
-    def __init__(self, spec: TtsEngineSpec, *, readiness_timeout_s: float = 60.0) -> None:
+    def __init__(self, spec: TtsEngineSpec, *, readiness_timeout_s: float = 60.0,
+                 fallback_spec: TtsEngineSpec | None = None,
+                 requested_device: str | None = None,
+                 launch_reason: str | None = None) -> None:
         self._spec = spec
         self._handle = SidecarHandle(spec)
         self._started = False
         self._readiness_timeout_s = readiness_timeout_s
+        self._fallback_spec = fallback_spec
+        self._requested_device = requested_device or spec.device
+        self._active_device = spec.device
+        self._fallback_reason = launch_reason
 
     @property
     def name(self) -> str:
@@ -212,17 +229,27 @@ class TtsPlugin:
     def output_format(self) -> AudioFormat:
         return AudioFormat(sample_rate=self._spec.output_sample_rate)
 
-    async def start(self) -> None:
+    async def _start_handle(self) -> tuple[str | None, str | None]:
         await self._handle.start()
-        conn = self._handle.connection
-        await conn.send_control({"type": "health"})
+        return await _await_ready(self._handle.connection, self._spec.name,
+                                  self._readiness_timeout_s)
+
+    async def start(self) -> None:
         try:
-            _kind, body = await asyncio.wait_for(conn.recv(), self._readiness_timeout_s)
-        except asyncio.TimeoutError as exc:
-            raise VoiceError(
-                f"{self._spec.name} not ready within {self._readiness_timeout_s}s") from exc
-        if not (isinstance(body, dict) and body.get("type") == "health_ok"):
-            raise VoiceError(f"{self._spec.name} unexpected readiness reply: {body!r}")
+            device, worker_reason = await self._start_handle()
+        except VoiceError as exc:
+            if self._fallback_spec is None:
+                raise
+            await self._handle.aclose()
+            self._spec, self._fallback_spec = self._fallback_spec, None
+            self._handle = SidecarHandle(self._spec)
+            self._fallback_reason = self._fallback_reason or f"GPU worker failed to start: {exc}"
+            device, worker_reason = await self._start_handle()
+        self._active_device = device or self._spec.device
+        self._fallback_reason = self._fallback_reason or worker_reason
+        if self._active_device != self._requested_device:
+            _log.warning("%s: requested device %s, running on %s (%s)", self._spec.name,
+                         self._requested_device, self._active_device, self._fallback_reason)
         self._started = True
 
     def synthesize(self, ctx: ExecutionContext, text: str) -> Synthesis:
@@ -231,7 +258,9 @@ class TtsPlugin:
 
     def health(self) -> TtsHealth:
         st = self._handle.snapshot()
-        return TtsHealth(engine=st.engine, device=st.device, alive=st.alive, last_error=st.last_error)
+        return TtsHealth(engine=st.engine, device=self._active_device, alive=st.alive,
+                         last_error=st.last_error, requested_device=self._requested_device,
+                         fallback_reason=self._fallback_reason)
 
     async def aclose(self) -> None:
         await self._handle.aclose()
