@@ -60,6 +60,8 @@ async def start_audio_turn(session, deps: TurnDeps) -> None:
                     session.enqueue(Frame(channel=CHAT, type="partial", payload={"text": ev.text}))
                 else:  # final
                     session.enqueue(Frame(channel=CHAT, type="final", payload={"text": ev.text}))
+                    if not ev.text.strip():
+                        return  # nothing was said: don't make the assistant answer silence
                     if session.active_task is not None and not session.active_task.done():
                         if session.active_cancel is not None:
                             session.active_cancel.trip()

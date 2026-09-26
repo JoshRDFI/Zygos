@@ -21,9 +21,12 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from zygos.api.audio import AudioTurn, cancel_audio_turn, start_audio_turn
 from zygos.api.frames import CHAT, Frame
 from zygos.voice.errors import TranscriptionFailed
+from zygos.voice.types import TranscriptEvent
 
 
 class _DeadSidecarTranscription:
@@ -193,3 +196,36 @@ async def test_cancel_audio_turn_stops_consumer_before_draining():
 
     assert order == ["consumer-cancelled", "drain"]  # reader stopped, THEN drain
     assert session.audio is None
+
+
+class _BlankFinalTranscription:
+    """STT committed nothing intelligible (silence / mic delivered no audio)."""
+
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    async def push(self, pcm: bytes) -> None:
+        pass
+
+    async def endpoint(self) -> None:
+        pass
+
+    async def events(self):
+        yield TranscriptEvent(kind="final", text=self._text)
+
+    async def cancel(self) -> None:
+        pass
+
+
+@pytest.mark.parametrize("text", ["", "   "])
+async def test_blank_final_does_not_start_a_turn(text):
+    # Regression (live smoke test 2026-09-26): an empty transcript started an LLM
+    # turn, so the assistant answered silence ("Please provide a question...").
+    session = _FakeSessionForStart()
+    deps = _FakeDeps(_FakeVoiceService(_BlankFinalTranscription(text)))
+
+    await start_audio_turn(session, deps)
+    await session.audio.consumer
+
+    assert session.active_task is None
+    assert any(f.channel == CHAT and f.type == "final" for f in session.frames)
