@@ -31,3 +31,21 @@ def test_join_segments_concatenates_and_trims():
 
 def test_join_segments_empty():
     assert fw.join_segments([]) == ""
+
+
+class _RecordingModel:
+    def __init__(self):
+        self.kwargs = None
+
+    def transcribe(self, audio, **kwargs):
+        self.kwargs = kwargs
+        return iter(()), None
+
+
+def test_transcribe_filters_non_speech():
+    # Whisper hallucinates text on silence (base.en turns 8s of zeros into
+    # "you"), which then drives an LLM turn. The bundled Silero VAD filter drops
+    # non-speech first, so silence transcribes to "" and no turn runs.
+    model = _RecordingModel()
+    assert fw._transcribe(model, np.zeros(16000, dtype=np.float32)) == ""
+    assert model.kwargs.get("vad_filter") is True

@@ -48,7 +48,9 @@ def _load_model():
 
 
 def _transcribe(model, audio: "np.ndarray") -> str:
-    segments, _info = model.transcribe(audio, language="en", beam_size=1)
+    # vad_filter: drop non-speech first (bundled Silero VAD, no download) —
+    # otherwise Whisper hallucinates text such as "you" from pure silence.
+    segments, _info = model.transcribe(audio, language="en", beam_size=1, vad_filter=True)
     return join_segments(segments)
 
 
