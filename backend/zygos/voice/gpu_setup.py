@@ -53,7 +53,18 @@ def setup_gpu(
         out(f"reusing {venv_dir}")
     steps += [
         ("install zygos[voice]", [py, "-m", "pip", "install", "-e", f"{backend_dir()}[voice]"], None),
-        ("remove CPU onnxruntime", [py, "-m", "pip", "uninstall", "-y", "onnxruntime"], None),
+        # `pip install -e .[voice]` can pull the CPU `onnxruntime` back in as a
+        # transitive dependency of faster-whisper, even when this venv already
+        # has onnxruntime-gpu installed — the two distributions share the same
+        # importable `onnxruntime/` package, so whichever installs last wins on
+        # disk and a subsequent uninstall of just one can leave the other's
+        # files half-deleted. Remove BOTH builds every run (not just the CPU
+        # one) so the next install always starts from a clean slate — this
+        # repairs a half-built venv on rerun, not only a venv built from
+        # scratch. `pip uninstall` on a package that isn't installed just
+        # warns and exits 0, so this is a no-op on a venv that never drifted.
+        ("remove onnxruntime builds",
+         [py, "-m", "pip", "uninstall", "-y", "onnxruntime", "onnxruntime-gpu"], None),
         ("install onnxruntime-gpu",
          [py, "-m", "pip", "install", f"onnxruntime-gpu[cuda,cudnn]>={ORT_GPU_MIN}"], None),
         ("self-check on CUDA", [py, "-m", "zygos.voice.sidecar.kokoro", "--self-check"],
