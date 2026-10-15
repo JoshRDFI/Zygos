@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-07-07
+**Refined by:** [ADR-0007](ADR-0007-native-thinking-off-by-default.md): orchestrating over a thinking model is now opt-in; native thinking is off by default.
 
 ## Context
 

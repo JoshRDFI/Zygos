@@ -75,6 +75,12 @@ failover between routes. Local backends (Ollama, vLLM) and public ones (OpenAI,
 Anthropic) sit behind the same interface, so switching — or keeping some traffic local
 and some public — is a config change. `[v1]` `[v2 · built]`
 
+Native model thinking (the hidden reasoning block of models like qwen3 and gemma4) is
+off by default, which keeps replies fast enough for voice; `providers.think: true` turns
+it on ([ADR-0007](./docs/adr/ADR-0007-native-thinking-off-by-default.md)). Client-side
+rate limiting is opt-in for cloud quotas
+([ADR-0008](./docs/adr/ADR-0008-opt-in-client-rate-limiting.md)).
+
 Letting a model *call tools* uses native function-calling normalized across providers
 ([RFC-0008](./docs/rfcs/RFC-0008-Tool-Calling-Protocol-and-Tool-Authoring.md)); tool calls
 run live inside the turn loop, and every side-effecting call is permission-gated with an

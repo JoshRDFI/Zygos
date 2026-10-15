@@ -30,3 +30,5 @@ ADRs are numbered sequentially using the format `ADR-NNNN`, zero-padded to four 
 | [ADR-0004](ADR-0004-multiplexed-websocket.md) | One Multiplexed WebSocket per Session | Accepted |
 | [ADR-0005](ADR-0005-apache-2-license.md) | Apache-2.0 License | Accepted |
 | [ADR-0006](ADR-0006-provider-class-token-limits.md) | Provider-Class-Aware Token Limits | Accepted |
+| [ADR-0007](ADR-0007-native-thinking-off-by-default.md) | Native Model Thinking Off by Default | Accepted |
+| [ADR-0008](ADR-0008-opt-in-client-rate-limiting.md) | Client-Side Rate Limiting Is Opt-In | Accepted |
