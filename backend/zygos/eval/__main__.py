@@ -11,7 +11,8 @@ from zygos.eval.report import EvalReport, build_report, render_table
 from zygos.eval.runner import EvalRunner
 from zygos.eval.scorers import CodeExecScorer, LlmJudgeScorer, Scorer, match_scorers
 from zygos.eval.suite import load_suite
-from zygos.services.model import ModelService
+from zygos.services.model import DefaultModelService, ModelService
+from zygos.services.router import ProviderRouter, RouteChoice
 
 _LOCAL_PROVIDERS = {"ollama", "vllm", "fake"}
 
@@ -33,10 +34,26 @@ def check_provider_configured(config: ZygosConfig) -> str | None:
     return None
 
 
-async def run_eval(suite_path, *, split, category, assembly, judge_model) -> EvalReport:
+def judge_model_service(assembly, judge_model: str) -> ModelService:
+    """A ModelService that really generates with `judge_model`.
+
+    The router fills request.model from its route, so naming the judge on the request
+    is not enough; a judge other than the model under test gets its own single-route
+    router on the primary provider.
+    """
+    primary = assembly.config.providers.primary
+    if judge_model == primary.model:
+        return assembly.model_service
+    router = ProviderRouter([RouteChoice(provider=primary.provider, model=judge_model)],
+                            assembly.providers)
+    return DefaultModelService(router)
+
+
+async def run_eval(suite_path, *, split, category, assembly, judge_model,
+                   judge_service: ModelService | None = None) -> EvalReport:
     suite = load_suite(suite_path)
     tasks = suite.filter(split=split, category=category)
-    scorers = build_scorers(assembly.model_service, judge_model)
+    scorers = build_scorers(judge_service or assembly.model_service, judge_model)
     runner = EvalRunner(assembly.reasoning_service, scorers, assembly.new_context)
     records = await runner.run(tasks)
     return build_report(suite.name, records)
@@ -70,6 +87,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     judge_model = args.judge_model or config.providers.primary.model
+    if judge_model == config.providers.primary.model:
+        print(f"note: llm_judge tasks are scored by {judge_model}, the model under test, "
+              "so it grades its own answers; pass --judge-model to use another model",
+              file=sys.stderr)
 
     async def _run_and_close() -> EvalReport:
         # run_eval and aclose MUST share one event loop: the run opens an httpx
@@ -79,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
             return await run_eval(
                 args.suite, split=args.split, category=args.category,
                 assembly=assembly, judge_model=judge_model,
+                judge_service=judge_model_service(assembly, judge_model),
             )
         finally:
             await assembly.aclose()

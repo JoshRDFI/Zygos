@@ -90,6 +90,7 @@ def test_main_runs_eval_and_closes_in_one_event_loop(tmp_path, monkeypatch):
 
     class _Assembly:
         config = _Cfg
+        model_service = None
         async def aclose(self):
             loops["close"] = asyncio.get_running_loop()
 
@@ -138,3 +139,93 @@ def test_build_scorers_includes_code_exec():
 
     scorers = build_scorers(None, "judge-x")
     assert isinstance(scorers["code_exec"], CodeExecScorer)
+
+
+def _fake_runtime(tmp_path):
+    from zygos.runtime.bootstrap import build_runtime
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("providers:\n  primary:\n    provider: fake\n    model: contestant\n"
+                   "reasoning:\n  enabled: true\n")
+    return build_runtime(cfg)
+
+
+@pytest.mark.asyncio
+async def test_judge_service_routes_to_the_judge_model(tmp_path):
+    """Regression (2026-10-15): --judge-model was ignored because the router fills
+    request.model from its route, so the model under test graded itself."""
+    from zygos.eval.__main__ import judge_model_service
+    from zygos.providers.types import GenerationRequest, Message
+    assembly = _fake_runtime(tmp_path)
+    try:
+        judge = judge_model_service(assembly, "judge-x")
+        result = await judge.generate(
+            assembly.new_context(), GenerationRequest(messages=(Message(role="user", content="score"),)))
+        assert result.model == "judge-x"
+    finally:
+        await assembly.aclose()
+
+
+@pytest.mark.asyncio
+async def test_judge_service_is_the_runtime_service_when_judge_is_the_contestant(tmp_path):
+    from zygos.eval.__main__ import judge_model_service
+    assembly = _fake_runtime(tmp_path)
+    try:
+        assert judge_model_service(assembly, "contestant") is assembly.model_service
+    finally:
+        await assembly.aclose()
+
+
+@pytest.mark.asyncio
+async def test_run_eval_scores_with_the_given_judge_service(tmp_path):
+    seen = []
+
+    class _Judge:
+        async def generate(self, ctx, request):
+            from zygos.providers.types import GenerationResult
+            seen.append(request)
+            return GenerationResult(text="1.0", model="judge-x", provider="fake")
+
+    p = tmp_path / "j.yaml"
+    p.write_text(textwrap.dedent("""
+        suite: demo
+        tasks:
+          - id: a
+            category: simple
+            split: val
+            input: "Why is the sky blue?"
+            scorer: {kind: llm_judge, rubric: "Rayleigh"}
+    """))
+    report = await run_eval(p, split=None, category=None, assembly=_FakeAssembly(),
+                            judge_model="judge-x", judge_service=_Judge())
+    assert len(seen) == 1
+    assert report.by_split["val"].pass_rate == 1.0
+
+
+def test_main_warns_when_the_model_grades_itself(tmp_path, monkeypatch, capsys):
+    import zygos.runtime.bootstrap as bootstrap
+    import zygos.eval.__main__ as cli
+    from zygos.eval.report import build_report
+
+    class _Cfg:
+        class reasoning:
+            enabled = True
+        class providers:
+            class primary:
+                provider = "ollama"
+                model = "qwen3:8b"
+            credentials = {}
+
+    class _Assembly:
+        config = _Cfg
+        model_service = object()
+        async def aclose(self):
+            pass
+
+    async def _fake_run_eval(*args, **kwargs):
+        return build_report("demo", [])
+
+    monkeypatch.setattr(bootstrap, "build_runtime", lambda config_path=None: _Assembly())
+    monkeypatch.setattr(cli, "run_eval", _fake_run_eval)
+
+    assert cli.main([str(tmp_path / "s.yaml")]) == 0
+    assert "grades its own" in capsys.readouterr().err

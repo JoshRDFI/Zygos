@@ -88,7 +88,11 @@ conservative by default and every decision is inspectable.
 1. **One model can't cover the workload.** Text chat, document/image understanding, and
    image generation need different models; the runtime supports only the first.
 2. **The selection seam is dead.** `ModelService.select_model` computes a choice that
-   generation ignores; there is no load-bearing per-turn model selection.
+   generation ignores; there is no load-bearing per-turn model selection. The eval
+   harness hit this too: its `--judge-model` was silently ignored because the router
+   fills `request.model` from its own route, so models graded their own answers. Since
+   2026-10-15 the harness builds a single-route router for the judge, as a stopgap until
+   the `route=` parameter below exists.
 3. **Two capabilities are named but unreachable.** `VISION` and `IMAGE_GENERATION` exist
    in the enum with no contract, so nothing can satisfy them.
 4. **Local VRAM is a hard limit.** Specialists generally cannot coexist locally with the
