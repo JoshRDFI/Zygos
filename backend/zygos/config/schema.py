@@ -73,7 +73,10 @@ class CircuitBreakerConfig(BaseModel):
 class RateLimitConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    max_requests_per_minute: int = Field(default=60, ge=1)
+    # None = no client-side throttle (the default). Set a cap to stay under a cloud
+    # provider's quota; local inference has none, and a reasoning turn's burst of
+    # calls would otherwise exhaust it and leave no eligible route.
+    max_requests_per_minute: int | None = Field(default=None, ge=1)
 
 
 class ProvidersConfig(BaseModel):

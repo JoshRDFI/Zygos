@@ -144,7 +144,7 @@ to the runtime as a whole.
 All runtime state that v1 kept as hidden private fields becomes named, snapshotable
 objects in v2:
 
-- `RouterState` — per-route circuit-breaker status, rate-limit windows.
+- `RouterState` — per-route circuit-breaker status, rate-limit windows (the throttle is opt-in, [ADR-0008](./docs/adr/ADR-0008-opt-in-client-rate-limiting.md)).
 - `SessionState` — message history (typed, immutable Pydantic models), pending events.
 - `ReasoningState` — RDT iteration history, confidence trajectory.
 

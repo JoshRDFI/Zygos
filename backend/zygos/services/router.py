@@ -117,8 +117,8 @@ class _CircuitBreaker:
 
 
 class _RateLimiter:
-    def __init__(self, max_per_minute: int, now: Callable[[], float]) -> None:
-        self._max = max_per_minute
+    def __init__(self, max_per_minute: int | None, now: Callable[[], float]) -> None:
+        self._max = max_per_minute  # None = unthrottled (still counted for the snapshot)
         self._now = now
         self._timestamps: list[float] = []
 
@@ -131,7 +131,7 @@ class _RateLimiter:
         return len(self._timestamps)
 
     def allows(self) -> bool:
-        return self.used() < self._max
+        return self._max is None or self.used() < self._max
 
     def record(self) -> None:
         self._timestamps.append(self._now())
@@ -148,7 +148,7 @@ class ProviderRouter:
         backoff_multiplier: float = 2.0,
         failure_threshold: int = 5,
         cooldown_s: float = 30.0,
-        max_requests_per_minute: int = 60,
+        max_requests_per_minute: int | None = None,
         now: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:

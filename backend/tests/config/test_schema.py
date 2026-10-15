@@ -26,7 +26,9 @@ def test_routing_sections_have_safe_defaults():
     config = ZygosConfig()
     assert config.providers.retry.max_attempts == 3
     assert config.providers.circuit_breaker.failure_threshold == 5
-    assert config.providers.rate_limit.max_requests_per_minute == 60
+    # Client-side throttling is opt-in (a cloud quota); local inference has none, and a
+    # reasoning turn's burst of calls must not starve the router (2026-10-15).
+    assert config.providers.rate_limit.max_requests_per_minute is None
 
 
 def test_credential_accepts_base_url():
@@ -86,6 +88,10 @@ def test_circuit_breaker_config_cooldown_s_negative_rejected():
 def test_rate_limit_config_max_requests_per_minute_below_minimum_rejected():
     with pytest.raises(ValidationError):
         RateLimitConfig(max_requests_per_minute=0)
+
+
+def test_rate_limit_config_accepts_explicit_cap():
+    assert RateLimitConfig(max_requests_per_minute=50).max_requests_per_minute == 50
 
 
 def test_reasoning_defaults_off_balanced():

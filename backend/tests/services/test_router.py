@@ -468,3 +468,13 @@ async def test_route_claimed_emitted_inside_probe_guard():
     assert provider.calls == 3
     probe_claims = [e for e in events if e.type == "route.claimed" and e.payload.probe]
     assert len(probe_claims) >= 1  # the probe attempt emitted route.claimed
+
+
+async def test_no_rate_limit_by_default():
+    """None (the default) = no client-side throttle: a burst well past 60/min is admitted."""
+    provider = _CountingProvider()
+    router = _router([RouteChoice("cnt", "m")], {"cnt": provider})
+    ctx = _ctx()
+    for _ in range(100):
+        await router.generate(ctx, _request())
+    assert provider.calls == 100
