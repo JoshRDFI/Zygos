@@ -51,6 +51,9 @@ class OllamaProvider:
             "stream": stream,
             "options": options,
         }
+        think = request.think if request.think is not None else self._settings.think
+        if think is not None:
+            body["think"] = think
         if request.tools and request.tool_choice != "none":
             body["tools"] = [{"type": "function",
                               "function": {"name": t.name, "description": t.description,

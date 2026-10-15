@@ -230,3 +230,18 @@ def test_reasoning_factory_builds_fresh_instances():
     finally:
         import asyncio
         asyncio.run(runtime.aclose())
+
+
+from zygos.config.loader import load_config  # noqa: E402
+from zygos.runtime.bootstrap import _provider_settings  # noqa: E402
+
+
+def test_native_thinking_defaults_off():
+    """2026-10-15 decision: native model thinking is OFF unless configured."""
+    assert _provider_settings(load_config(None), "ollama").think is False
+
+
+def test_native_thinking_configurable(tmp_path: Path):
+    file = tmp_path / "config.yaml"
+    file.write_text("providers:\n  think: true\n", encoding="utf-8")
+    assert _provider_settings(load_config(file), "ollama").think is True

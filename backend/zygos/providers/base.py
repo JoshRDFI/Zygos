@@ -41,6 +41,9 @@ class ProviderSettings(BaseModel):
     # the backstop against a runaway/looping generation — generous enough for long
     # thinking, finite enough to kill a wedged call.
     timeout_s: float = 300.0
+    # Native model thinking default for providers that support it (Ollama `think`).
+    # None = leave it to the model; a request's own `think` overrides this.
+    think: bool | None = None
 
 
 # Providers also declare a class attribute `supports_native_tools: bool` (RFC-0008

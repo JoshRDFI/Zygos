@@ -48,6 +48,8 @@ class GenerationRequest(BaseModel):
     temperature: float = 0.7
     tools: tuple[ToolSchema, ...] = ()
     tool_choice: Literal["auto", "none", "required"] = "auto"
+    # None = use the provider's configured default (ProviderSettings.think).
+    think: bool | None = None
 
 
 class Usage(BaseModel):

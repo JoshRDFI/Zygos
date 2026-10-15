@@ -166,3 +166,39 @@ async def test_embed_parses_ollama_batch():
     assert result.vectors == ((1.0, 0.0), (0.0, 1.0))
     assert result.dim == 2
     assert Capability.EMBEDDING in OllamaProvider.capabilities
+
+
+async def _captured_body(provider: OllamaProvider, request: GenerationRequest, *, stream: bool) -> dict:
+    seen: dict = {}
+
+    def handler(r: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(r.content))
+        if stream:
+            return httpx.Response(200, text=json.dumps({"message": {"content": ""}, "done": True}) + "\n")
+        return httpx.Response(200, json={"message": {"content": "ok"}, "done": True})
+
+    provider._client = make_client(handler)
+    if stream:
+        [c async for c in provider.stream(request)]
+    else:
+        await provider.generate(request)
+    return seen
+
+
+async def test_think_omitted_when_unset_everywhere():
+    body = await _captured_body(_make(make_client(lambda r: None)), contract_request(), stream=False)
+    assert "think" not in body  # model's own default
+
+
+async def test_settings_think_default_is_sent_on_generate_and_stream():
+    settings = ProviderSettings(base_url="http://localhost:11434", think=False)
+    provider = OllamaProvider(settings=settings, client=make_client(lambda r: None))
+    assert (await _captured_body(provider, contract_request(), stream=False))["think"] is False
+    assert (await _captured_body(provider, contract_request(), stream=True))["think"] is False
+
+
+async def test_request_think_overrides_settings_default():
+    settings = ProviderSettings(base_url="http://localhost:11434", think=False)
+    provider = OllamaProvider(settings=settings, client=make_client(lambda r: None))
+    req = GenerationRequest(model="m", messages=(Message(role="user", content="hi"),), think=True)
+    assert (await _captured_body(provider, req, stream=False))["think"] is True

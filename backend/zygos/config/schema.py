@@ -88,6 +88,9 @@ class ProvidersConfig(BaseModel):
     circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     task_routes: dict[str, ProviderRoute] = Field(default_factory=dict)
+    # Native model thinking (e.g. qwen3/gemma4 via Ollama). Off by default: it costs
+    # seconds of time-to-first-token, which voice turns can't afford.
+    think: bool | None = False
 
     @model_validator(mode="after")
     def reject_duplicate_routes(self) -> "ProvidersConfig":

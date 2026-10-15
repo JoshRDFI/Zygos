@@ -88,7 +88,8 @@ def _provider_settings(config: ZygosConfig, name: str) -> ProviderSettings:
     base_url = (credential.base_url if credential else None) or DEFAULT_BASE_URLS.get(name)
     if base_url is None:
         base_url = "http://localhost"
-    return ProviderSettings(base_url=base_url, api_key=credential.api_key if credential else None)
+    return ProviderSettings(base_url=base_url, api_key=credential.api_key if credential else None,
+                            think=config.providers.think)
 
 
 def _provider_healthy(router: ProviderRouter, provider_name: str) -> bool:
