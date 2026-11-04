@@ -10,6 +10,8 @@
 # Any string value written exactly as "${VAR}" is read from the environment.
 # Zygos v2 does not load .env files: export variables in your shell instead.
 
+# Backend addresses and llama.cpp launch settings are not set here: use
+# `zygos personalize backends` (stored in .zygos/preferences.db, never in this file).
 providers:
   primary:
     provider: ollama          # ollama | vllm | openai | anthropic

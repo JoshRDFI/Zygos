@@ -26,7 +26,7 @@ So a `[v2 · built]` subsystem is real code with tests, now driven by a live tur
 WebSocket (start it with `zygos serve`). The **React web UI and voice I/O are now built**
 too — early, with a few surfaces (files, memory) still placeholders. The Models page is read-only (hardware, profiles, fit,
 from `GET /models` and `GET /hardware`; profiles are stored in `.zygos/models/profiles/`);
-choosing and downloading models come next. What
+choosing and downloading models come next. Ollama, llama.cpp (GGUF folder) and vLLM models are listed; llama.cpp fit is computed from each model's launch settings (`GET /backends`, `PUT /backends`, `zygos personalize backends`). Zygos does not start `llama-server` yet; that is the next phase. What
 remains before v2 is a finished product is the fuller UI, learning and workflows (M6/M7),
 the scheduler, and a single-command installer.
 

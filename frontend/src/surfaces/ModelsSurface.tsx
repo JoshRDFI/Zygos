@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { getModels } from "../client/rest";
-import type { HardwareSnapshot, ModelEntry, ModelsView, Sourced } from "../client/types";
+import { getBackends, getModels } from "../client/rest";
+import type { BackendsView, Check, HardwareSnapshot, ModelEntry, ModelsView, Sourced } from "../client/types";
 
 const GB = 1024 ** 3;
 const gb = (n: number) => `${(n / GB).toFixed(1)} GB`;
@@ -47,6 +47,61 @@ function Profile({ fields }: { fields: ModelEntry["fields"] }) {
   );
 }
 
+function CheckLine({ label, check }: { label: string; check: Check }) {
+  return (
+    <li className="flex flex-wrap items-center gap-2">
+      <span className="text-text">{label}</span>
+      <span className="text-text-muted">{check.detail}</span>
+      {!check.ok && <span className="border border-border rounded px-1 text-xs text-accent">problem</span>}
+    </li>
+  );
+}
+
+function Backends({ b, error }: { b: BackendsView | null; error: string | null }) {
+  return (
+    <section aria-label="Backends" className="space-y-1 font-mono text-sm border border-border rounded p-3">
+      <h2 className="text-text-muted">Backends</h2>
+      {error ? (
+        <div className="text-text-muted">Couldn't load backend status: {error}</div>
+      ) : !b ? (
+        <div className="text-text-muted">Loading…</div>
+      ) : (
+        <>
+          <ul className="space-y-1">
+            <CheckLine label="Ollama" check={b.ollama} />
+            <CheckLine label="llama.cpp server" check={b.llamacpp.server} />
+            <CheckLine label="llama.cpp models" check={b.llamacpp.models} />
+            <CheckLine label="vLLM" check={b.vllm.check} />
+          </ul>
+          {b.restart_required && <div role="status" className="text-accent">Restart Zygos to apply the new addresses.</div>}
+        </>
+      )}
+      <div className="text-text-muted">Change backend settings with zygos personalize backends.</div>
+    </section>
+  );
+}
+
+function LaunchInfo({ m }: { m: ModelEntry }) {
+  const ambiguous = m.mmproj_ambiguous ?? [];
+  return (
+    <>
+      {m.launch_text != null && (
+        <div className="flex flex-wrap items-center gap-2 text-text-muted">
+          <span className="font-mono text-text">{m.launch_text}</span>
+          <span>({m.launch_source === "model" ? "own settings" : "default settings"})</span>
+          {m.mmproj && <span>+ vision projector</span>}
+        </div>
+      )}
+      {m.launch_error && <div className="text-text-muted">Launch settings problem: {m.launch_error}</div>}
+      {ambiguous.length > 0 && (
+        <div className="text-text-muted">
+          Projector unclear: {ambiguous.join(", ")} — pairing comes with the next phase
+        </div>
+      )}
+    </>
+  );
+}
+
 function Row({ m }: { m: ModelEntry }) {
   const caps = Object.entries(m.capabilities).filter(([, v]) => v).map(([k]) => k);
   const chip = "border border-border rounded px-1 text-xs text-text-muted";
@@ -68,6 +123,8 @@ function Row({ m }: { m: ModelEntry }) {
         {m.fit && <span className="border border-border rounded px-1 text-text">{m.fit.level}</span>}
         {m.fit_text && <span>{m.fit_text}</span>}
       </div>
+      {m.served_by && <div className="text-text-muted">served by {m.served_by}</div>}
+      <LaunchInfo m={m} />
       {m.profile_error && <div className="text-text-muted">{m.profile_error}</div>}
       <Profile fields={m.fields} />
     </li>
@@ -88,17 +145,29 @@ function Group({ title, models }: { title: string; models: ModelEntry[] }) {
 export default function ModelsSurface() {
   const [v, setV] = useState<ModelsView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [b, setB] = useState<BackendsView | null>(null);
+  const [bError, setBError] = useState<string | null>(null);
+  useEffect(() => {
+    getBackends().then(setB).catch((e: unknown) => setBError(e instanceof Error ? e.message : String(e)));
+  }, []);
   useEffect(() => {
     getModels().then(setV).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
 
-  const local = (v?.models ?? []).filter((m) => m.location === "local");
+  const local = (v?.models ?? []).filter((m) => m.location === "local" && m.provider !== "vllm" && m.provider !== "llamacpp");
+  const llama = (v?.models ?? []).filter((m) => m.location === "local" && m.provider === "llamacpp");
+  const vllm = (v?.models ?? []).filter((m) => m.location === "local" && m.provider === "vllm");
   const cloud = (v?.models ?? []).filter((m) => m.location === "cloud");
-  const families = new Map<string, ModelEntry[]>();
-  for (const m of local) {
-    const k = m.family ?? "other";
-    families.set(k, [...(families.get(k) ?? []), m]);
-  }
+  const byFamily = (ms: ModelEntry[]) => {
+    const g = new Map<string, ModelEntry[]>();
+    for (const m of ms) {
+      const k = m.family ?? "other";
+      g.set(k, [...(g.get(k) ?? []), m]);
+    }
+    return g;
+  };
+  const ollamaFamilies = byFamily(local);
+  const llamaFamilies = byFamily(llama);
 
   return (
     <div className="p-6 space-y-6">
@@ -110,12 +179,15 @@ export default function ModelsSurface() {
       ) : (
         <>
           <Hardware hw={v.hardware} />
+          <Backends b={b} error={bError} />
           {v.ollama.configured && !v.ollama.reachable && (
             <div role="alert" className="border border-border rounded p-3 text-sm">
               Ollama is unreachable{v.ollama.error ? `: ${v.ollama.error}` : ""}
             </div>
           )}
-          {[...families].map(([family, ms]) => <Group key={family} title={family} models={ms} />)}
+          {[...ollamaFamilies].map(([family, ms]) => <Group key={`ollama/${family}`} title={family} models={ms} />)}
+          {[...llamaFamilies].map(([family, ms]) => <Group key={`llamacpp/${family}`} title={family} models={ms} />)}
+          {vllm.length > 0 && <Group title="vLLM" models={vllm} />}
           {cloud.length > 0 && <Group title="cloud" models={cloud} />}
         </>
       )}

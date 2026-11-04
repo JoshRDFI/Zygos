@@ -40,6 +40,11 @@ export interface FitEstimate {
   overhead_bytes: number;
   total_bytes: number | null;
   measured: boolean;
+  gpu_bytes?: number | null;
+  cpu_bytes?: number | null;
+  split_by?: "settings" | null;
+  assumptions?: string[];
+  reason?: string | null;
 }
 
 export interface Fit {
@@ -48,6 +53,9 @@ export interface Fit {
   vram_available_bytes: number | null;
   ram_available_bytes: number | null;
   reason: string;
+  gpu_bytes?: number | null;
+  cpu_bytes?: number | null;
+  split_by?: "settings" | null;
 }
 
 export type ProfileSource = "user" | "eval" | "measured" | "modelfile" | "ollama" | "name";
@@ -77,6 +85,30 @@ export interface ModelEntry {
   fallback: boolean;
   profile_error: string | null;
   fields: Record<string, Sourced>;
+  launch_text?: string | null;
+  launch_source?: "model" | "default" | null;
+  launch_error?: string | null;
+  mmproj?: string | null;
+  mmproj_ambiguous?: string[];
+  served_by?: string | null;
+}
+
+export interface Check {
+  ok: boolean;
+  detail: string;
+}
+
+export interface BackendsView {
+  settings: {
+    ollama: { base_url: string | null };
+    llamacpp: { server_path: string | null; models_dir: string | null; default_args: string; model_args: Record<string, string> };
+    vllm: { name: string; base_url: string }[];
+  };
+  ollama: Check;
+  llamacpp: { server: Check; models: Check };
+  vllm: { check: Check; served: string[] };
+  address_sources: Record<string, string>;
+  restart_required: boolean;
 }
 
 export interface ModelsView {

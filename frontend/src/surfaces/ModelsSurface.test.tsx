@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import ModelsSurface from "./ModelsSurface";
 import * as rest from "../client/rest";
-import type { ModelEntry, ModelsView } from "../client/types";
+import type { BackendsView, ModelEntry, ModelsView } from "../client/types";
 
 const GB = 1024 ** 3;
 const est = { model_bytes: 5 * GB, context_bytes: GB, context_tokens: 4096, context_assumed: true, overhead_bytes: 0, total_bytes: 6 * GB, measured: false };
@@ -47,7 +47,26 @@ function view(over: Partial<ModelsView> = {}): ModelsView {
   };
 }
 
-beforeEach(() => { vi.spyOn(rest, "getModels").mockResolvedValue(view()); });
+const backends: BackendsView = {
+  settings: {
+    ollama: { base_url: null },
+    llamacpp: { server_path: "/tmp/x/llama-server", models_dir: "/tmp/x/gguf", default_args: "-c 8192", model_args: {} },
+    vllm: [{ name: "vllm", base_url: "http://127.0.0.1:8000/v1" }],
+  },
+  ollama: { ok: true, detail: "Ollama 0.9.1 at http://localhost:11434" },
+  llamacpp: {
+    server: { ok: true, detail: "version: 6500 (abc1234)" },
+    models: { ok: true, detail: "10 GGUF files in /tmp/x/gguf" },
+  },
+  vllm: { check: { ok: true, detail: "1 models served at http://127.0.0.1:8000/v1" }, served: ["Qwen/Qwen3-8B"] },
+  address_sources: { ollama: "default", vllm: "backends" },
+  restart_required: false,
+};
+
+beforeEach(() => {
+  vi.spyOn(rest, "getModels").mockResolvedValue(view());
+  vi.spyOn(rest, "getBackends").mockResolvedValue(backends);
+});
 afterEach(() => vi.restoreAllMocks());
 
 test("renders hardware with unknown for null fields and summed VRAM", async () => {
@@ -132,4 +151,117 @@ test("notes that choosing and downloading come next", async () => {
   render(<ModelsSurface />);
   await waitFor(() => expect(screen.getByText("Choosing a default model and downloading models come next.")).toBeInTheDocument());
   expect(screen.queryByText(/coming later/i)).not.toBeInTheDocument();
+});
+
+const llamaEst = { model_bytes: 943722496, context_bytes: 33554432, context_tokens: 4096, context_assumed: false, overhead_bytes: 536870912, total_bytes: 1514147840, measured: false };
+const llamaBase = { provider: "llamacpp", launch_source: "default" as const, launch_error: null, mmproj: null, mmproj_ambiguous: [], served_by: null };
+const splitText = "needs \u22480.8 GB on GPU + 0.6 GB in RAM (split by your settings): 0.9 GB model + 0.0 GB context (4096 tokens) + 0.5 GB overhead";
+
+function llamaView(models: ModelEntry[], over: Partial<ModelsView> = {}): ModelsView {
+  return { ...view({ models }), ...over };
+}
+
+test("Backends block shows each check's detail, marks problems, and says how to change settings", async () => {
+  vi.spyOn(rest, "getBackends").mockResolvedValue({
+    ...backends,
+    llamacpp: { server: { ok: false, detail: "llama-server not found at /nope" }, models: backends.llamacpp.models },
+  });
+  render(<ModelsSurface />);
+  const block = await screen.findByRole("region", { name: "Backends" });
+  expect(within(block).getByText(/Ollama 0\.9\.1 at http:\/\/localhost:11434/)).toBeInTheDocument();
+  expect(within(block).getByText(/10 GGUF files in/)).toBeInTheDocument();
+  expect(within(block).getByText(/1 models served at http:\/\/127\.0\.0\.1:8000\/v1/)).toBeInTheDocument();
+  expect(within(block).getByText(/llama-server not found at \/nope/).closest("li")).toHaveTextContent("problem");
+  expect(within(block).queryByText("Restart Zygos to apply the new addresses.")).toBeNull();
+  expect(screen.getByText("Change backend settings with zygos personalize backends.")).toBeInTheDocument();
+});
+
+test("restart_required shows the restart notice and where vLLM is served from", async () => {
+  vi.spyOn(rest, "getBackends").mockResolvedValue({ ...backends, restart_required: true });
+  vi.spyOn(rest, "getModels").mockResolvedValue(llamaView([
+    entry({ provider: "vllm", name: "Qwen/Qwen3-8B", fit_text: "fit not checked: vLLM reserves its GPU share at start", served_by: "http://127.0.0.1:8000/v1" } as Partial<ModelEntry>),
+  ]));
+  render(<ModelsSurface />);
+  expect(await screen.findByText("Restart Zygos to apply the new addresses.")).toBeInTheDocument();
+  expect(screen.getByText(/served by http:\/\/127\.0\.0\.1:8000\/v1/)).toBeInTheDocument();
+  expect(screen.getByText("fit not checked: vLLM reserves its GPU share at start")).toBeInTheDocument();
+});
+
+test("a failed GET /backends does not break the page", async () => {
+  vi.spyOn(rest, "getBackends").mockRejectedValue(new Error("request failed: 500"));
+  render(<ModelsSurface />);
+  expect(await screen.findByText("Couldn't load backend status: request failed: 500")).toBeInTheDocument();
+  expect(screen.getByText(/qwen3:8b/)).toBeInTheDocument();
+});
+
+test("llama.cpp rows show the served split text, own settings, and the vision projector", async () => {
+  vi.spyOn(rest, "getModels").mockResolvedValue(llamaView([
+    entry({
+      ...llamaBase, name: "gemma/gemma-3-4b-it-Q4_K_M", family: "gemma3", quantization: "Q4_K_M",
+      launch_text: "-c 4096 -ngl 1", launch_source: "model", mmproj: "gemma/mmproj-gemma-3-4b-f16.gguf",
+      fit: { level: "partial", needs: { ...llamaEst, gpu_bytes: 868225024, cpu_bytes: 645922816, split_by: "settings", assumptions: [], reason: null }, vram_available_bytes: 16777216000, ram_available_bytes: 32768000000, reason: "", gpu_bytes: 868225024, cpu_bytes: 645922816, split_by: "settings" },
+      fit_text: splitText,
+    } as Partial<ModelEntry>),
+    entry({
+      ...llamaBase, name: "Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M", family: "qwen3", launch_text: "-c 8192", launch_source: "default",
+      fit_text: "needs \u22481.7 GB: 1.2 GB model",
+    } as Partial<ModelEntry>),
+  ]));
+  render(<ModelsSurface />);
+  expect(await screen.findByText(splitText)).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "gemma3" })).toBeInTheDocument();
+  const own = screen.getByText("-c 4096 -ngl 1");
+  expect(own.className).toMatch(/font-mono/);
+  expect(own.closest("li")).toHaveTextContent("(own settings)");
+  expect(own.closest("li")).toHaveTextContent("+ vision projector");
+  const def = screen.getByText("-c 8192");
+  expect(def.closest("li")).toHaveTextContent("(default settings)");
+  expect(def.closest("li")).not.toHaveTextContent("vision projector");
+});
+
+test("a launch settings problem is shown as the backend words it", async () => {
+  vi.spyOn(rest, "getModels").mockResolvedValue(llamaView([
+    entry({
+      ...llamaBase, name: "Llama-3.2-3B-Q8_0", family: "llama", launch_text: "-c 4096 --port=9000", launch_source: "model",
+      launch_error: "--port is set by Zygos \u2014 remove it", fit_text: "launch settings: --port is set by Zygos \u2014 remove it",
+    } as Partial<ModelEntry>),
+  ]));
+  render(<ModelsSurface />);
+  expect(await screen.findByText("Launch settings problem: --port is set by Zygos \u2014 remove it")).toBeInTheDocument();
+});
+
+test("an unclear projector pairing lists the files and does not guess", async () => {
+  vi.spyOn(rest, "getModels").mockResolvedValue(llamaView([
+    entry({
+      ...llamaBase, name: "mixed/A-Q4_0", family: "qwen3", launch_text: "-c 8192",
+      mmproj_ambiguous: ["mixed/mmproj-a.gguf", "mixed/mmproj-b.gguf"], fit_text: "needs \u22480.6 GB",
+    } as Partial<ModelEntry>),
+  ]));
+  render(<ModelsSurface />);
+  expect(await screen.findByText(
+    "Projector unclear: mixed/mmproj-a.gguf, mixed/mmproj-b.gguf \u2014 pairing comes with the next phase",
+  )).toBeInTheDocument();
+  expect(screen.queryByText("+ vision projector")).toBeNull();
+});
+
+test("an unreachable vLLM entry shows the backend's reason", async () => {
+  const why = "vLLM unreachable: can't read models from http://127.0.0.1:8000/v1: ConnectError: [Errno 111] Connection refused";
+  vi.spyOn(rest, "getModels").mockResolvedValue(llamaView([
+    entry({ provider: "vllm", name: "http://127.0.0.1:8000/v1", fit_text: why, served_by: "http://127.0.0.1:8000/v1" } as Partial<ModelEntry>),
+  ]));
+  render(<ModelsSurface />);
+  expect(await screen.findByText(why)).toBeInTheDocument();
+});
+
+test("groups come in order Ollama, llama.cpp, vLLM, cloud", async () => {
+  vi.spyOn(rest, "getModels").mockResolvedValue(llamaView([
+    entry({ provider: "anthropic", name: "claude-sonnet-5", location: "cloud", fit_text: "fit doesn't apply (cloud)" }),
+    entry({ provider: "vllm", name: "Qwen/Qwen3-8B", fit_text: "x", served_by: "http://v/v1" } as Partial<ModelEntry>),
+    entry({ ...llamaBase, name: "g/a", family: "gemma3", launch_text: "-c 8192", fit_text: "y" } as Partial<ModelEntry>),
+    entry({ name: "qwen3:8b", family: "qwen3", fit_text: "z" }),
+  ]));
+  render(<ModelsSurface />);
+  await screen.findByText(/qwen3:8b/);
+  const heads = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
+  expect(heads).toEqual(["qwen3", "gemma3", "vLLM", "cloud"]);
 });
