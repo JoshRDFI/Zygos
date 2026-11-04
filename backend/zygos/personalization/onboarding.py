@@ -23,7 +23,8 @@ from zygos.services.model import ModelService
 _INTRO = (
     "Let's personalize Zygos. Describe yourself and the assistant you want in a sentence "
     "or two (your name, how to address you, the assistant's name, its tone). I'll draft "
-    "settings from it; you review and edit each field before anything is saved."
+    "settings from it; you review and edit each field (Enter keeps, - clears) before anything "
+    "is saved."
 )
 
 
@@ -41,6 +42,8 @@ async def run_onboarding(
 ) -> bool:
     try:
         say(_INTRO)
+        if not store.get().is_empty:
+            say("This replaces your current settings.")
         description = ask("Describe yourself and the assistant you want (Enter to skip): ").strip()
         if not description:
             say("Skipped. Run `zygos personalize` any time.")

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import signal
 import sys
 from pathlib import Path
 
@@ -47,12 +48,30 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _interruptible_input(prompt: str) -> str:
+    """``input()`` that a single Ctrl-C stops, even under ``asyncio.run``.
+
+    asyncio's runner swaps in a SIGINT handler that only cancels the main task;
+    a blocking ``input()`` retries on EINTR, so the prompt would keep waiting and
+    the cancel would land only after onboarding finished (possibly after a save).
+    Restoring the default handler for the duration of the read makes Ctrl-C raise
+    KeyboardInterrupt right here, which ``main()`` maps to exit 130.
+    """
+    previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        return input(prompt)
+    finally:
+        if previous is not None:
+            signal.signal(signal.SIGINT, previous)
+
+
 async def _personalize(runtime, args: argparse.Namespace) -> int:
     store = runtime.preferences
     sub = args.personalize_command
     if sub is None:
         await run_onboarding(
-            runtime.new_context(), runtime.model_service, store, ask=input, say=print
+            runtime.new_context(), runtime.model_service, store,
+            ask=_interruptible_input, say=print,
         )
         return 0
     if sub == "show":

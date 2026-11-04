@@ -142,3 +142,73 @@ def test_interrupt_escaping_asyncio_run_exits_130(cfg, monkeypatch, capsys):
     monkeypatch.setattr("zygos.cli.__main__.asyncio.run", fake_run)
     assert main([*base, "personalize"]) == 130
     assert "Traceback" not in capsys.readouterr().err
+
+
+def _real_sigint_input(monkeypatch, kill_at, answers):
+    """Fake input whose ``kill_at``-th call sends a real SIGINT to this process.
+
+    If the signal does not stop the prompt, the call returns and the remaining
+    calls keep answering with values that would save.
+    """
+    import os
+    import signal
+
+    state = {"calls": 0, "returned_after_kill": False}
+    queue = list(answers)
+
+    def fake_input(prompt=""):
+        state["calls"] += 1
+        if state["calls"] == kill_at:
+            os.kill(os.getpid(), signal.SIGINT)
+            state["returned_after_kill"] = True
+        return queue.pop(0) if queue else "y"
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    return state
+
+
+@pytest.fixture
+def drafting_provider(monkeypatch):
+    import json
+
+    from zygos.providers.fake import FakeProvider
+
+    original = FakeProvider.__init__
+
+    def init(self, *a, **k):
+        k["text"] = json.dumps({"user_name": "Josh", "assistant_name": "Rommie"})
+        original(self, *a, **k)
+
+    monkeypatch.setattr(FakeProvider, "__init__", init)
+
+
+def test_real_sigint_at_description_prompt_stops_immediately(
+        cfg, drafting_provider, monkeypatch, capsys):
+    base, store = cfg
+    state = _real_sigint_input(monkeypatch, 1, ["I am Josh"] + [""] * 6 + ["y"])
+    assert main([*base, "personalize"]) == 130
+    assert not state["returned_after_kill"], "prompt kept waiting after Ctrl-C"
+    assert state["calls"] == 1
+    assert "Traceback" not in capsys.readouterr().err
+    assert store.get().is_empty
+
+
+def test_real_sigint_mid_review_exits_130_without_saving(
+        cfg, drafting_provider, monkeypatch, capsys):
+    base, store = cfg
+    # call 1 = description, call 2 = "User name [Josh]:" -> Ctrl-C there.
+    state = _real_sigint_input(monkeypatch, 2, ["I am Josh"] + [""] * 6 + ["y"])
+    assert main([*base, "personalize"]) == 130
+    assert store.get().is_empty, "saved before the Ctrl-C landed"
+    assert not state["returned_after_kill"]
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_sigint_handler_restored_after_onboarding(cfg, monkeypatch):
+    import signal
+
+    base, _ = cfg
+    before = signal.getsignal(signal.SIGINT)
+    monkeypatch.setattr("builtins.input", lambda *a: "")
+    assert main([*base, "personalize"]) == 0
+    assert signal.getsignal(signal.SIGINT) is before

@@ -133,3 +133,26 @@ async def test_unreachable_model_reports_and_does_not_save():
     )
     assert ok is False and store.writes == 0
     assert any("zygos personalize set" in s for s in h.said)
+
+
+@pytest.mark.asyncio
+async def test_intro_explains_review_keys():
+    _, h, _ = await _run([""])
+    assert "(Enter keeps, - clears)" in h.said[0]
+
+
+@pytest.mark.asyncio
+async def test_rerun_warns_before_replacing_existing_settings():
+    h, store = _Harness([""]), _Store()
+    store.value = Personalization(user_name="Josh")
+    await run_onboarding(
+        root_context(InProcessEventBus()), _model(json.dumps(DRAFT)), store, ask=h.ask, say=h.say,
+    )
+    assert "This replaces your current settings." in h.said
+    assert h.prompts and h.prompts[0].startswith("Describe yourself")
+
+
+@pytest.mark.asyncio
+async def test_first_run_does_not_warn_about_replacing():
+    _, h, _ = await _run([""])
+    assert "This replaces your current settings." not in h.said
