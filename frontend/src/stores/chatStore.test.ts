@@ -70,3 +70,28 @@ test("voice_command frames do not change messages", () => {
   s.onFrame({ channel: "chat", type: "voice_command", payload: { command: "rethink", phrase: "think harder" } });
   expect(useChatStore.getState().messages).toHaveLength(1);
 });
+
+test("an error after turn.start releases the stuck streaming message (I3)", () => {
+  const s = useChatStore.getState();
+  s.addUser("q");
+  s.onFrame({ channel: "chat", type: "turn.start", payload: { turn_id: "t1", think: true } });
+  s.onFrame({ channel: "chat", type: "error", payload: { message: "generation failed" } });
+  const msgs = useChatStore.getState().messages;
+  expect(msgs.find((m) => m.turnId === "t1")!.streaming).toBe(false);
+  expect(msgs.some((m) => m.streaming)).toBe(false);
+  expect(msgs.at(-1)!.text).toContain("generation failed");
+});
+
+test("a voice rethink copies the question from the rethought turn (M2)", () => {
+  useChatStore.setState({
+    messages: [
+      { role: "user", text: "why is the sky blue?", streaming: false },
+      { role: "assistant", text: "scattering", streaming: false, turnId: "t1", question: "why is the sky blue?" },
+      { role: "user", text: "Think harder.", streaming: false },
+    ],
+  });
+  useChatStore.getState().onFrame({
+    channel: "chat", type: "turn.start", payload: { turn_id: "t2", think: true, rethink_of: "t1" },
+  });
+  expect(useChatStore.getState().messages.at(-1)!.question).toBe("why is the sky blue?");
+});

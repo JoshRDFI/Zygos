@@ -46,6 +46,12 @@ export const useChatStore = create<ChatState>((set) => ({
     set((s) => {
       if (f.type === "turn.start") {
         let question = s.pendingQuestion ?? undefined;
+        const rethinkOf = (f.payload.rethink_of as string | null | undefined) ?? null;
+        if (question === undefined && rethinkOf !== null) {
+          // A voice "think harder" re-asks an earlier turn: its question, not the
+          // spoken phrase that is now the last user bubble.
+          question = s.messages.find((m) => m.role === "assistant" && m.turnId === rethinkOf)?.question;
+        }
         if (question === undefined) {
           for (let i = s.messages.length - 1; i >= 0; i--) {
             if (s.messages[i].role === "user") { question = s.messages[i].text; break; }
@@ -55,7 +61,7 @@ export const useChatStore = create<ChatState>((set) => ({
           role: "assistant", text: "", streaming: true,
           turnId: f.payload.turn_id as string | undefined,
           think: (f.payload.think as boolean | null | undefined) ?? null,
-          rethinkOf: (f.payload.rethink_of as string | null | undefined) ?? null,
+          rethinkOf,
           question,
         };
         return { messages: [...s.messages, msg], pendingQuestion: null };
@@ -76,7 +82,11 @@ export const useChatStore = create<ChatState>((set) => ({
       }
       if (f.type === "error") {
         const text = `⚠ ${String(f.payload.message ?? "error")}`;
-        return { messages: [...s.messages, { role: "assistant", text, streaming: false }] };
+        // A failed turn sends no turn.end: release its stuck streaming message, or
+        // "Thinking…" never clears and every "Think it through" stays disabled.
+        const i = s.messages.map((m) => m.role === "assistant" && m.streaming).lastIndexOf(true);
+        const released = i < 0 ? s.messages : s.messages.map((m, j) => (j === i ? { ...m, streaming: false } : m));
+        return { messages: [...released, { role: "assistant", text, streaming: false }] };
       }
       if (f.type === "final") {
         const text = String(f.payload.text ?? "");

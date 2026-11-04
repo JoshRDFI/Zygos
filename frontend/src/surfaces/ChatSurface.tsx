@@ -54,8 +54,13 @@ export default function ChatSurface() {
           <div key={i} className={m.role === "user" ? "text-text" : "text-text-muted"}>
             <span className="font-mono text-xs mr-2 uppercase">{m.role}</span>
             <span>{m.text}{m.streaming ? " ▍" : ""}</span>
-            {m.role === "assistant" && m.rethinkOf != null && (
+            {m.role === "assistant" && m.rethinkOf != null && m.think === true && (
               <span className="ml-2 text-xs text-text-muted">with thinking</span>
+            )}
+            {m.role === "assistant" && m.thinkUnsupportedReason && (
+              <span className="ml-2 text-xs text-text-muted">
+                {`thinking unavailable — ${m.thinkUnsupportedReason}`}
+              </span>
             )}
             {m.role === "assistant" && m.streaming && m.think === true && (
               <span className="ml-2 text-xs text-text-muted">Thinking…</span>

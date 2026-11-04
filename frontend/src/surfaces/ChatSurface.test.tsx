@@ -157,3 +157,31 @@ test("thinking text never appears in the chat", () => {
   const { container } = render(<ChatSurface />);
   expect(container.textContent).not.toContain("SECRET-CHAIN");
 });
+
+test("after a failed turn, Think it through on an earlier answer is enabled (I3)", async () => {
+  await startConnected();
+  useThinkStore.setState({ supported: true });
+  useChatStore.setState({ messages: [{ role: "user", text: "why?", streaming: false }, answered()] });
+  const s = useChatStore.getState();
+  s.addUser("next");
+  s.onFrame({ channel: "chat", type: "turn.start", payload: { turn_id: "t2", think: true } });
+  s.onFrame({ channel: "chat", type: "error", payload: { message: "generation failed" } });
+  render(<ChatSurface />);
+  expect(screen.queryByText("Thinking…")).toBeNull();
+  expect(screen.getByRole("button", { name: "Think it through" })).toBeEnabled();
+});
+
+test("a downgraded re-ask is not labelled with thinking and shows why (M3)", () => {
+  useChatStore.setState({
+    messages: [answered({ think: false, rethinkOf: "t0", thinkUnsupportedReason: "qwen3 can't think" })],
+  });
+  render(<ChatSurface />);
+  expect(screen.queryByText("with thinking")).toBeNull();
+  expect(screen.getByText("thinking unavailable — qwen3 can't think")).toBeInTheDocument();
+});
+
+test("no unsupported note without a reason (M3)", () => {
+  useChatStore.setState({ messages: [answered()] });
+  const { container } = render(<ChatSurface />);
+  expect(container.textContent).not.toContain("thinking unavailable");
+});
