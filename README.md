@@ -23,7 +23,8 @@ development on this (`main`) branch. The v2 runtime now **runs as a self-hosted 
 with a live chat-and-tools turn loop over WebSocket** (start it with `zygos serve`), and a
 **React web app** front of it carries live chat, read-only inspection panels, and **voice
 in and out** (local Whisper/Kokoro engines, opt-in). Both are early — a few surfaces
-(files, memory, model picker) are still placeholders — and the graphical UI keeps growing.
+(files, memory) are still placeholders, and the Models page is read-only (hardware, model
+profiles, fit; choosing and downloading models come next) — and the graphical UI keeps growing.
 This README describes where Zygos is headed; the table marks what runs now versus what's
 still being built.
 
@@ -105,8 +106,10 @@ that's a capability you control and can see, not a data leak.
 ## Quick start (v2 web app, local)
 
 This runs the v2 server and web UI from this branch, fully local with Ollama. v2 is
-early: expect rough edges, and the Files and Memory panels and the model picker are still
-placeholders.
+early: expect rough edges, and the Files and Memory panels are still
+placeholders. The Models page is read-only for now: it shows your hardware, each model's
+profile (`GET /models`, `GET /hardware`; profiles live in `.zygos/models/profiles/`) and
+whether it fits, but cannot yet pick or download models.
 
 **Prerequisites:** Python 3.12, [Node.js](https://nodejs.org) 18+, and
 [Ollama](https://ollama.com) running locally with the default model pulled:

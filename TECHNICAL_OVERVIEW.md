@@ -24,7 +24,9 @@ Every capability below carries one of these tags:
 
 So a `[v2 · built]` subsystem is real code with tests, now driven by a live turn loop over
 WebSocket (start it with `zygos serve`). The **React web UI and voice I/O are now built**
-too — early, with a few surfaces (files, memory, model picker) still placeholders. What
+too — early, with a few surfaces (files, memory) still placeholders. The Models page is read-only (hardware, profiles, fit,
+from `GET /models` and `GET /hardware`; profiles are stored in `.zygos/models/profiles/`);
+choosing and downloading models come next. What
 remains before v2 is a finished product is the fuller UI, learning and workflows (M6/M7),
 the scheduler, and a single-command installer.
 

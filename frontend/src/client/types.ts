@@ -14,6 +14,66 @@ export interface Manifest {
   versions: Record<string, string>;
   voice: unknown | null;
   thinking: { supported: boolean; reason: string | null } | null;
+  hardware?: HardwareSnapshot | null;
+}
+
+export interface Gpu { name: string; vram_total_bytes: number; vram_free_bytes: number }
+
+export interface HardwareSnapshot {
+  gpus: Gpu[] | null;
+  ram_total_bytes: number | null;
+  ram_available_bytes: number | null;
+  cpu_model: string | null;
+  cpu_cores: number | null;
+  disk_path: string | null;
+  disk_free_bytes: number | null;
+  scanned_at: string;
+}
+
+export type FitLevel = "gpu" | "partial" | "no" | "unknown";
+
+export interface FitEstimate {
+  model_bytes: number | null;
+  context_bytes: number | null;
+  context_tokens: number;
+  context_assumed: boolean;
+  overhead_bytes: number;
+  total_bytes: number | null;
+  measured: boolean;
+}
+
+export interface Fit {
+  level: FitLevel;
+  needs: FitEstimate;
+  vram_available_bytes: number | null;
+  ram_available_bytes: number | null;
+  reason: string;
+}
+
+export interface ModelEntry {
+  provider: string;
+  name: string;
+  location: "local" | "cloud";
+  family: string | null;
+  parameter_size: string | null;
+  quantization: string | null;
+  specialty: string[];
+  capabilities: Record<string, boolean>;
+  download_size_bytes: number | null;
+  loaded: boolean;
+  vram_bytes: number | null;
+  fit: Fit | null;
+  fit_text: string | null;
+  primary: boolean;
+  fallback: boolean;
+  profile_error: string | null;
+  fields: Record<string, unknown>;
+}
+
+export interface ModelsView {
+  hardware: HardwareSnapshot | null;
+  ollama: { configured: boolean; reachable: boolean; error: string | null };
+  models: ModelEntry[];
 }
 
 export interface RuntimeHealth {

@@ -1,4 +1,4 @@
-import type { Manifest, RuntimeHealth } from "./types";
+import type { Manifest, ModelsView, RuntimeHealth } from "./types";
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) throw new Error(`request failed: ${res.status}`);
@@ -17,4 +17,8 @@ export async function getManifest(): Promise<Manifest> {
 
 export async function getHealth(probe = false): Promise<RuntimeHealth> {
   return json<RuntimeHealth>(await fetch(`/runtime/health${probe ? "?probe=true" : ""}`));
+}
+
+export async function getModels(): Promise<ModelsView> {
+  return json<ModelsView>(await fetch("/models"));
 }
