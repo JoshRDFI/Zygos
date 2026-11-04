@@ -158,7 +158,7 @@ voice:
 
 Models download on first use. In the UI, turn on **Voice**, then **Speaker**, then either
 **Mic** (push to talk) or **Always-on** (hands-free). Use headphones with Always-on so the
-assistant doesn't hear itself. For GPU speech synthesis, see [GPU TTS](#gpu-tts-optional)
+assistant doesn't hear itself. Spoken replies start before the reply has finished being written, and **Inspect** shows the time to the first spoken word (the live speed-up hasn't been measured yet). For GPU speech synthesis, see [GPU TTS](#gpu-tts-optional)
 above.
 
 **Semantic memory (optional).** `memory.enabled: true` gives keyword recall out of the box;

@@ -149,7 +149,7 @@ you talk over a reply — the assistant ducks, then stops, when your speech is c
 RFC-0011 web UI). The engines and the pure audio logic are unit-tested; the real-engine
 browser round-trip is validated by a documented manual smoke test. Voice sidecars default
 to CPU; TTS can opt into CUDA from a separate Zygos-managed GPU venv (`zygos voice
-setup-gpu`), with health reporting the active vs requested device (RFC-0005 §2a).
+setup-gpu`), with health reporting the active vs requested device (RFC-0005 §2a). Streamed replies are spoken sentence by sentence as they are written rather than after the full reply, and a `speech.timing` trace event (shown in Inspect) records time to first word; the real-world speed-up has not been measured yet.
 `[v2 · built]`
 
 ## How it runs

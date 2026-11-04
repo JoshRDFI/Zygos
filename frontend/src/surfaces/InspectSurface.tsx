@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useThinkStore } from "../stores/thinkStore";
+import { formatSpeechTiming, useSpeechStore } from "../stores/speechStore";
 import { getManifest } from "../client/rest";
 import type { Manifest } from "../client/types";
 
@@ -10,6 +11,7 @@ export default function InspectSurface() {
   const eventsByTurn = useThinkStore((st) => st.eventsByTurn);
   const turnOrder = useThinkStore((st) => st.turnOrder);
   const selectedTurnId = useThinkStore((st) => st.selectedTurnId);
+  const timings = useSpeechStore((st) => st.timings);
   const selectedRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -75,6 +77,18 @@ export default function InspectSurface() {
               );
             })}
           </div>
+        )}
+      </section>
+      <section>
+        <h2 className="text-text-muted mb-1">speech</h2>
+        {timings.length === 0 ? (
+          <div className="text-text-muted">No spoken replies yet.</div>
+        ) : (
+          <ul className="space-y-1">
+            {timings.map((t, i) => (
+              <li key={`${t.turnId}-${i}`}>{formatSpeechTiming(t)}</li>
+            ))}
+          </ul>
         )}
       </section>
     </div>

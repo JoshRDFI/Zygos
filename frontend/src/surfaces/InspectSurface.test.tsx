@@ -80,3 +80,16 @@ test("manifest thinking line: supported and unavailable", async () => {
   render(<InspectSurface />);
   expect(await screen.findByText("thinking: unavailable — m can't think")).toBeInTheDocument();
 });
+
+test("speech section: empty state and timing lines", async () => {
+  const { useSpeechStore } = await import("../stores/speechStore");
+  useSpeechStore.getState().reset();
+  render(<InspectSurface />);
+  await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+  expect(screen.getByRole("heading", { name: "speech" })).toBeInTheDocument();
+  expect(screen.getByText("No spoken replies yet.")).toBeInTheDocument();
+  useSpeechStore.setState({ timings: [{ turnId: "t1", firstAudioMs: 1830, wordsAtStart: 14, rateWps: 52, gaps: 0, gapMs: 0, reason: "complete" }] });
+  await waitFor(() =>
+    expect(screen.getByText("first word 1.8 s · started after 14 words at 52 w/s · no gaps")).toBeInTheDocument());
+  useSpeechStore.getState().reset();
+});
