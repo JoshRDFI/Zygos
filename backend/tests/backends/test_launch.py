@@ -33,7 +33,8 @@ def test_parse_unbalanced():
 def test_zygos_flag_list():
     assert ZYGOS_FLAGS == {
         "-m", "--model", "--host", "--port", "-a", "--alias", "--mmproj",
-        "-hf", "--hf-repo", "-hff", "--hf-file", "-mu", "--model-url",
+        "-hf", "--hf-repo", "-hfr", "-hff", "--hf-file", "-mu", "--model-url",
+        "-mm", "--mmproj-url",
     }
 
 
@@ -118,3 +119,16 @@ def test_read_missing_value_none():
 def test_frozen():
     with pytest.raises(Exception):
         read_launch([]).ctx_size = 1
+
+
+@pytest.mark.parametrize("flag", ["-hfr", "-mm", "--mmproj-url"])
+def test_more_model_selecting_flags_are_zygos_set(flag):
+    with pytest.raises(LaunchError, match=f"^{flag} is set by Zygos"):
+        parse_launch(f"{flag} x")
+    with pytest.raises(LaunchError, match=f"^{flag} is set by Zygos"):
+        parse_launch(f"{flag}=x")
+
+
+@pytest.mark.parametrize("text", ["-ngl auto", "--n-gpu-layers auto", "--n-gpu-layers=auto"])
+def test_ngl_auto_is_read_as_auto(text):
+    assert read_launch(parse_launch(text)).n_gpu_layers == "auto"

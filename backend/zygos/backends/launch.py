@@ -15,7 +15,8 @@ from pydantic import BaseModel, ConfigDict
 ZYGOS_FLAGS: frozenset[str] = frozenset(
     {
         "-m", "--model", "--host", "--port", "-a", "--alias", "--mmproj",
-        "-hf", "--hf-repo", "-hff", "--hf-file", "-mu", "--model-url",
+        "-hf", "--hf-repo", "-hfr", "-hff", "--hf-file", "-mu", "--model-url",
+        "-mm", "--mmproj-url",
     }
 )
 
@@ -40,7 +41,7 @@ class LaunchSettings(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     ctx_size: int | None = None
-    n_gpu_layers: int | Literal["all"] | None = None
+    n_gpu_layers: int | Literal["all", "auto"] | None = None
     cache_type_k: str | None = None
     cache_type_v: str | None = None
     n_cpu_moe: int | None = None
@@ -71,9 +72,9 @@ def _int(value: str) -> int | None:
         return None
 
 
-def _layers(value: str) -> int | Literal["all"] | None:
-    if value == "all":
-        return "all"
+def _layers(value: str) -> int | Literal["all", "auto"] | None:
+    if value in ("all", "auto"):
+        return value
     n = _int(value)
     if n is None:
         return None

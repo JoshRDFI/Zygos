@@ -338,13 +338,43 @@ def test_fit_split_unknown_when_a_side_is_unknown():
     assert fit(p, _hw(ram_gb=64), needs=e).level == "unknown"
 
 
-def test_fit_unsplit_llamacpp_judged_like_ollama():
+def test_fit_unsplit_llamacpp_never_spills_to_ram():
+    """llama.cpp puts on GPU what the settings say; it does not spill like Ollama."""
     p = _lc_profile()
     e = estimate_llamacpp(p, LaunchSettings())
+    assert e.spill is False
     assert fit(p, _hw(free_bytes=e.total_bytes, ram_gb=1), needs=e).level == "gpu"
-    assert fit(p, _hw(free_bytes=e.total_bytes - 1, ram_gb=1), needs=e).level == "partial"
-    assert fit(p, _hw(free_gb=1, ram_gb=1), needs=e).level == "no"
+    over = fit(p, _hw(free_bytes=e.total_bytes - 1, ram_gb=64), needs=e)
+    assert over.level == "no" and over.reason == "the GPU part doesn't fit in free VRAM"
     assert fit(p, _hw(free_gb=1, ram_gb=1), needs=e).split_by is None
+
+
+@pytest.mark.parametrize("launch", [LaunchSettings(n_gpu_layers=99), LaunchSettings()])
+def test_llamacpp_all_on_gpu_overflow_is_no_not_partial(launch):
+    """-ngl 99 (or unset: all assumed) needing 13.5 GB with 10 GB free is ``no``."""
+    p = _lc_profile(layer=340 * MB)
+    e = estimate_llamacpp(p, launch)
+    assert round(e.gpu_bytes / 1024**3, 1) == 13.5 and e.cpu_bytes == 0
+    f = fit(p, _hw(free_gb=10, ram_gb=64), needs=e)
+    assert f.level == "no"
+    assert f.reason == "the GPU part doesn't fit in free VRAM"
+    assert "the GPU part doesn't fit in free VRAM" in describe(f)
+
+
+def test_llamacpp_split_names_the_ram_side_when_it_overflows():
+    p, e = _split()
+    f = fit(p, _hw(free_gb=24, ram_gb=1), needs=e)
+    assert f.level == "no" and f.reason == "the RAM part doesn't fit in available RAM"
+
+
+def test_llamacpp_ngl_auto_is_all_on_gpu_labelled_auto():
+    e = estimate_llamacpp(_lc_profile(), LaunchSettings(n_gpu_layers="auto", ctx_size=4096))
+    assert e.cpu_bytes == 0 and e.split_by is None
+    assert e.assumptions == ("all layers on GPU (-ngl auto)",)
+
+
+def test_ollama_estimate_still_spills():
+    assert estimate(_profile()).spill is True
 
 
 def test_existing_fit_has_new_fields_defaulted():

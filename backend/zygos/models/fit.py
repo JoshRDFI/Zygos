@@ -21,8 +21,11 @@ KV_TYPE_BYTES: dict[str, float] = {
 }
 ASSUMED_CONTEXT_NOTE = f"context {ASSUMED_CONTEXT_TOKENS} tokens"
 ASSUMED_ALL_LAYERS_NOTE = "all layers on GPU (llama-server default)"
+ASSUMED_AUTO_LAYERS_NOTE = "all layers on GPU (-ngl auto)"
 
 FitLevel = Literal["gpu", "partial", "no", "unknown"]
+GPU_SIDE_REASON = "the GPU part doesn't fit in free VRAM"
+RAM_SIDE_REASON = "the RAM part doesn't fit in available RAM"
 
 
 class FitEstimate(BaseModel):
@@ -41,6 +44,9 @@ class FitEstimate(BaseModel):
     split_by: Literal["settings"] | None = None
     assumptions: tuple[str, ...] = ()
     reason: str | None = None  # why total_bytes is None, when the generic reason would mislead
+    # Ollama spills what VRAM can't hold into RAM; llama.cpp puts exactly what the
+    # launch settings say on the GPU, so an overflowing GPU part doesn't fit.
+    spill: bool = True
 
 
 class Fit(BaseModel):
@@ -130,16 +136,19 @@ def estimate_llamacpp(profile: ModelProfile, launch: LaunchSettings) -> FitEstim
         tokens = launch.ctx_size
     blocks = _int(profile, "identity.block_count")
     ngl = launch.n_gpu_layers
-    all_on_gpu = ngl is None or ngl == "all" or (blocks is not None and ngl >= blocks)
+    all_on_gpu = ngl in (None, "all", "auto") or (blocks is not None and ngl >= blocks)
     if ngl is None:
         assumptions.append(ASSUMED_ALL_LAYERS_NOTE)
+    elif ngl == "auto":
+        assumptions.append(ASSUMED_AUTO_LAYERS_NOTE)
 
     def unknown(model_bytes: int | None, context_bytes: int | None = None,
                 reason: str | None = None) -> FitEstimate:
         return FitEstimate(
             model_bytes=model_bytes, context_bytes=context_bytes, context_tokens=tokens or 0,
             context_assumed=context_assumed, overhead_bytes=RUNTIME_OVERHEAD_BYTES,
-            total_bytes=None, measured=False, assumptions=tuple(assumptions), reason=reason)
+            total_bytes=None, measured=False, assumptions=tuple(assumptions), reason=reason,
+            spill=False)
 
     tb = resolve(profile, "identity.tensor_bytes")
     table = tb.value if tb is not None and isinstance(tb.value, dict) else None
@@ -182,7 +191,7 @@ def estimate_llamacpp(profile: ModelProfile, launch: LaunchSettings) -> FitEstim
         model_bytes=model_bytes, context_bytes=context_bytes, context_tokens=tokens,
         context_assumed=context_assumed, overhead_bytes=RUNTIME_OVERHEAD_BYTES,
         total_bytes=gpu + cpu, measured=False, gpu_bytes=gpu, cpu_bytes=cpu,
-        split_by="settings" if cpu > 0 else None, assumptions=tuple(assumptions))
+        split_by="settings" if cpu > 0 else None, assumptions=tuple(assumptions), spill=False)
 
 
 def fit(profile: ModelProfile, hardware: HardwareSnapshot | None,
@@ -218,11 +227,16 @@ def fit(profile: ModelProfile, hardware: HardwareSnapshot | None,
         return result("unknown", "GPU not detected" + (f"; {size_reason}" if size_reason else ""))
     if size_reason is not None:
         return result("unknown", size_reason)
-    if needs.split_by == "settings":
+    if not needs.spill and needs.gpu_bytes is not None:
+        if needs.gpu_bytes > available:
+            return result("no", GPU_SIDE_REASON)
+        if not needs.cpu_bytes:
+            return result("gpu")
         if ram is None:
             return result("unknown", "RAM unknown")
-        fits = needs.gpu_bytes <= available and needs.cpu_bytes <= ram
-        return result("partial" if fits else "no")
+        if needs.cpu_bytes > ram:
+            return result("no", RAM_SIDE_REASON)
+        return result("partial")
     if needs.total_bytes <= available:
         return result("gpu")
     if ram is None:
@@ -255,6 +269,6 @@ def describe(f: Fit) -> str:
             text = f"needs ≈{total} GB: {parts}"
         if n.assumptions:
             text += "; assumed: " + ", ".join(n.assumptions)
-    if f.level == "unknown" and f.reason:
+    if f.level in ("unknown", "no") and f.reason:
         text += f" — {f.reason}"
     return text

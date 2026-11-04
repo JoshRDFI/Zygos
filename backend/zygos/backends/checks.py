@@ -121,9 +121,15 @@ def count_gguf(models_dir: str | None) -> Check:
         root = Path(models_dir)
         if not root.is_dir():
             return Check(ok=False, detail=f"{models_dir} is not a folder")
+        try:
+            with os.scandir(root):
+                pass
+        except OSError as exc:
+            return Check(ok=False, detail=f"can't read {models_dir}: {exc.strerror or _reason(exc)}")
         n = 0
         for _dirpath, _dirs, files in os.walk(root, onerror=lambda _e: None):
             n += sum(1 for f in files if f.lower().endswith(".gguf"))
-        return Check(ok=True, detail=f"{n} GGUF files in {models_dir}")
+        noun = "GGUF file" if n == 1 else "GGUF files"
+        return Check(ok=True, detail=f"{n} {noun} in {models_dir}")
     except Exception as exc:  # noqa: BLE001
         return Check(ok=False, detail=f"can't read {models_dir}: {_reason(exc)}")

@@ -88,7 +88,7 @@ async def test_happy_path_saves_exact_record(tmp_path, server):
     assert "Default launch settings (as typed after llama-server; Enter for none): " in prompts
     assert "Do you run a vLLM server? [y/N]: " in prompts
     assert prompts[-1] == "Save these settings? [y/N]: "
-    assert any("1 GGUF files" in s for s in said)
+    assert any("1 GGUF file in" in s for s in said)
     assert any("qwen" in s for s in said)
     assert "Restart Zygos for address changes to apply." in said
 

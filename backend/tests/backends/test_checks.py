@@ -184,7 +184,7 @@ def test_count_gguf_nested(tmp_path):
 
 def test_count_gguf_one(tmp_path):
     (tmp_path / "a.gguf").write_text("x")
-    assert count_gguf(str(tmp_path)).detail == f"1 GGUF files in {tmp_path}"
+    assert count_gguf(str(tmp_path)).detail == f"1 GGUF file in {tmp_path}"
 
 
 @pytest.mark.skipif(os.name != "posix" or (hasattr(os, "geteuid") and os.geteuid() == 0),
@@ -199,7 +199,22 @@ def test_count_gguf_unreadable_subdir(tmp_path):
         c = count_gguf(str(tmp_path))
     finally:
         bad.chmod(0o755)
-    assert c.ok and c.detail == f"1 GGUF files in {tmp_path}"
+    assert c.ok and c.detail == f"1 GGUF file in {tmp_path}"
+
+
+@pytest.mark.skipif(os.name != "posix" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                    reason="needs non-root posix")
+def test_count_gguf_unreadable_root_is_not_ok(tmp_path):
+    root = tmp_path / "locked"
+    root.mkdir()
+    (root / "a.gguf").write_text("x")
+    root.chmod(0)
+    try:
+        c = count_gguf(str(root))
+    finally:
+        root.chmod(0o755)
+    assert c.ok is False
+    assert c.detail == f"can't read {root}: Permission denied"
 
 
 async def test_read_vllm_max_model_len():

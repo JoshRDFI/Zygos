@@ -12,6 +12,7 @@ MAGIC = b"GGUF"
 SUPPORTED_VERSIONS = (2, 3)
 ARRAY_KEEP_LIMIT = 64
 DEFAULT_ALIGNMENT = 32
+MAX_STRING_BYTES = 16 * 1024**2  # one metadata string; real headers stay far below
 
 # type id -> (name, struct format, size)
 _FIXED: dict[int, tuple[str, str, int]] = {
@@ -82,6 +83,8 @@ class _Reader:
 
     def string(self) -> str:
         n = self.u64()
+        if n > MAX_STRING_BYTES:
+            raise GgufError("metadata string too long")
         if n > self.remaining():
             raise GgufError("string length runs past end of file")
         return self.take(n).decode("utf-8", errors="replace")
@@ -178,6 +181,8 @@ def _read(f: BinaryIO, size: int) -> GgufHeader:
 
     raw.sort(key=lambda t: t[1])
     data_size = size - data_offset
+    if any(off >= data_size for _name, off in raw):  # download cut inside the tensor data
+        raise GgufError("file is truncated")
     tensors = []
     for i, (name, off) in enumerate(raw):
         nxt = raw[i + 1][1] if i + 1 < len(raw) else data_size

@@ -128,3 +128,31 @@ def test_unknown_value_type(tmp_path):
 def test_missing_file(tmp_path):
     with pytest.raises(GgufError):
         read_header(tmp_path / "nope.gguf")
+
+
+def test_tensor_offset_past_the_data_is_a_truncated_download(tmp_path):
+    from tests.models.gguf_writer import write_gguf
+    path = write_gguf(tmp_path / "cut.gguf", [("general.architecture", 8, "qwen3")],
+                      [("a", [4], 0, 0), ("b", [4], 0, 512)], data_size=256)
+    with pytest.raises(GgufError, match="^file is truncated$"):
+        read_header(path)
+
+
+def test_tensor_offset_inside_the_data_is_fine(tmp_path):
+    from tests.models.gguf_writer import write_gguf
+    path = write_gguf(tmp_path / "ok.gguf", [("general.architecture", 8, "qwen3")],
+                      [("a", [4], 0, 0), ("b", [4], 0, 128)], data_size=256)
+    assert [t.size_bytes for t in read_header(path).tensors] == [128, 128]
+
+
+def test_metadata_string_over_16_mib_is_refused(tmp_path):
+    from tests.models.gguf_writer import write_gguf
+    path = write_gguf(tmp_path / "big.gguf", [("x", 8, "a" * (16 * 1024**2 + 1))])
+    with pytest.raises(GgufError, match="^metadata string too long$"):
+        read_header(path)
+
+
+def test_metadata_string_of_16_mib_is_read(tmp_path):
+    from tests.models.gguf_writer import write_gguf
+    path = write_gguf(tmp_path / "edge.gguf", [("x", 8, "a" * (16 * 1024**2))])
+    assert len(read_header(path).metadata["x"]) == 16 * 1024**2
