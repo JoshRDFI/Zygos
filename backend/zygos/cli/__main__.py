@@ -16,14 +16,18 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from zygos.backends.setup import run_backend_setup, summarize
 from zygos.cli.doctor import DoctorReport, run_doctor
 from zygos.hardware.describe import describe_hardware
 from zygos.errors import ConfigError
+from zygos.providers.base import DEFAULT_BASE_URLS
 from zygos.personalization import PERSONALIZATION_FIELDS, Personalization
 from zygos.personalization.onboarding import run_onboarding
 from zygos.runtime.bootstrap import build_runtime
 from zygos.runtime.manifest import Manifest, primary_route, runtime_manifest
 from zygos.thinking.support import check_selected
+
+_OLLAMA_DEFAULT = DEFAULT_BASE_URLS["ollama"]
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -44,6 +48,11 @@ def _build_parser() -> argparse.ArgumentParser:
     personalize_cmds = personalize.add_subparsers(dest="personalize_command", required=False)
     personalize_cmds.add_parser("show", help="Show the saved personalization")
     personalize_cmds.add_parser("clear", help="Remove all personalization")
+    backends_cmd = personalize_cmds.add_parser(
+        "backends", help="Tell Zygos about Ollama, llama.cpp and vLLM"
+    )
+    backends_cmds = backends_cmd.add_subparsers(dest="backends_command", required=False)
+    backends_cmds.add_parser("show", help="Show the saved backends settings")
     set_cmd = personalize_cmds.add_parser("set", help="Set individual fields directly")
     for field in PERSONALIZATION_FIELDS:
         set_cmd.add_argument(f"--{field.replace('_', '-')}", dest=field, default=None)
@@ -67,6 +76,22 @@ def _interruptible_input(prompt: str) -> str:
             signal.signal(signal.SIGINT, previous)
 
 
+async def _backends_setup(runtime) -> None:
+    await run_backend_setup(
+        runtime.backends, runtime.http_client,
+        current_ollama_url=runtime.addresses_at_start.get("ollama", _OLLAMA_DEFAULT),
+        ask=_interruptible_input, say=print,
+    )
+
+
+def _backends_show(runtime) -> None:
+    settings = runtime.backends.get()
+    print("\n".join(summarize(settings)))
+    print("Address sources:")
+    for name, source in sorted(runtime.address_sources.items()):
+        print(f"  {name}: {source} ({runtime.addresses_at_start.get(name, 'unknown')})")
+
+
 async def _personalize(runtime, args: argparse.Namespace) -> int:
     store = runtime.preferences
     sub = args.personalize_command
@@ -75,6 +100,18 @@ async def _personalize(runtime, args: argparse.Namespace) -> int:
             runtime.new_context(), runtime.model_service, store,
             ask=_interruptible_input, say=print,
         )
+        try:
+            wants = _interruptible_input("Set up inference backends now? [y/N]: ")
+        except EOFError:
+            return 0
+        if wants.strip().lower() in ("y", "yes"):
+            await _backends_setup(runtime)
+        return 0
+    if sub == "backends":
+        if args.backends_command == "show":
+            _backends_show(runtime)
+        else:
+            await _backends_setup(runtime)
         return 0
     if sub == "show":
         prefs = store.get()

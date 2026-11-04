@@ -212,3 +212,78 @@ def test_sigint_handler_restored_after_onboarding(cfg, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda *a: "")
     assert main([*base, "personalize"]) == 0
     assert signal.getsignal(signal.SIGINT) is before
+
+
+# --- backends (RFC-0014 section 2) ---
+
+import httpx  # noqa: E402
+
+from zygos.backends.settings import BackendsSettings, OllamaBackend  # noqa: E402
+from zygos.backends.store import SqliteBackendsStore  # noqa: E402
+
+
+def _no_network(monkeypatch):
+    def deny(self, request):
+        raise AssertionError(f"network call: {request.url}")
+
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", deny)
+
+
+def test_backends_show_prints_record_and_sources_without_network(cfg, monkeypatch, capsys):
+    base, store = cfg
+    db = store._path
+    SqliteBackendsStore(db).set(BackendsSettings(ollama=OllamaBackend(base_url="http://box:11434")))
+    _no_network(monkeypatch)
+    assert main([*base, "personalize", "backends", "show"]) == 0
+    out = capsys.readouterr().out
+    assert "http://box:11434" in out
+    assert "address sources" in out.lower()
+
+
+def test_backends_setup_saves_through_cli(cfg, monkeypatch, capsys):
+    base, store = cfg
+    answers = iter(["http://box:11434", "n", "n", "y"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+    monkeypatch.setattr("zygos.backends.setup.check_ollama",
+                        _fake_check_ollama)
+    assert main([*base, "personalize", "backends"]) == 0
+    assert SqliteBackendsStore(store._path).get().ollama.base_url == "http://box:11434"
+
+
+async def _fake_check_ollama(client, url):
+    from zygos.backends.checks import Check
+    return Check(ok=True, detail=f"Ollama fake at {url}")
+
+
+def test_backends_ctrl_c_exits_130_and_saves_nothing(cfg, monkeypatch, capsys):
+    base, store = cfg
+    monkeypatch.setattr("zygos.backends.setup.check_ollama", _fake_check_ollama)
+
+    def boom(*a):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("builtins.input", boom)
+    assert main([*base, "personalize", "backends"]) == 130
+    assert SqliteBackendsStore(store._path).get() == BackendsSettings()
+
+
+def test_onboarding_offers_backends_step(cfg, monkeypatch):
+    base, store = cfg
+    prompts = []
+
+    def fake_input(prompt=""):
+        prompts.append(prompt)
+        return ""
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    assert main([*base, "personalize"]) == 0
+    assert prompts[-1] == "Set up inference backends now? [y/N]: "
+
+
+def test_onboarding_backends_yes_runs_setup(cfg, monkeypatch):
+    base, store = cfg
+    answers = iter(["", "y", "http://box:11434", "n", "n", "y"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+    monkeypatch.setattr("zygos.backends.setup.check_ollama", _fake_check_ollama)
+    assert main([*base, "personalize"]) == 0
+    assert SqliteBackendsStore(store._path).get().ollama.base_url == "http://box:11434"
