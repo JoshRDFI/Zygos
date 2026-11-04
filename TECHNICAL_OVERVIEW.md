@@ -129,7 +129,7 @@ state — which route was chosen, what was retrieved, the reasoning trajectory �
 named, snapshotable objects rather than hidden fields. A **capability registry** and a
 **runtime manifest** answer "what can this runtime do, and is it healthy?", surfaced by
 `zygos inspect` / `zygos doctor`. A per-session **`trace` channel** now streams these
-events live over the WebSocket as a turn runs. `[v2 · built]` The guiding principle: *state
+events live over the WebSocket as a turn runs, including the model's native thinking, one `model.thinking` event per model call, when the user turns thinking on for a turn (RFC-0012). `[v2 · built]` The guiding principle: *state
 the console cannot see is an architecture bug*. The web UI already renders the read-only
 slice of this — **Inspect** (runtime manifest), **Doctor** (live health), **Models**, and
 **Tools** panels driven off `GET /runtime` and `/runtime/health`. `[v2 · built]` The fuller

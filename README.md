@@ -166,6 +166,17 @@ above.
 
 **Personalize (optional).** `.venv/bin/python -m zygos.cli personalize` — describe yourself and the assistant you want; review the draft before it's saved. `personalize show|set|clear` edit it directly; changes apply on the next turn, no restart.
 
+**Thinking (optional).** Native model thinking is off by default, because it adds seconds before the first word. Turn it on when a question needs it:
+
+- **Think toggle** (beside Speaker): every turn in this session thinks until you turn it off. It starts off in each new session.
+- **Think it through**: a button on each answer that asks the same question again with thinking on. The quick answer stays visible.
+- **By voice** (spoken input only):
+  - "think about this / think about it / think it through / think carefully, …" followed by a question thinks for that turn;
+  - "think harder", "think about that" or "think it through" on its own re-asks your last question with thinking;
+  - "turn thinking on" / "thinking on" and "turn thinking off" / "thinking off" flip the toggle.
+
+The chat shows only "thought for N s". The model's thinking itself appears step by step in **Inspect**, and is never spoken or saved to memory. For now this works with Ollama models that support thinking (e.g. qwen3); for other models the controls are disabled with the reason.
+
 ## Quick start (v1 CLI, local)
 
 The stable but frozen v1 CLI lives on the
