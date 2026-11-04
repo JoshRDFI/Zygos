@@ -222,6 +222,12 @@ class ServerConfig(BaseModel):
     audio_sample_rate: int = 16000
 
 
+class PersonalizationConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    db_path: str = ".zygos/preferences.db"
+
+
 class ZygosConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -232,6 +238,7 @@ class ZygosConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
+    personalization: PersonalizationConfig = Field(default_factory=PersonalizationConfig)
     # plugin kind -> plugin name -> "module.path:ClassName" (RFC-0001 §3)
     plugins: dict[str, dict[str, str]] = Field(default_factory=_default_plugins)
     # Capabilities a deployment requires; `zygos doctor` fails if any is unbound
