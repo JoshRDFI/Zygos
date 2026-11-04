@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
+from zygos.backends.view import build_view, restart_required
 from zygos.config.loader import primary_route_credentialed
 from zygos.errors import PluginError
 from zygos.hardware.describe import describe_hardware
@@ -78,6 +79,44 @@ def _hardware_check(runtime: RuntimeAssembly, gpu_query: GpuQuery) -> DoctorChec
     return DoctorCheck("hardware", True, describe_hardware(snap), warn=not snap.gpus)
 
 
+async def _backend_checks(runtime: RuntimeAssembly) -> list[DoctorCheck]:
+    """Optional backends (RFC-0014): shown only when set up; problems warn, never fail."""
+    settings = runtime.backends.get()
+    lc = settings.llamacpp
+    ollama_routed = any(
+        r.provider == "ollama"
+        for r in [runtime.config.providers.primary, *runtime.config.providers.fallbacks]
+    )
+    out: list[DoctorCheck] = []
+    show_ollama = bool(settings.ollama.base_url) or ollama_routed
+    show_llama = bool(lc.server_path or lc.models_dir)
+    if not (show_ollama or show_llama or settings.vllm):
+        return out
+    view = await build_view(
+        settings, runtime.http_client, runtime.address_sources, runtime.addresses_at_start
+    )
+    if show_ollama:
+        url = view.settings.ollama.base_url or runtime.addresses_at_start.get("ollama", "")
+        source = runtime.address_sources.get("ollama", "default")
+        out.append(DoctorCheck("ollama_address", True, f"{url} (from {source})"))
+    if show_llama:
+        out.append(DoctorCheck("llamacpp_server", True, view.llamacpp.server.detail,
+                               warn=not view.llamacpp.server.ok))
+        out.append(DoctorCheck("llamacpp_models", True, view.llamacpp.models.detail,
+                               warn=not view.llamacpp.models.ok))
+    if view.vllm is not None:
+        served = f" — serving: {', '.join(view.vllm.served)}" if view.vllm.served else ""
+        out.append(DoctorCheck("vllm", True, view.vllm.check.detail + served,
+                               warn=not view.vllm.check.ok))
+    if restart_required(settings, runtime.addresses_at_start):
+        out.append(DoctorCheck(
+            "backends_restart", True,
+            "a saved backend address differs from the one in use: restart Zygos to apply it",
+            warn=True,
+        ))
+    return out
+
+
 async def run_doctor(
     runtime: RuntimeAssembly, *, probe: bool = False, gpu_query: GpuQuery = run_nvidia_smi
 ) -> DoctorReport:
@@ -136,6 +175,7 @@ async def run_doctor(
 
     checks.append(_hardware_check(runtime, gpu_query))
     checks.extend(_voice_device_checks(runtime))
+    checks.extend(await _backend_checks(runtime))
 
     if probe:
         context = runtime.new_context()

@@ -20,6 +20,7 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from zygos.api.permission import WebSocketPromptResolver
+from zygos.api.routes_backends import router as backends_router
 from zygos.api.routes_models import router as models_router
 from zygos.api.routes_preferences import router as preferences_router
 from zygos.api.routes_runtime import router as runtime_router
@@ -117,6 +118,7 @@ def create_app(
 
     app.include_router(runtime_router)
     app.include_router(models_router)
+    app.include_router(backends_router)
     app.include_router(preferences_router)
     app.include_router(sessions_router)
     app.include_router(ws_router)

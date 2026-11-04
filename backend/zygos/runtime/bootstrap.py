@@ -18,6 +18,9 @@ from pathlib import Path
 import httpx
 
 from zygos.agent.config import ToolLoopConfig
+from zygos.backends.settings import BackendsSettings
+from zygos.backends.store import BackendsStore, SqliteBackendsStore
+from zygos.backends.view import AddressSource
 from zygos.config.loader import load_config
 from zygos.config.schema import ZygosConfig
 from zygos.errors import ConfigError
@@ -80,6 +83,9 @@ class RuntimeAssembly:
     hardware: HardwareProbe
     profiles: ProfileStore
     model_catalog: ModelCatalog
+    backends: BackendsStore
+    address_sources: Mapping[str, AddressSource]
+    addresses_at_start: Mapping[str, str]
 
     def new_context(self, *, session_id: str | None = None) -> ExecutionContext:
         return root_context(self.event_bus, session_id=session_id)
@@ -94,11 +100,37 @@ class RuntimeAssembly:
         await self.http_client.aclose()
 
 
-def _provider_settings(config: ZygosConfig, name: str) -> ProviderSettings:
+def _record_address(backends: BackendsSettings | None, name: str) -> str | None:
+    if backends is None:
+        return None
+    if name == "ollama":
+        return backends.ollama.base_url or None
+    if name == "vllm":
+        return backends.vllm[0].base_url if backends.vllm else None
+    return None
+
+
+def _resolve_address(
+    config: ZygosConfig, name: str, backends: BackendsSettings | None = None
+) -> tuple[str, AddressSource]:
+    """Backends record, then config credential, then the built-in default (RFC-0014 section 2)."""
+    recorded = _record_address(backends, name)
+    if recorded:
+        return recorded, "backends"
     credential = config.providers.credentials.get(name)
-    base_url = (credential.base_url if credential else None) or DEFAULT_BASE_URLS.get(name)
-    if base_url is None:
-        base_url = "http://localhost"
+    if credential is not None and credential.base_url:
+        return credential.base_url, "config"
+    default = DEFAULT_BASE_URLS.get(name)
+    if default is not None:
+        return default, "default"
+    return "http://localhost", "default"
+
+
+def _provider_settings(
+    config: ZygosConfig, name: str, backends: BackendsSettings | None = None
+) -> ProviderSettings:
+    credential = config.providers.credentials.get(name)
+    base_url, _source = _resolve_address(config, name, backends)
     return ProviderSettings(base_url=base_url, api_key=credential.api_key if credential else None,
                             think=config.providers.think)
 
@@ -115,7 +147,7 @@ def _provider_healthy(router: ProviderRouter, provider_name: str) -> bool:
 _EMBED_DEFAULT_MODEL: Mapping[str, str] = {"ollama": "nomic-embed-text"}
 
 
-def _build_embedder(config, client, plugin_registry) -> tuple[Embedder | None, str]:
+def _build_embedder(config, client, plugin_registry, backends=None) -> tuple[Embedder | None, str]:
     """Construct the configured embedder, DECOUPLED from the chat route (RFC-0006 §6).
     Returns (embedder, model). Returns (None, model) when the local extra is missing
     so the caller can degrade to FTS5."""
@@ -139,7 +171,7 @@ def _build_embedder(config, client, plugin_registry) -> tuple[Embedder | None, s
             f"(no universal default for a cloud embedder)"
         )
     provider_cls = plugin_registry.resolve("providers", backend)
-    embedder = provider_cls(settings=_provider_settings(config, backend), client=client)
+    embedder = provider_cls(settings=_provider_settings(config, backend, backends), client=client)
     return embedder, model
 
 
@@ -185,6 +217,8 @@ def build_runtime(
     config_path: Path | None = None, *, subscribers: Sequence[Subscriber] = ()
 ) -> RuntimeAssembly:
     config = load_config(config_path)
+    backends = SqliteBackendsStore(Path(config.personalization.db_path))
+    backends_settings = backends.get()
     plugin_registry = PluginRegistry(config.plugins)
     client = httpx.AsyncClient()
 
@@ -197,13 +231,23 @@ def build_runtime(
         for route in [config.providers.primary, *config.providers.fallbacks]
     ]
     providers: dict[str, Provider] = {}
+    address_sources: dict[str, AddressSource] = {}
+    addresses_at_start: dict[str, str] = {}
     for route in routes:
         if route.provider in providers:
             continue
         provider_cls = plugin_registry.resolve("providers", route.provider)
-        providers[route.provider] = provider_cls(
-            settings=_provider_settings(config, route.provider), client=client
-        )
+        provider_settings = _provider_settings(config, route.provider, backends_settings)
+        providers[route.provider] = provider_cls(settings=provider_settings, client=client)
+        addresses_at_start[route.provider] = provider_settings.base_url
+        address_sources[route.provider] = _resolve_address(
+            config, route.provider, backends_settings
+        )[1]
+    for name in ("ollama", "vllm"):  # recorded backends count even when no route uses them
+        recorded = _record_address(backends_settings, name)
+        if recorded and name not in addresses_at_start:
+            addresses_at_start[name] = recorded
+            address_sources[name] = "backends"
 
     router = ProviderRouter(
         routes,
@@ -253,7 +297,7 @@ def build_runtime(
     if config.memory.enabled:
         memory_store = MemoryStore(config.memory.db_path)
         if config.memory.retrieval_mode != "fts5":
-            embedder, embedding_model = _build_embedder(config, client, plugin_registry)
+            embedder, embedding_model = _build_embedder(config, client, plugin_registry, backends_settings)
         else:
             embedder, embedding_model = None, ""
         relevance_index = _memory_index(
@@ -327,4 +371,7 @@ def build_runtime(
         hardware=hardware,
         profiles=profiles,
         model_catalog=model_catalog,
+        backends=backends,
+        address_sources=address_sources,
+        addresses_at_start=addresses_at_start,
     )

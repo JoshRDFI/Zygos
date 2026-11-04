@@ -262,3 +262,40 @@ def test_runtime_exposes_preferences_store(tmp_path: Path):
         assert not db.exists()
     finally:
         asyncio.run(assembly.aclose())
+
+
+def test_address_precedence_record_then_config_then_default(tmp_path: Path):
+    from zygos.backends.settings import BackendsSettings, OllamaBackend, VllmEndpoint
+    from zygos.runtime.bootstrap import _resolve_address
+
+    file = tmp_path / "config.yaml"
+    file.write_text(
+        "providers:\n  credentials:\n    ollama: {base_url: 'http://cfg:1'}\n",
+        encoding="utf-8",
+    )
+    config = load_config(file)
+    record = BackendsSettings(ollama=OllamaBackend(base_url="http://rec:2"),
+                              vllm=[VllmEndpoint(base_url="http://v:3/v1")])
+    assert _resolve_address(config, "ollama", record) == ("http://rec:2", "backends")
+    assert _resolve_address(config, "vllm", record) == ("http://v:3/v1", "backends")
+    assert _resolve_address(config, "ollama", BackendsSettings()) == ("http://cfg:1", "config")
+    assert _resolve_address(load_config(None), "ollama", None)[1] == "default"
+    assert _provider_settings(config, "ollama", record).base_url == "http://rec:2"
+
+
+def test_build_runtime_records_address_sources(tmp_path: Path):
+    import asyncio
+
+    from zygos.backends.settings import BackendsSettings, OllamaBackend
+    from zygos.backends.store import SqliteBackendsStore
+
+    file = tmp_path / "config.yaml"
+    db = tmp_path / "p.db"
+    file.write_text(f"personalization:\n  db_path: '{db}'\n", encoding="utf-8")
+    SqliteBackendsStore(db).set(BackendsSettings(ollama=OllamaBackend(base_url="http://rec:2")))
+    runtime = build_runtime(file)
+    try:
+        assert runtime.address_sources["ollama"] == "backends"
+        assert runtime.addresses_at_start["ollama"] == "http://rec:2"
+    finally:
+        asyncio.run(runtime.aclose())
