@@ -181,9 +181,14 @@ channel (RFC-0007 §10):
 - `step` names where in the turn it happened: `direct`, `tool_loop`, or the RDT
   stage (`prelude`, `recurrent`, `judge`, `coda`); `index` orders events within
   the turn (tool-loop iteration / RDT pass).
-- `text` is capped at `MAX_THINKING_EVENT_CHARS = 32_000` per event; longer
-  thinking is cut at the cap with `truncated: true`, and `chars` gives the full
-  length.
+- `text` is capped at `MAX_THINKING_EVENT_CHARS = 32_000` per event and works
+  as a **rolling buffer that keeps the tail**: when a call's thinking is longer,
+  the oldest text is dropped and the most recent 32,000 characters are kept, so
+  the end of the thinking (where the model settles on its answer) is always
+  shown. `truncated: true` marks a cut, `chars` gives the full length, and
+  Inspect shows "… N earlier characters not kept" above the text. When the
+  provider streams thinking, the buffer is a bounded deque filled chunk by
+  chunk, so memory stays at the cap however long the model thinks.
 - `elapsed_ms` is that call's time to its first answer token, summed into
   `turn.end.thinking_ms`.
 
@@ -264,9 +269,11 @@ today's behavior (config default, off). Order:
   the same question. Acceptable: the deeper answer is the one most worth
   recalling, and recency weighting favors it. Revisit if memory quality suffers.
 - **Large thinking text.** Reasoning can run to thousands of tokens per call and
-  several calls per turn. Mitigated by one event per call, a per-event cap
-  (`MAX_THINKING_EVENT_CHARS`) with an explicit `truncated` flag, and keeping it
-  out of chat frames, TTS and memory.
+  several calls per turn. Mitigated by one event per call, a per-event rolling
+  buffer (`MAX_THINKING_EVENT_CHARS`) that keeps the tail and flags the cut, and
+  keeping it out of chat frames, TTS and memory. Cost: the start of a very long
+  thinking block is lost; the tail is kept because it is where the model reaches
+  its conclusion.
 - **Support cache goes stale** if the user swaps the model behind the same name.
   Accepted for a process lifetime; restarting the server refreshes it.
 - **Toggle drift between tabs.** The toggle is per session; a second tab has its
@@ -292,7 +299,8 @@ today's behavior (config default, off). Order:
 7. `run_turn` requires the `think` argument; both production callers pass it
    explicitly (tested).
 8. Each model call that returns thinking emits one `model.thinking` trace event
-   with the right `step`/`index`, capped with `truncated` set past the cap; the
+   with the right `step`/`index`; past the cap it keeps exactly the **last**
+   `MAX_THINKING_EVENT_CHARS` characters with `truncated` and `chars` set; the
    text is absent from every chat frame, TTS input and memory record; and
    `turn.end.thinking_ms` is set on thinking turns (tested on the direct, tools
    and RDT paths).
