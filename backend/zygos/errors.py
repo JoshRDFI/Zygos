@@ -79,3 +79,9 @@ class ToolTransient(ToolError):
 
     code = "tool_transient"
     retryable = True
+
+
+class PersonalizationCompileError(ZygosError):
+    """The model returned no usable personalization draft."""
+
+    code = "personalization_compile_failed"
