@@ -932,7 +932,7 @@ async def test_barge_in_while_waiting_for_next_sentence():
     assert "pcm" not in kinds[kinds.index("tts.end"):]
 
 
-async def test_generation_error_speaks_complete_sentences_then_errors():
+async def test_generation_error_reports_error_then_speaks_complete_sentences():
     voice = _RecordingVoice()
     session = _speaking_session()
     model = _scripted_model(["One two ", "three. ", "Four", RuntimeError("boom")])
@@ -942,7 +942,7 @@ async def test_generation_error_speaks_complete_sentences_then_errors():
     assert voice.texts == ["One two three."]
     kinds = _kinds(frames)
     assert kinds.count("tts.end") == 1
-    assert kinds.index("tts.end") < kinds.index("error")
+    assert kinds.index("error") < kinds.index("tts.end")  # the failure is shown first
     (err,) = [f for f in frames if isinstance(f, Frame) and f.type == "error"]
     assert err.channel == CHAT and err.payload == {"message": "generation failed"}
 
@@ -1002,3 +1002,82 @@ async def test_speaker_off_unchanged():
     frames = _drain(session)
     assert [f for f in frames if isinstance(f, bytes) or f.channel == AUDIO_OUT] == []
     assert voice.texts == [] and timings == []
+
+
+# --- Final review fixes: M2 (Review Focus 5) and a second cancel during abort ------------
+
+class _SlowCancelSynth:
+    """Never finishes on its own; once cancelled, takes ``ticks`` loop turns to unwind."""
+
+    def __init__(self, started, ticks=20):
+        self._started = started
+        self._ticks = ticks
+
+    async def chunks(self):
+        yield b"\x00\x00"
+        self._started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            for _ in range(self._ticks):
+                try:
+                    await asyncio.sleep(0)
+                except asyncio.CancelledError:
+                    pass
+            raise
+
+    async def cancel(self):
+        pass
+
+    async def aclose(self):
+        pass
+
+
+class _SlowCancelVoice(_RecordingVoice):
+    def synthesize_stream(self, ctx, text):
+        self.texts.append(text)
+        return _SlowCancelSynth(self.started)
+
+
+async def _speaking_long_turn(voice, session):
+    gate = asyncio.Event()  # never set: the model is still writing
+    model = _scripted_model([S1 + " ", S2 + " ", gate, "Done."])
+    turn = asyncio.create_task(run_turn(session, _think_deps(model, voice_service=voice), "hi",
+                                        CancelToken(), spoken_input=False, think=None))
+    await asyncio.wait_for(voice.started.wait(), 1.0)  # the speaker is speaking S1
+    return turn
+
+
+async def test_cancelling_run_turn_while_speaking_leaks_nothing():
+    baseline = asyncio.all_tasks()
+    voice = _SlowCancelVoice()
+    session = _speaking_session()
+    session.turn_status = "running"
+    turn = await _speaking_long_turn(voice, session)
+    turn.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await turn
+    await asyncio.sleep(0)
+    assert asyncio.all_tasks() == baseline
+    (end,) = _tts(_drain(session), "tts.end")
+    assert end.payload["reason"] == "cancelled"
+    assert session.speaking is False and session.turn_status == "idle"
+
+
+async def test_second_cancel_during_speaker_abort_still_ends_turn():
+    baseline = asyncio.all_tasks()
+    voice = _SlowCancelVoice()
+    session = _speaking_session()
+    session.turn_status = "running"
+    turn = await _speaking_long_turn(voice, session)
+    turn.cancel()
+    for _ in range(3):  # run_turn's finally is now awaiting the slow-to-cancel consumer
+        await asyncio.sleep(0)
+    turn.cancel()  # e.g. shutdown cancels again
+    with pytest.raises(asyncio.CancelledError):
+        await turn
+    await asyncio.sleep(0)
+    assert asyncio.all_tasks() == baseline
+    (end,) = _tts(_drain(session), "tts.end")
+    assert end.payload["reason"] == "cancelled"
+    assert session.speaking is False and session.turn_status == "idle"

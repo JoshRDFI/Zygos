@@ -245,18 +245,20 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
             await speak_reply(session, deps.voice_service, ctx, final, turn_id)
     except Exception:  # noqa: BLE001 - a failed turn must not kill the session
         logger.exception("turn failed")
-        if speaker is not None:  # speak what was complete, then report the failure
+        session.enqueue(Frame(channel=CHAT, type="error", payload={"message": "generation failed"}))
+        if speaker is not None:  # report the failure, then speak what was complete
             speaker.say(pacer.flush_complete())
             await speaker.close(pacer)
-        session.enqueue(Frame(channel=CHAT, type="error", payload={"message": "generation failed"}))
     finally:
-        if prefix is not None:
-            if not prefix.done():
-                prefix.cancel()
-            await asyncio.gather(prefix, return_exceptions=True)
-        if speaker is not None:
-            await speaker.abort(pacer)  # no-op once closed; ends a cancelled speech
-        session.end_turn()
+        try:
+            if prefix is not None:
+                if not prefix.done():
+                    prefix.cancel()
+                await asyncio.gather(prefix, return_exceptions=True)
+            if speaker is not None:
+                await speaker.abort(pacer)  # no-op once closed; ends a cancelled speech
+        finally:  # a second cancel during teardown must not leave the turn "running"
+            session.end_turn()
         # RFC-0012 §2: a support change (e.g. Ollama warmed up since connect) is
         # re-announced. Backgrounded: barge-in awaits this task, and a cold probe
         # can take PROBE_TIMEOUT_S. Normally a cache hit, sending nothing.

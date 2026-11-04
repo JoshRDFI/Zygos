@@ -121,7 +121,10 @@ class StreamingSpeaker:
     ``say`` is sync and only queues; a single consumer task synthesizes in order. The
     consumer first awaits ``wait_for`` (e.g. the "Let me think" prefix) before sending
     ``tts.begin``. ``close`` drains and ends; ``abort`` cancels and ends. A synthesis
-    failure ends the speech with reason ``error`` and never raises out of close/abort.
+    failure ends the speech with reason ``error`` and never raises out of close/abort;
+    the consumer stops at once (``speaking`` drops, later sentences are dropped) and the
+    one ``tts.end`` still goes out at close/abort. Speaker turned off mid-reply stops
+    synthesis at the next sentence (reason ``cancelled``).
     """
 
     def __init__(self, session, voice_service, ctx, turn_id: str, *, turn_started_at: float,
@@ -143,10 +146,18 @@ class StreamingSpeaker:
         self._projected_end: float | None = None
         self._gaps = 0
         self._gap_s = 0.0
+        self._stopped = False  # consumer gave up early (synthesis error / Speaker off)
+
+    def _stop(self, reason: str) -> None:
+        self._reason = reason
+        self._stopped = True
+        self._session.speaking = False  # nothing is playing; don't duck for it
+        while not self._queue.empty():
+            self._queue.get_nowait()
 
     def say(self, sentences: list[str]) -> None:
         sentences = [s for s in sentences if s and s.strip()]
-        if not sentences:
+        if not sentences or self._stopped:
             return
         for s in sentences:
             self._queue.put_nowait(s)
@@ -172,6 +183,9 @@ class StreamingSpeaker:
             text = await self._queue.get()
             if text is None or self._ctx.cancelled:
                 break
+            if not self._session.speak:  # Speaker turned off mid-reply
+                self._stop("cancelled")
+                break
             synth = None
             first_chunk = True
             try:
@@ -193,6 +207,7 @@ class StreamingSpeaker:
                     except Exception:  # noqa: BLE001 - teardown failure must not skip tts.end
                         logger.debug("StreamingSpeaker: synth teardown failed", exc_info=True)
             if self._reason == "error":
+                self._stop("error")
                 break
 
     def _track(self, duration: float, first_of_sentence: bool) -> None:
@@ -238,10 +253,15 @@ class StreamingSpeaker:
     async def abort(self, pacer: SpeechPacer | None = None) -> None:
         if self._ended:
             return
+        me = asyncio.current_task()
+        before = me.cancelling() if me is not None else 0
         if self._task is not None:
             self._task.cancel()
             try:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        await self._end(pacer or SpeechPacer(), "cancelled")
+        await self._end(pacer or SpeechPacer(),
+                        "error" if self._reason == "error" else "cancelled")
+        if me is not None and me.cancelling() > before:
+            raise asyncio.CancelledError  # the caller was cancelled while we waited

@@ -110,6 +110,8 @@ def test_single_chunk_reply_t_zero_starts():
 
 import asyncio
 
+import pytest
+
 from zygos.api.frames import AUDIO_OUT, AUDIO_TAG_OUT
 from zygos.api.session import Session
 from zygos.api.speech_stream import StreamingSpeaker
@@ -163,7 +165,9 @@ class _Voice:
 
 
 def _sess():
-    return Session("s", root_context(InProcessEventBus()), created_at=0.0)
+    s = Session("s", root_context(InProcessEventBus()), created_at=0.0)
+    s.speak = True  # a speaker only exists while Speaker is on
+    return s
 
 
 def _frames(session):
@@ -376,3 +380,82 @@ async def test_abort_after_synthesize_failure_does_not_raise():
     await sp.abort()
     ends = [i for i in _frames(s) if getattr(i, "type", None) == "tts.end"]
     assert len(ends) == 1
+    assert ends[0].payload["reason"] == "error"  # M1: a later abort keeps the error reason
+
+
+# --- Final review fixes (M1, M3, M4) -------------------------------------------------------
+
+async def test_speaking_false_right_after_synthesis_failure():
+    s = _sess()
+    v = _RaisingVoice({})
+    sp = _speaker(s, v)
+    sp.say(["A."])
+    await _until_true(lambda: v.texts == ["A."] and sp._task.done())
+    assert s.speaking is False  # before close: no duck for audio that isn't playing
+    sp.say(["B."])  # dropped once the reason is error
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert v.texts == ["A."]
+    assert sp._queue.empty()
+    await sp.close(SpeechPacer())
+    ends = [i for i in _frames(s) if getattr(i, "type", None) == "tts.end"]
+    assert len(ends) == 1 and ends[0].payload["reason"] == "error"
+
+
+async def _until_true(pred, n=200):
+    for _ in range(n):
+        if pred():
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("condition never became true")
+
+
+class _SlowCancelSynth(_Synth):
+    """Synthesizes until cancelled, then takes several ticks to unwind."""
+
+    def __init__(self, started):
+        super().__init__([])
+        self._started = started
+
+    async def chunks(self):
+        self._started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            for _ in range(5):
+                try:
+                    await asyncio.sleep(0)
+                except asyncio.CancelledError:
+                    pass
+            raise
+        yield b""  # pragma: no cover
+
+
+async def test_abort_propagates_caller_cancellation_after_one_end():
+    s = _sess()
+    started = asyncio.Event()
+    v = _Voice({"A.": _SlowCancelSynth(started)})
+    sp = _speaker(s, v)
+    sp.say(["A."])
+    await asyncio.wait_for(started.wait(), 1.0)
+    caller = asyncio.create_task(sp.abort(SpeechPacer()))
+    await asyncio.sleep(0)  # caller is now awaiting the slow-to-cancel consumer
+    caller.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await caller
+    ends = [i for i in _frames(s) if getattr(i, "type", None) == "tts.end"]
+    assert len(ends) == 1 and ends[0].payload["reason"] == "cancelled"
+
+
+async def test_speaker_off_mid_reply_stops_at_next_sentence():
+    s = _sess()
+    s.speak = True
+    v = _Voice({"A.": _Synth([b"\x00\x00"], hook=lambda i: setattr(s, "speak", False))})
+    sp = _speaker(s, v)
+    sp.say(["A.", "B.", "C."])
+    await sp.close(SpeechPacer())
+    items = _frames(s)
+    assert v.texts == ["A."]
+    ends = [i for i in items if getattr(i, "type", None) == "tts.end"]
+    assert len(ends) == 1 and ends[0].payload["reason"] == "cancelled"
+    assert s.speaking is False
