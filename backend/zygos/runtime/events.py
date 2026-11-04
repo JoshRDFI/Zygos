@@ -94,6 +94,18 @@ class SpeechTiming(EventPayload):
     reason: Literal["complete", "cancelled", "error"]
 
 
+class ModelFit(EventPayload):
+    """Will a local model fit? One per model per catalog view (RFC-0013 §3, §11)."""
+
+    type: Literal["model.fit"] = "model.fit"
+    provider: str
+    model: str
+    level: Literal["gpu", "partial", "no", "unknown"]
+    needs_bytes: int | None
+    free_bytes: int | None
+    measured: bool
+
+
 AnyPayload = Annotated[
     Union[
         RouteClaimed,
@@ -106,6 +118,7 @@ AnyPayload = Annotated[
         CapabilityRenegotiated,
         ModelThinking,
         SpeechTiming,
+        ModelFit,
     ],
     Field(discriminator="type"),
 ]

@@ -103,3 +103,20 @@ def test_speech_timing_round_trips():
                          gaps=0, gap_ms=0, reason="error")
     assert Event.model_validate(Event(run_id="r", span_id="s", source="speech",
                                       payload=nulls).model_dump()).payload == nulls
+
+
+def test_model_fit_round_trips():
+    from zygos.runtime.events import ModelFit
+
+    ev = Event(run_id="r", span_id="s", source="models",
+               payload=ModelFit(provider="ollama", model="qwen3:8b", level="partial",
+                                needs_bytes=9_000, free_bytes=4_000, measured=False))
+    assert ev.type == "model.fit"
+    assert Event.model_validate(ev.model_dump()) == ev
+    unknown = ModelFit(provider="ollama", model="m", level="unknown", needs_bytes=None,
+                       free_bytes=None, measured=False)
+    assert Event.model_validate(Event(run_id="r", span_id="s", source="models",
+                                      payload=unknown).model_dump()).payload == unknown
+    with pytest.raises(ValidationError):
+        ModelFit(provider="ollama", model="m", level="maybe", needs_bytes=None,
+                 free_bytes=None, measured=False)

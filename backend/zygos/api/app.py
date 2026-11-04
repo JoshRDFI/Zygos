@@ -9,6 +9,7 @@ Stability: Experimental.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import time
 import uuid
@@ -19,6 +20,7 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from zygos.api.permission import WebSocketPromptResolver
+from zygos.api.routes_models import router as models_router
 from zygos.api.routes_preferences import router as preferences_router
 from zygos.api.routes_runtime import router as runtime_router
 from zygos.api.routes_sessions import router as sessions_router
@@ -45,6 +47,7 @@ async def _lifespan(app: FastAPI):
     runtime = app.state.runtime
     ctx = runtime.new_context()
     try:
+        await asyncio.to_thread(runtime.hardware.scan)   # so the manifest carries hardware
         _advance(app, LOAD_SKILLS_STAGE)   # no-op today; SkillService is M6
         _advance(app, LOAD_MEMORY_STAGE)
         if runtime.memory_service is not None:
@@ -113,6 +116,7 @@ def create_app(
     app.state.session_count = session_count if session_count is not None else registry.count
 
     app.include_router(runtime_router)
+    app.include_router(models_router)
     app.include_router(preferences_router)
     app.include_router(sessions_router)
     app.include_router(ws_router)

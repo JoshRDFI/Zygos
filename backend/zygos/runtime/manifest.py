@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
+from zygos.hardware.probe import HardwareSnapshot
 from zygos.runtime.capabilities import Capability, CapabilityBinding
 from zygos.services.router import RouteChoice
 from zygos.thinking.support import ThinkingSupport
@@ -64,6 +65,7 @@ class Manifest(BaseModel):
     versions: dict[str, str]
     voice: VoiceManifest | None = None
     thinking: ThinkingSupport | None = None   # primary route, from the checker cache
+    hardware: HardwareSnapshot | None = None   # the last scan; the manifest never scans
 
 
 def _package_version() -> str:
@@ -110,4 +112,5 @@ def runtime_manifest(runtime: "RuntimeAssembly") -> Manifest:
         versions={"zygos": _package_version(), "python": platform.python_version()},
         voice=voice,
         thinking=runtime.thinking_support.cached(primary_route(config)),
+        hardware=runtime.hardware.last(),
     )

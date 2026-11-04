@@ -12,6 +12,7 @@ import uuid
 import warnings
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -20,6 +21,7 @@ from zygos.agent.config import ToolLoopConfig
 from zygos.config.loader import load_config
 from zygos.config.schema import ZygosConfig
 from zygos.errors import ConfigError
+from zygos.hardware.probe import HardwareProbe
 from zygos.memory.retrieve import (
     Fts5RelevanceIndex, HybridRelevanceIndex, MemoryRetriever,
     RelevanceIndex, RetrievalWeights, VectorRelevanceIndex,
@@ -27,6 +29,8 @@ from zygos.memory.retrieve import (
 from zygos.memory.service import DefaultMemoryService, MemoryService
 from zygos.memory.store import MemoryStore
 from zygos.memory.vector_search import VectorSearch
+from zygos.models.catalog import ModelCatalog
+from zygos.models.store import ProfileStore
 from zygos.personalization import PreferencesStore, SqlitePreferencesStore
 from zygos.plugins.resolver import PluginRegistry
 from zygos.providers.base import DEFAULT_BASE_URLS, Provider, ProviderSettings
@@ -73,6 +77,9 @@ class RuntimeAssembly:
     _router: ProviderRouter
     lifecycle_stage: str
     _memory_store: MemoryStore | None
+    hardware: HardwareProbe
+    profiles: ProfileStore
+    model_catalog: ModelCatalog
 
     def new_context(self, *, session_id: str | None = None) -> ExecutionContext:
         return root_context(self.event_bus, session_id=session_id)
@@ -285,6 +292,18 @@ def build_runtime(
         # is a sync composition root; the async consumer (Task 10) spawns the
         # sidecar at startup.
 
+    hardware = HardwareProbe(models_dir=config.models.ollama_models_dir)
+    profiles = ProfileStore(Path(config.models.profiles_dir))
+    profiles.load_all()
+    model_catalog = ModelCatalog(
+        providers=providers,
+        profiles=profiles,
+        hardware=hardware,
+        config=config,
+        voice_snapshot=(voice_service.snapshot if voice_service is not None else lambda: None),
+        clock=lambda: datetime.now(timezone.utc),
+    )
+
     return RuntimeAssembly(
         config=config,
         plugins=plugin_registry,
@@ -305,4 +324,7 @@ def build_runtime(
         _router=router,
         lifecycle_stage=REGISTER_CAPABILITIES_STAGE,
         _memory_store=memory_store,
+        hardware=hardware,
+        profiles=profiles,
+        model_catalog=model_catalog,
     )

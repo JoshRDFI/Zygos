@@ -86,3 +86,27 @@ async def test_startup_drain_failure_still_closes_runtime():
             pass  # startup raises before we get here
     # aclose ran in `finally` despite the startup failure
     assert app.state.runtime.http_client.is_closed
+
+
+@pytest.mark.asyncio
+async def test_startup_scans_hardware_once_and_mounts_models_routes():
+    from zygos.hardware.probe import HardwareProbe
+
+    calls = []
+
+    def smi():
+        calls.append(1)
+        return "RTX, 16303, 12000\n"
+
+    probe = HardwareProbe(run_nvidia_smi=smi, read_text=lambda p: None, disk_free=lambda p: 0,
+                          cpu_count=lambda: 8, env={}, exists=lambda p: False)
+    runtime = dataclasses.replace(build_runtime(), hardware=probe)
+    app = create_app(runtime)
+    async with app.router.lifespan_context(app):
+        assert calls == [1]
+        assert probe.last() is not None
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            assert (await client.get("/hardware")).status_code == 200
+            assert (await client.get("/runtime")).json()["hardware"] is not None
+        assert calls == [1, 1]  # GET /hardware rescans; GET /runtime does not

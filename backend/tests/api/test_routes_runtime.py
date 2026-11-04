@@ -119,3 +119,34 @@ async def test_get_runtime_survives_unroutable_model():
         await runtime.aclose()
     assert resp.status_code == 200
     assert resp.json()["thinking"] == {"supported": True, "reason": None}
+
+
+@pytest.mark.asyncio
+async def test_get_runtime_carries_last_hardware_scan_without_scanning():
+    from dataclasses import replace
+    from datetime import datetime, timezone
+
+    from zygos.hardware.probe import HardwareProbe
+
+    calls = []
+
+    def smi():
+        calls.append(1)
+        return "RTX, 16303, 12000\n"
+
+    probe = HardwareProbe(run_nvidia_smi=smi, read_text=lambda p: None, disk_free=lambda p: 0,
+                          cpu_count=lambda: 8, env={}, exists=lambda p: False,
+                          clock=lambda: datetime(2026, 11, 4, tzinfo=timezone.utc))
+    runtime = build_runtime()
+    try:
+        runtime = replace(runtime, hardware=probe)
+        async with _client(_mount(runtime)) as client:
+            before = (await client.get("/runtime")).json()
+            assert calls == []
+            assert before["hardware"] is None
+            probe.scan()
+            after = (await client.get("/runtime")).json()
+    finally:
+        await runtime.aclose()
+    assert calls == [1]  # only the explicit scan; GET /runtime never scans
+    assert after["hardware"]["gpus"][0]["name"] == "RTX"
