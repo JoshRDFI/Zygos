@@ -24,7 +24,7 @@ class _StubModel:
 
 
 class _FakeReasoning:
-    async def run(self, ctx, input):
+    async def run(self, ctx, input, thinking=None):
         return ReasoningResult(text="4", loops_used=1, final_confidence=0.9,
                                halted_early=True, model="fake")
 

@@ -206,3 +206,61 @@ async def test_no_system_messages_by_default():
     service, provider = _service(profile="shallow")
     await service.run(root_context(InProcessEventBus()), ReasoningInput(prompt="q"))
     assert all(m.role == "user" for req in provider.requests for m in req.messages)
+
+
+class _SpyRecorder:
+    def __init__(self) -> None:
+        self.calls: list = []
+
+    async def record(self, ctx, *, step, index, text, elapsed_ms):
+        assert isinstance(elapsed_ms, int)
+        self.calls.append((step, index, text))
+
+
+class _ThinkingStageProvider(_StageProvider):
+    async def generate(self, request):
+        result = await super().generate(request)
+        return result.model_copy(update={"thinking": f"think-{len(self.requests)}"})
+
+
+def _thinking_service(judge=0.9):
+    provider = _ThinkingStageProvider(judge=judge)
+    router = ProviderRouter([RouteChoice("stage", "base")], {"stage": provider})
+    svc = DefaultReasoningService(DefaultModelService(router), ReasoningConfig(enabled=True, profile="shallow"))
+    return svc, provider
+
+
+async def test_reasoning_calls_carry_think():
+    svc, provider = _thinking_service()
+    await svc.run(root_context(InProcessEventBus()), ReasoningInput(prompt="q", think=True))
+    assert provider.requests and all(r.think is True for r in provider.requests)
+
+
+async def test_reasoning_records_stages():
+    svc, provider = _thinking_service()
+    spy = _SpyRecorder()
+    await svc.run(root_context(InProcessEventBus()), ReasoningInput(prompt="q", think=True), thinking=spy)
+    assert len(spy.calls) == len(provider.requests)
+    assert [c[2] for c in spy.calls] == [f"think-{n}" for n in range(1, len(spy.calls) + 1)]
+    steps = [(s, i) for s, i, _ in spy.calls]
+    assert steps[0] == ("prelude", 0)
+    assert steps[-1] == ("coda", 0)
+    assert ("recurrent", 1) in steps
+
+
+async def test_reasoning_records_judge_index():
+    svc, _ = _thinking_service(judge=0.0)
+    spy = _SpyRecorder()
+    await svc.run(root_context(InProcessEventBus()),
+                  ReasoningInput(prompt="hard", think=True), thinking=spy)
+    judges = [(s, i) for s, i, _ in spy.calls if s == "judge"]
+    recurrents = [i for s, i, _ in spy.calls if s == "recurrent"]
+    for _, i in judges:
+        assert i in recurrents
+
+
+async def test_reasoning_without_recorder_unchanged():
+    svc, provider = _thinking_service()
+    result = await svc.run(root_context(InProcessEventBus()), ReasoningInput(prompt="q"))
+    assert result.text == "FINAL ANSWER TEXT"
+    assert all(r.think is None for r in provider.requests)

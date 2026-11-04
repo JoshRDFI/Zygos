@@ -13,6 +13,8 @@ class ReasoningInput(BaseModel):
     # runtime-authored system messages (identity/modality, RFC-0010 §3a) for the
     # prelude and coda requests; empty = today's prompts unchanged
     system: tuple[str, ...] = ()
+    # per-turn native thinking flag (RFC-0012); None = provider default
+    think: bool | None = None
 
 
 class ConfidenceBreakdown(BaseModel):

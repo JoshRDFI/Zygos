@@ -288,7 +288,7 @@ async def test_reasoning_path_receives_modality_message():
     seen = {}
 
     class _CapturingReasoning:
-        async def run(self, ctx, input):
+        async def run(self, ctx, input, thinking=None):
             seen["input"] = input
             from zygos.reasoning.types import ReasoningResult
             return ReasoningResult(text="r", loops_used=1, final_confidence=1.0,
@@ -307,7 +307,7 @@ async def test_reasoning_path_typed_turn_has_no_system():
     seen = {}
 
     class _CapturingReasoning:
-        async def run(self, ctx, input):
+        async def run(self, ctx, input, thinking=None):
             seen["input"] = input
             from zygos.reasoning.types import ReasoningResult
             return ReasoningResult(text="r", loops_used=1, final_confidence=1.0,
@@ -400,7 +400,7 @@ async def test_reasoning_path_receives_identity():
     seen = {}
 
     class _CapturingReasoning:
-        async def run(self, ctx, input):
+        async def run(self, ctx, input, thinking=None):
             seen["input"] = input
             from zygos.reasoning.types import ReasoningResult
             return ReasoningResult(text="r", loops_used=1, final_confidence=1.0,

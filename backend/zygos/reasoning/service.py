@@ -5,6 +5,7 @@ ReasoningState. Always runs the full loop (the disabled bypass is external).
 Stability: Experimental.
 """
 
+import time
 from typing import Protocol
 
 from zygos.config.schema import ReasoningConfig
@@ -18,10 +19,12 @@ from zygos.reasoning.types import (
 from zygos.runtime.context import ExecutionContext
 from zygos.runtime.events import ModelSelected, RequestFinished, RequestStarted
 from zygos.services.model import ModelService
+from zygos.thinking.capture import Step, ThinkingRecorder
 
 
 class ReasoningService(Protocol):
-    async def run(self, ctx: ExecutionContext, input: ReasoningInput) -> ReasoningResult: ...
+    async def run(self, ctx: ExecutionContext, input: ReasoningInput, *,
+                  thinking: ThinkingRecorder | None = None) -> ReasoningResult: ...
 
     def snapshot(self) -> ReasoningState: ...
 
@@ -56,17 +59,24 @@ class DefaultReasoningService:
         )
 
     async def _call(self, ctx: ExecutionContext, prompt: str, *, model: str, temperature: float,
-                    max_tokens: int | None = None, system: tuple[str, ...] = ()) -> str:
+                    max_tokens: int | None = None, system: tuple[str, ...] = (),
+                    think: bool | None = None, step: Step = "direct", index: int = 0,
+                    recorder: ThinkingRecorder | None = None) -> str:
         messages = (*(Message(role="system", content=t) for t in system),
                     Message(role="user", content=prompt))
         request = GenerationRequest(
             model=model, messages=messages,
-            temperature=temperature, max_tokens=max_tokens,
+            temperature=temperature, max_tokens=max_tokens, think=think,
         )
+        t0 = time.monotonic()
         result = await self._model.generate(ctx, request)
+        if recorder is not None:
+            await recorder.record(ctx, step=step, index=index, text=result.thinking,
+                                  elapsed_ms=int((time.monotonic() - t0) * 1000))
         return result.text
 
-    async def run(self, ctx: ExecutionContext, input: ReasoningInput) -> ReasoningResult:
+    async def run(self, ctx: ExecutionContext, input: ReasoningInput, *,
+                  thinking: ThinkingRecorder | None = None) -> ReasoningResult:
         if self._running:
             raise RuntimeError(
                 "ReasoningService.run is not re-entrant; a run is already in progress on this instance"
@@ -96,6 +106,7 @@ class DefaultReasoningService:
                 prelude_text = await self._call(
                     ctx.child("prelude"), prompts.build_prelude(input.prompt, input.context),
                     model=route.model, temperature=profile.temperature, system=input.system,
+                    think=input.think, step="prelude", index=0, recorder=thinking,
                 )
                 summary, self._decomposition = prompts.parse_prelude(prelude_text)
 
@@ -118,6 +129,7 @@ class DefaultReasoningService:
                     ctx.child(f"recurrent-{iteration}"),
                     prompts.build_recurrent(input.prompt, self._decomposition, prior_summary, iteration),
                     model=route.model, temperature=temperature,
+                    think=input.think, step="recurrent", index=iteration, recorder=thinking,
                 )
                 current = prompts.parse_summary(text)
                 breakdown = confidence.score(
@@ -135,6 +147,7 @@ class DefaultReasoningService:
                             # content and parse_judge would silently read 0.0.
                             ctx.child(f"judge-{iteration}"), prompts.build_judge(input.prompt, current),
                             model=route.model, temperature=0.0,
+                            think=input.think, step="judge", index=iteration, recorder=thinking,
                         )
                     )
                     judge_exit = judged >= breakdown.threshold
@@ -187,6 +200,7 @@ class DefaultReasoningService:
                 final = await self._call(
                     ctx.child("coda"), prompts.build_coda(input.prompt, best_summary),
                     model=route.model, temperature=profile.temperature, system=input.system,
+                    think=input.think, step="coda", index=0, recorder=thinking,
                 )
             self._final = final
             self._stage = "cancelled" if self._cancelled else "done"

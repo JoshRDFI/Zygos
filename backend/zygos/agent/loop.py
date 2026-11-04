@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
@@ -24,6 +25,7 @@ from zygos.errors import ToolNotFound
 from zygos.providers.types import GenerationRequest, Message
 from zygos.runtime.context import ExecutionContext
 from zygos.services.model import ModelService
+from zygos.thinking.capture import ThinkingRecorder
 from zygos.tools.service import ToolService
 from zygos.tools.types import Tool, ToolCall, ToolResult
 
@@ -58,6 +60,8 @@ async def run_agentic_loop(
     messages: Sequence[Message],
     config: ToolLoopConfig,
     observer: ToolObserver | None = None,
+    think: bool | None = None,
+    thinking: ThinkingRecorder | None = None,
 ) -> AgentResult:
     schemas = tuple(tool_schema(t) for t in tools)
     history: list[Message] = list(messages)
@@ -67,8 +71,12 @@ async def run_agentic_loop(
             return AgentResult(text="", messages=tuple(history), iterations=i, stop_reason="cancelled")
 
         request = GenerationRequest(messages=tuple(history), tools=schemas,
-                                    tool_choice=config.default_tool_choice)
+                                    tool_choice=config.default_tool_choice, think=think)
+        t0 = time.monotonic()
         result = await model_service.generate(ctx, request)
+        if thinking is not None:
+            await thinking.record(ctx, step="tool_loop", index=i, text=result.thinking,
+                                  elapsed_ms=int((time.monotonic() - t0) * 1000))
 
         if not result.tool_calls:
             return AgentResult(text=result.text, messages=tuple(history),
@@ -101,7 +109,12 @@ async def run_agentic_loop(
             history.append(Message(role="tool", tool_call_id=inv.id, content=_render(res)))
 
     # Iteration cap reached with tool calls still pending: one final tool-free answer.
-    final_req = GenerationRequest(messages=tuple(history), tools=schemas, tool_choice="none")
+    final_req = GenerationRequest(messages=tuple(history), tools=schemas, tool_choice="none",
+                                 think=think)
+    t0 = time.monotonic()
     final = await model_service.generate(ctx, final_req)
+    if thinking is not None:
+        await thinking.record(ctx, step="tool_loop", index=config.max_iterations, text=final.thinking,
+                              elapsed_ms=int((time.monotonic() - t0) * 1000))
     return AgentResult(text=final.text, messages=tuple(history),
                        iterations=config.max_iterations, stop_reason="max_iterations")

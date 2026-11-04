@@ -12,7 +12,7 @@ class _FakeReasoning:
     def __init__(self, *, text="4", exc: Exception | None = None):
         self._text, self._exc = text, exc
 
-    async def run(self, ctx, input):
+    async def run(self, ctx, input, thinking=None):
         if self._exc is not None:
             raise self._exc
         return ReasoningResult(text=self._text, loops_used=3, final_confidence=0.8,
@@ -59,7 +59,7 @@ class _ScriptedReasoning:
     def __init__(self, outcomes):
         self._outcomes = list(outcomes)
 
-    async def run(self, ctx, input):
+    async def run(self, ctx, input, thinking=None):
         item = self._outcomes.pop(0)
         if isinstance(item, Exception):
             raise item

@@ -217,3 +217,63 @@ async def test_observer_reports_tool_not_found_result():
     finished = [e for e in events if isinstance(e, ToolCallFinished)]
     assert finished[0].result.ok is False
     assert finished[0].result.error_code == "tool_not_found"
+
+
+class _RecordingProvider(FakeProvider):
+    def __init__(self, **kw) -> None:
+        super().__init__(**kw)
+        self.requests: list = []
+
+    async def generate(self, request):
+        self.requests.append(request)
+        return await super().generate(request)
+
+
+class _SpyRecorder:
+    def __init__(self) -> None:
+        self.calls: list = []
+
+    async def record(self, ctx, *, step, index, text, elapsed_ms):
+        assert isinstance(elapsed_ms, int)
+        self.calls.append((step, index, text))
+
+
+def _rec_service(script):
+    prov = _RecordingProvider(script=script)
+    router = ProviderRouter(routes=[RouteChoice("fake", "fake-model")], providers={"fake": prov})
+    return DefaultModelService(router), prov
+
+
+def _thought(result: GenerationResult, text: str) -> GenerationResult:
+    return result.model_copy(update={"thinking": text})
+
+
+async def test_loop_requests_carry_think():
+    # max_iterations=1 with a pending tool call forces the tool_choice="none" final call
+    script = [_call("echo", {"value": "a"}), "done"]
+    ms, prov = _rec_service(script)
+    await run_agentic_loop(
+        _ctx(), model_service=ms, tool_service=_tool_service(EchoTool()), tools=[EchoTool()],
+        messages=[Message(role="user", content="go")],
+        config=ToolLoopConfig(max_iterations=1), think=True)
+    assert len(prov.requests) == 2
+    assert prov.requests[1].tool_choice == "none"
+    assert all(r.think is True for r in prov.requests)
+
+    ms, prov = _rec_service([_call("echo", {"value": "a"}), "done"])
+    await run_agentic_loop(
+        _ctx(), model_service=ms, tool_service=_tool_service(EchoTool()), tools=[EchoTool()],
+        messages=[Message(role="user", content="go")], config=ToolLoopConfig(max_iterations=1))
+    assert all(r.think is None for r in prov.requests)
+
+
+async def test_loop_records_thinking_per_iteration():
+    script = [_thought(_call("echo", {"value": "a"}), "t0"),
+              _thought(GenerationResult(text="ok", model="fake-model", provider="fake"), "t1")]
+    ms, _ = _rec_service(script)
+    spy = _SpyRecorder()
+    await run_agentic_loop(
+        _ctx(), model_service=ms, tool_service=_tool_service(EchoTool()), tools=[EchoTool()],
+        messages=[Message(role="user", content="go")], config=ToolLoopConfig(),
+        think=True, thinking=spy)
+    assert spy.calls == [("tool_loop", 0, "t0"), ("tool_loop", 1, "t1")]
