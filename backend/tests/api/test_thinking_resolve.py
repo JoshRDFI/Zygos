@@ -70,3 +70,28 @@ async def test_resolve_false_never_checks(requested, default):
     effective, reason = await resolve_think(_session(), _deps(default, checker), requested)
     assert reason is None
     assert checker.calls == []
+
+
+class _UnroutableModel:
+    def select_model(self, *a, **k):
+        from zygos.errors import ProviderUnavailable
+        raise ProviderUnavailable("No eligible provider routes")
+
+
+def _unroutable_deps():
+    return SimpleNamespace(think_default=False, model_service=_UnroutableModel(),
+                           thinking_support=_Checker(ThinkingSupport(supported=True)))
+
+
+async def test_resolve_think_unroutable_model():
+    result = await resolve_think(_session(), _unroutable_deps(), True)
+    assert result == (False, "couldn't check the model")
+
+
+async def test_think_state_unroutable_model():
+    from zygos.api.thinking import send_think_state
+    session = SimpleNamespace(think=None, enqueue=lambda f: sent.append(f))
+    sent = []
+    await send_think_state(session, _unroutable_deps())
+    assert sent[0].payload == {"enabled": False, "supported": False,
+                               "reason": "couldn't check the model"}

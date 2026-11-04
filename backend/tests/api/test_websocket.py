@@ -572,3 +572,25 @@ def test_hello_also_sends_think_state():
         ws.send_text(_ctl("hello"))
         types = [json.loads(ws.receive_text())["type"] for _ in range(2)]
     assert types == ["hello", "think.state"]
+
+
+def test_connect_survives_unroutable_model():
+    from zygos.errors import ProviderUnavailable
+
+    app = _app()
+
+    def boom(*a, **k):
+        raise ProviderUnavailable("No eligible provider routes")
+
+    app.state.turn_deps.model_service.select_model = boom
+    app.state.turn_deps = dataclasses.replace(
+        app.state.turn_deps, thinking_support=_FixedChecker(True))
+    client = TestClient(app)
+    sid = client.post("/sessions").json()["id"]
+    with client.websocket_connect(f"/ws/session/{sid}") as ws:
+        first = json.loads(ws.receive_text())
+        assert first["type"] == "think.state"
+        assert first["payload"]["supported"] is False
+        assert first["payload"]["reason"] == "couldn't check the model"
+        ws.send_text(_ctl("ping"))
+        assert json.loads(ws.receive_text())["type"] == "pong"

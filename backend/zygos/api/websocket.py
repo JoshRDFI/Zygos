@@ -136,9 +136,9 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
     session.connected = True
     writer = asyncio.create_task(_writer(websocket, session))
     session._writer = writer
-    await send_think_state(session, deps)
 
     try:
+        await send_think_state(session, deps)
         while True:
             message = await websocket.receive()
             if message.get("type") == "websocket.disconnect":
