@@ -171,3 +171,10 @@ def test_describe_unknown():
         "+ 0.5 GB overhead — GPU not detected"
     )
     assert isinstance(f, Fit)
+
+
+def test_fit_without_gpu_says_gpu_not_detected_even_when_size_is_unknown():
+    f = fit(_profile(kv=None), _hw())
+    assert f.level == "unknown" and f.reason == "GPU not detected; context size unknown"
+    f = fit(_profile(download=None), None)
+    assert f.level == "unknown" and f.reason == "GPU not detected; size unknown"

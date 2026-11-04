@@ -99,7 +99,10 @@ async def test_get_models_ollama_unreachable_is_200(tmp_path):
     body = resp.json()
     assert body["ollama"]["reachable"] is False
     assert "connection refused" in body["ollama"]["error"]
-    assert body["models"] == []
+    # only configured routes; Ollama ones say why they have no fit
+    assert all(not m["loaded"] for m in body["models"])
+    assert [m["fit_text"] for m in body["models"] if m["provider"] == "ollama"] == ["Ollama unreachable"] * len(
+        [m for m in body["models"] if m["provider"] == "ollama"])
 
 
 @pytest.mark.asyncio
@@ -116,3 +119,25 @@ async def test_get_hardware_rescans(tmp_path):
     body = resp.json()
     assert body["gpus"][0]["vram_free_bytes"] == 12000 * 1024**2
     assert {"ram_total_bytes", "cpu_cores", "disk_free_bytes", "scanned_at"} <= set(body)
+
+
+@pytest.mark.asyncio
+async def test_get_models_with_unwritable_profiles_dir_is_200(tmp_path):
+    import os
+
+    root = tmp_path / "ro"
+    root.mkdir()
+    os.chmod(root, 0o555)
+    try:
+        original, runtime = _runtime(root)
+        try:
+            async with _client(_mount(runtime)) as client:
+                resp = await client.get("/models")
+        finally:
+            await original.aclose()
+    finally:
+        os.chmod(root, 0o755)
+    assert resp.status_code == 200
+    qwen = next(m for m in resp.json()["models"] if m["name"] == "qwen3:8b" and m["loaded"] is False
+                and m["fit"] is not None)
+    assert qwen["profile_error"].startswith("profile can't be saved: ")

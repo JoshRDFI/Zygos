@@ -110,6 +110,13 @@ class ModelCatalog:
         # Routes whose profile save was tried and refused (e.g. a filename
         # collision): not retried, so the warning is logged once.
         self._save_tried: set[tuple[str, str]] = set()
+        # (provider, name) -> why its profile could not be written (OSError).
+        # Persistence never fails the view; the entry carries the reason.
+        self._save_errors: dict[tuple[str, str], str] = {}
+        # digest -> name of a profile created while /api/show failed. Such a
+        # profile is saved with ``digest=None`` so every later view (and a
+        # restart) retries show; an alias seen meanwhile joins it.
+        self._unshown: dict[str, str] = {}
 
     # -- routes ---------------------------------------------------------------
 
@@ -122,6 +129,22 @@ class ModelCatalog:
 
     def _is_local(self, provider: str) -> bool:
         return provider in LOCAL_PROVIDERS
+
+    # -- persistence ----------------------------------------------------------
+
+    def _persisted(self, provider: str, names: list[str], write: Callable[[], Any]) -> bool:
+        """Run a profile write; an OSError is logged and recorded, never raised."""
+        try:
+            write()
+        except OSError as exc:
+            reason = (str(exc) or type(exc).__name__)[:_ERROR_CHARS]
+            log.warning("profile for %s/%s can't be saved: %s", provider, ", ".join(names), reason)
+            for n in names:
+                self._save_errors[(provider, n)] = reason
+            return False
+        for n in names:
+            self._save_errors.pop((provider, n), None)
+        return True
 
     # -- view -----------------------------------------------------------------
 
@@ -138,7 +161,8 @@ class ModelCatalog:
             else:
                 status = OllamaStatus(configured=True, reachable=True, error=None)
                 entries.extend(await self._ollama_entries(ctx, ollama, tags, running, hardware))
-        entries.extend(self._route_entries())
+        installed = {e.name for e in entries}
+        entries.extend(self._route_entries(installed, ollama_reachable=status.reachable))
         entries.sort(key=lambda e: (e.location == "cloud", e.family is None, e.family or "", e.name))
         return ModelsView(hardware=hardware, ollama=status, models=tuple(entries))
 
@@ -162,16 +186,30 @@ class ModelCatalog:
             log.info("ollama show %s failed: %s", name, exc)
             return None
 
+    def _add_name(self, profile: ModelProfile, name: str) -> ModelProfile:
+        joined = profile if name in profile.names else profile.model_copy(
+            update={"names": [*profile.names, name]})
+        added: list[ModelProfile] = []
+        if self._persisted("ollama", joined.names, lambda: added.append(self._profiles.add_name(profile, name))):
+            return added[0]
+        return joined
+
     async def _sync_profile(self, ollama: Any, model: OllamaModel) -> ModelProfile:
         store = self._profiles
         profile = store.get("ollama", model.name)
+        if profile is not None and profile.digest is None:
+            # Created while show failed: retry it until it answers.
+            show = await self._show(ollama, model.name)
+            if show is not None:
+                return refresh_from_ollama(profile, model, show, at=self._clock())
+            return profile
         if profile is not None and profile.digest != model.digest:
             other = store.find_by_digest("ollama", model.digest)
             if len(profile.names) > 1 or other is not None:
                 # The name moved to a different model: it leaves this profile
                 # (which stays with its other names, or as an orphan keeping
                 # its user notes) and joins or starts the profile for its digest.
-                store.remove_name(profile, model.name)
+                self._persisted("ollama", [model.name], lambda: store.remove_name(profile, model.name))
                 profile = None
             else:
                 show = await self._show(ollama, model.name)
@@ -180,12 +218,21 @@ class ModelCatalog:
                 # Keep the stored values (and digest) so the next view retries show.
                 return profile
         if profile is None:
-            shared = store.find_by_digest("ollama", model.digest)
+            shared = store.find_by_digest("ollama", model.digest) or self._unshown_profile(model.digest)
             if shared is not None:
-                return store.add_name(shared, model.name)
+                return self._add_name(shared, model.name)
             show = await self._show(ollama, model.name)
-            return profile_from_ollama(model, show, at=self._clock())
+            created = profile_from_ollama(model, show, at=self._clock())
+            if show is None:
+                self._unshown[model.digest] = model.name
+                created = created.model_copy(update={"digest": None})
+            return created
         return profile
+
+    def _unshown_profile(self, digest: str) -> ModelProfile | None:
+        name = self._unshown.get(digest)
+        profile = None if name is None else self._profiles.get("ollama", name)
+        return profile if profile is not None and profile.digest is None else None
 
     def _reserve_bytes(self) -> int:
         voice = self._config.voice
@@ -216,10 +263,10 @@ class ModelCatalog:
             loaded = mine[0] if mine else None
             if loaded is not None:
                 profile = apply_running(profile, loaded, at=self._clock())
-            if profile != before:
-                self._profiles.save(profile)
+            saved = profile == before or self._persisted(
+                "ollama", list({model.name, *profile.names}), lambda: self._profiles.save(profile))
             stored = self._profiles.get("ollama", model.name)
-            if stored is not None and stored.digest == profile.digest:
+            if saved and stored is not None and stored.digest == profile.digest:
                 profile = stored  # what is on disk, user section included
             others = sum(r.size_vram for r in running if r not in mine)
             vram = VramContext(reclaimable_bytes=others, reserve_bytes=reserve)
@@ -235,28 +282,48 @@ class ModelCatalog:
                 primary=("ollama", model.name) == primary, fallback=("ollama", model.name) in fallbacks))
         return entries
 
-    def _route_entries(self) -> list[ModelEntry]:
+    def _route_entries(self, installed: set[str], *, ollama_reachable: bool) -> list[ModelEntry]:
+        """Configured routes not already listed: non-Ollama routes, and Ollama
+        routes missing from ``/api/tags`` (not installed, or Ollama is down)."""
         primary, fallbacks = self._route_keys()
         p = self._config.providers
         entries: list[ModelEntry] = []
         seen: set[tuple[str, str]] = set()
         for route in [p.primary, *p.fallbacks]:
+            if route.provider == "ollama":
+                name = _ollama_name(route.model)
+                key = ("ollama", name)
+                if name in installed or key in seen:
+                    continue
+                seen.add(key)
+                # Never create a profile for a model that is not there.
+                profile = self._profiles.get("ollama", name) or ModelProfile(
+                    provider="ollama", model=name, names=[name])
+                entries.append(self._entry(
+                    profile, provider="ollama", name=name, location="local", loaded=False,
+                    vram_bytes=None, fitted=None,
+                    fit_text="not installed" if ollama_reachable else "Ollama unreachable",
+                    primary=key == primary, fallback=key in fallbacks))
+                continue
             key = (route.provider, route.model)
-            if route.provider == "ollama" or key in seen:
+            if key in seen:
                 continue
             seen.add(key)
             profile = self._profiles.get(route.provider, route.model)
             if profile is None:
                 profile = ModelProfile(provider=route.provider, model=route.model, names=[route.model])
                 if key not in self._save_tried and self._profiles.error_for(*key) is None:
-                    self._save_tried.add(key)
-                    self._profiles.save(profile)  # once; a refused save is not retried
-                    profile = self._profiles.get(route.provider, route.model) or profile
+                    self._save_tried.add(key)  # once; a refused save is not retried
+                    new = profile
+                    if self._persisted(route.provider, [route.model], lambda: self._profiles.save(new)):
+                        profile = self._profiles.get(route.provider, route.model) or profile
+                    else:
+                        self._save_tried.discard(key)  # an OSError may clear up: retry next view
             local = self._is_local(route.provider)
             entries.append(self._entry(
                 profile, provider=route.provider, name=route.model,
                 location="local" if local else "cloud", loaded=False, vram_bytes=None, fitted=None,
-                fit_text=f"fit not checked for {route.provider}" if local else None,
+                fit_text=f"fit not checked for {route.provider}" if local else "fit doesn't apply (cloud)",
                 primary=key == primary, fallback=key in fallbacks))
         return entries
 
@@ -268,6 +335,13 @@ class ModelCatalog:
         specialty = _value(profile, "identity.specialty")
         size = _value(profile, "identity.download_size_bytes")
         error = self._profiles.error_for(provider, name)
+        save_error = self._save_errors.get((provider, name))
+        if error is not None:
+            profile_error: str | None = f"profile file can't be read: {error.reason[:_ERROR_CHARS]}"
+        elif save_error is not None:
+            profile_error = f"profile can't be saved: {save_error}"
+        else:
+            profile_error = None
         return ModelEntry(
             provider=provider, name=name, location=location,
             family=_str(profile, "identity.family"),
@@ -279,5 +353,5 @@ class ModelCatalog:
             download_size_bytes=size if isinstance(size, int) and not isinstance(size, bool) else None,
             loaded=loaded, vram_bytes=vram_bytes, fit=fitted, fit_text=fit_text,
             primary=primary, fallback=fallback,
-            profile_error=error.reason[:_ERROR_CHARS] if error is not None else None,
+            profile_error=profile_error,
             fields=fields)

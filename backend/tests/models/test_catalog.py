@@ -183,8 +183,9 @@ async def test_view_ollama_unreachable_still_answers(tmp_path):
     view = await catalog.view(_ctx())
     assert view.ollama.configured is True and view.ollama.reachable is False
     assert "connection refused" in view.ollama.error
-    assert [(m.provider, m.name, m.location) for m in view.models] == [("anthropic", "claude-x", "cloud")]
-    assert view.models[0].fallback is True
+    assert [(m.provider, m.name, m.location) for m in view.models] == [
+        ("ollama", "qwen3:8b", "local"), ("anthropic", "claude-x", "cloud")]
+    assert view.models[1].fallback is True
 
 
 @pytest.mark.asyncio
@@ -288,7 +289,8 @@ async def test_view_lists_cloud_routes_without_fit(tmp_path):
     view = await catalog.view(_ctx())
     models = _by_name(view)
     cloud = models["claude-x"]
-    assert cloud.location == "cloud" and cloud.fit is None and cloud.fit_text is None
+    assert cloud.location == "cloud" and cloud.fit is None
+    assert cloud.fit_text == "fit doesn't apply (cloud)"
     assert cloud.fallback is True and cloud.primary is False
     assert (tmp_path / "profiles" / "anthropic" / "claude-x.json").exists()
     vllm = models["llama-70b"]
@@ -307,7 +309,7 @@ async def test_view_reports_profile_error(tmp_path):
     catalog, _ = _catalog(tmp_path, ollama)
     view = await catalog.view(_ctx())
     qwen = _by_name(view)["qwen3:8b"]
-    assert qwen.profile_error
+    assert qwen.profile_error.startswith("profile file can't be read: ")
     assert qwen.family == "qwen3"  # listed from the in-memory profile
     assert bad.read_bytes() == b"{ not json"
 
@@ -458,3 +460,130 @@ async def test_view_warns_once_for_a_colliding_cloud_profile(tmp_path, caplog):
             view = await catalog.view(_ctx())
     assert len([r for r in caplog.records if r.name == "zygos.models"]) == 1
     assert "claude:x" in _by_name(view)
+
+
+@pytest.mark.asyncio
+async def test_view_retries_show_that_failed_when_the_profile_was_created(tmp_path):
+    ollama = FakeOllama(tags=[_tag("qwen3:8b", "d1")], show_fail=True)
+    catalog, _ = _catalog(tmp_path, ollama)
+    view = await catalog.view(_ctx())
+    assert _by_name(view)["qwen3:8b"].fit.level == "unknown"
+    ollama.show_fail = False
+    view = await catalog.view(_ctx())
+    qwen = _by_name(view)["qwen3:8b"]
+    assert "identity.kv_bytes_per_token" in qwen.fields
+    assert qwen.fit.level != "unknown"
+    assert ollama.show_calls == ["qwen3:8b", "qwen3:8b"]
+    saved = json.loads((tmp_path / "profiles" / "ollama" / "qwen3_8b.json").read_text())
+    assert saved["digest"] == "d1"
+
+
+@pytest.mark.asyncio
+async def test_view_retries_failed_show_after_restart(tmp_path):
+    ollama = FakeOllama(tags=[_tag("qwen3:8b", "d1")], show_fail=True)
+    catalog, _ = _catalog(tmp_path, ollama)
+    await catalog.view(_ctx())
+    ollama.show_fail = False
+    catalog, _ = _catalog(tmp_path, ollama)  # a fresh process reads the saved profile
+    view = await catalog.view(_ctx())
+    assert "identity.kv_bytes_per_token" in _by_name(view)["qwen3:8b"].fields
+
+
+@pytest.mark.asyncio
+async def test_view_aliases_share_one_profile_when_show_fails(tmp_path):
+    ollama = FakeOllama(tags=[_tag("qwen3:8b", "same"), _tag("qwen3:latest", "same")], show_fail=True)
+    catalog, store = _catalog(tmp_path, ollama)
+    await catalog.view(_ctx())
+    assert len(_files(tmp_path)) == 1
+    ollama.show_fail = False
+    view = await catalog.view(_ctx())
+    assert _disk(tmp_path) == {"qwen3_8b.json": (["qwen3:8b", "qwen3:latest"], "same")}
+    models = _by_name(view)
+    assert "identity.kv_bytes_per_token" in models["qwen3:latest"].fields
+    assert store.get("ollama", "qwen3:latest") is store.get("ollama", "qwen3:8b")
+
+
+@pytest.mark.asyncio
+async def test_view_answers_when_profiles_dir_is_unwritable(tmp_path, caplog):
+    import logging
+    import os
+
+    root = tmp_path / "profiles"
+    root.mkdir()
+    os.chmod(root, 0o555)
+    try:
+        ollama = FakeOllama(tags=[_tag("qwen3:8b", "d1")],
+                            running=[OllamaRunning(name="qwen3:8b", digest="d1", size=6 * GiB, size_vram=6 * GiB)])
+        config = _config(fallbacks=[{"provider": "anthropic", "model": "claude-x"}])
+        catalog, _ = _catalog(tmp_path, ollama, config=config, extra={"anthropic": FakeCloud()})
+        with caplog.at_level(logging.WARNING, logger="zygos.models"):
+            view = await catalog.view(_ctx())
+    finally:
+        os.chmod(root, 0o755)
+    models = _by_name(view)
+    assert set(models) == {"qwen3:8b", "claude-x"}
+    assert models["qwen3:8b"].family == "qwen3" and models["qwen3:8b"].loaded is True
+    for m in models.values():
+        assert m.profile_error is not None and m.profile_error.startswith("profile can't be saved: ")
+    assert [r for r in caplog.records if r.name == "zygos.models" and r.levelno == logging.WARNING]
+
+
+@pytest.mark.asyncio
+async def test_view_answers_when_an_alias_cannot_be_saved(tmp_path):
+    import os
+
+    ollama = FakeOllama(tags=[_tag("qwen3:8b", "same")])
+    catalog, _ = _catalog(tmp_path, ollama)
+    await catalog.view(_ctx())
+    pdir = tmp_path / "profiles" / "ollama"
+    os.chmod(pdir, 0o555)
+    try:
+        ollama.tags = (_tag("qwen3:8b", "same"), _tag("qwen3:latest", "same"))
+        view = await catalog.view(_ctx())
+    finally:
+        os.chmod(pdir, 0o755)
+    models = _by_name(view)
+    assert set(models) == {"qwen3:8b", "qwen3:latest"}
+    assert models["qwen3:latest"].profile_error.startswith("profile can't be saved: ")
+
+
+@pytest.mark.asyncio
+async def test_view_does_not_rewrite_a_loaded_profile_that_did_not_change(tmp_path):
+    ollama = FakeOllama(tags=[_tag("qwen3:8b", "d1")],
+                        running=[OllamaRunning(name="qwen3:8b", digest="d1", size=6 * GiB, size_vram=6 * GiB)])
+    from datetime import timedelta
+
+    ticks = iter(range(1000))
+    catalog, _ = _catalog(tmp_path, ollama)
+    catalog._clock = lambda: NOW + timedelta(minutes=next(ticks))  # every reading is later
+    await catalog.view(_ctx())
+    path = tmp_path / "profiles" / "ollama" / "qwen3_8b.json"
+    before = (path.read_bytes(), path.stat().st_mtime_ns)
+    await catalog.view(_ctx())
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+
+@pytest.mark.asyncio
+async def test_view_lists_a_configured_ollama_route_that_is_not_installed(tmp_path):
+    ollama = FakeOllama(tags=[_tag("gemma4:e4b", "d2", family="gemma4")])
+    config = _config(fallbacks=[{"provider": "ollama", "model": "llama3"}])
+    catalog, _ = _catalog(tmp_path, ollama, config=config)
+    view = await catalog.view(_ctx())
+    models = _by_name(view)
+    assert set(models) == {"gemma4:e4b", "qwen3:8b", "llama3:latest"}
+    for name, primary in (("qwen3:8b", True), ("llama3:latest", False)):
+        m = models[name]
+        assert m.provider == "ollama" and m.location == "local"
+        assert m.fit is None and m.fit_text == "not installed"
+        assert m.primary is primary and m.fallback is (not primary)
+    assert _files(tmp_path) == ["gemma4_e4b.json"]  # no profile for a model that isn't there
+
+
+@pytest.mark.asyncio
+async def test_view_lists_configured_ollama_routes_when_ollama_is_unreachable(tmp_path):
+    ollama = FakeOllama(fail=ProviderUnavailable("connection refused", provider="ollama"))
+    catalog, _ = _catalog(tmp_path, ollama)
+    view = await catalog.view(_ctx())
+    (qwen,) = view.models
+    assert (qwen.provider, qwen.name, qwen.location, qwen.primary) == ("ollama", "qwen3:8b", "local", True)
+    assert qwen.fit is None and qwen.fit_text == "Ollama unreachable"

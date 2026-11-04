@@ -5,7 +5,7 @@ Stability: Experimental.
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class ToolSchema(BaseModel):
@@ -124,6 +124,11 @@ class OllamaModel(BaseModel):
     context_length: int | None = None
     capabilities: tuple[str, ...] = ()
 
+    @field_validator("capabilities", mode="before")
+    @classmethod
+    def _null_is_empty(cls, v: Any) -> Any:
+        return () if v is None else v
+
 
 class OllamaRunning(BaseModel):
     """One loaded model from ``/api/ps``."""
@@ -146,3 +151,11 @@ class OllamaShow(BaseModel):
     model_info: dict[str, Any] = {}
     parameters: str | None = None
     details: dict[str, Any] = {}
+
+    @field_validator("capabilities", "model_info", "parameters", "details", mode="before")
+    @classmethod
+    def _null_is_default(cls, v: Any, info: Any) -> Any:
+        """An explicit JSON ``null`` means "not reported", same as absent."""
+        if v is not None:
+            return v
+        return cls.model_fields[info.field_name].get_default(call_default_factory=True)

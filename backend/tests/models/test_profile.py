@@ -47,3 +47,10 @@ def test_safe_filename_ollama_tag():
 
 def test_sourced_model():
     assert Sourced(value=1, source="eval", at=None).value == 1
+
+
+def test_record_same_value_keeps_the_original_entry():
+    later = datetime(2026, 11, 5, tzinfo=UTC)
+    p = record(_p(), "identity.k", 1, "ollama", T)
+    assert record(p, "identity.k", 1, "ollama", later) == p
+    assert resolve(record(p, "identity.k", 2, "ollama", later), "identity.k").at == later

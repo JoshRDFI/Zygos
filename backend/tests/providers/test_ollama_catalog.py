@@ -111,3 +111,16 @@ async def test_catalog_calls_reject_malformed_body(method, args):
 async def test_catalog_calls_reject_wrong_shape(method, args):
     with pytest.raises(ProviderProtocolError):
         await getattr(_make(_json({"models": [{"nope": 1}]} if method != "show" else [1])), method)(*args)
+
+
+async def test_list_models_null_capabilities_parse_to_default():
+    entry = {**QWEN, "capabilities": None, "details": None}
+    m, gemma = await _make(_json({"models": [entry, GEMMA]})).list_models()
+    assert m.capabilities == () and m.family is None
+    assert gemma.capabilities == ("completion",)  # one bad entry does not fail the read
+
+
+async def test_show_null_fields_parse_to_defaults():
+    payload = {"capabilities": None, "model_info": None, "details": None, "parameters": None}
+    s = await _make(_json(payload)).show("qwen3:8b")
+    assert s.capabilities == () and s.model_info == {} and s.details == {} and s.parameters is None

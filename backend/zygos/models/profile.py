@@ -37,9 +37,16 @@ class ModelProfile(BaseModel):
 
 
 def record(profile: ModelProfile, key: str, value: Any, source: Source, at: datetime) -> ModelProfile:
-    """Return a copy with exactly one entry for ``source`` under ``key``."""
+    """Return a copy with exactly one entry for ``source`` under ``key``.
+
+    Re-recording the value already held for ``source`` returns ``profile``
+    unchanged, keeping its original date, so an unchanged profile is not resaved.
+    """
     if source == "user":
         raise ValueError("Zygos never records user-sourced values; the user edits that section")
+    if any(s.source == source and type(s.value) is type(value) and s.value == value
+           for s in profile.values.get(key, [])):
+        return profile
     kept = [s for s in profile.values.get(key, []) if s.source != source]
     kept.append(Sourced(value=value, source=source, at=at))
     return profile.model_copy(update={"values": {**profile.values, key: kept}})

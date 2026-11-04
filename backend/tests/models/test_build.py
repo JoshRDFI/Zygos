@@ -140,3 +140,22 @@ def test_refresh_keeps_measured_and_user():
     assert resolve(new, "identity.family").value == "mine"
     assert new.user == {"identity.family": "mine"}
     assert [s for s in new.values["identity.family"] if s.source == "eval"][0].value == 1.5
+
+
+def test_refresh_drops_a_removed_num_ctx():
+    p = profile_from_ollama(_model(), _show(), at=T0)
+    assert resolve(p, "identity.num_ctx").value == 8192
+    p2 = refresh_from_ollama(p, _model(digest="new"), _show(parameters='stop "<|im_end|>"'), at=T1)
+    assert resolve(p2, "identity.num_ctx") is None
+
+
+def test_kv_bytes_per_token_rejects_bool_values():
+    assert kv_bytes_per_token({**QWEN3_INFO, "qwen3.block_count": True}) is None
+
+
+def test_apply_running_twice_with_same_values_keeps_the_profile_unchanged():
+    run = OllamaRunning(name="qwen3:8b", digest="abc", size=6, size_vram=5, context_length=4096)
+    p = apply_running(profile_from_ollama(_model(), _show(), at=T0), run, at=T0)
+    assert apply_running(p, run, at=T1) == p
+    changed = apply_running(p, run.model_copy(update={"size_vram": 7}), at=T1)
+    assert resolve(changed, "performance.vram_bytes").at == T1

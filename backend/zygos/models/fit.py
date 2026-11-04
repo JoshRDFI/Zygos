@@ -97,10 +97,13 @@ def fit(profile: ModelProfile, hardware: HardwareSnapshot | None,
         return Fit(level=level, needs=needs, vram_available_bytes=available,
                    ram_available_bytes=ram, reason=reason)
 
+    size_reason = None
     if needs.total_bytes is None:
-        return result("unknown", "size unknown" if needs.model_bytes is None else "context size unknown")
+        size_reason = "size unknown" if needs.model_bytes is None else "context size unknown"
     if available is None:
-        return result("unknown", "GPU not detected")
+        return result("unknown", "GPU not detected" + (f"; {size_reason}" if size_reason else ""))
+    if size_reason is not None:
+        return result("unknown", size_reason)
     if needs.total_bytes <= available:
         return result("gpu")
     if ram is None:
