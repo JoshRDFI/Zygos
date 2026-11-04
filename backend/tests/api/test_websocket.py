@@ -438,4 +438,25 @@ async def test_typed_user_message_starts_a_turn_marked_as_typed(monkeypatch):
     frame = Frame(channel=CHAT, type="user_message", payload={"text": "typed words"})
     await _dispatch(session, None, frame)
     await session.active_task
-    assert calls == [("typed words", {"spoken_input": False})]
+    assert calls == [("typed words", {"spoken_input": False, "think": None, "rethink_of": None})]
+
+
+@pytest.mark.parametrize("payload, expected", [
+    ({"text": "q", "think": True, "rethink_of": "t1"},
+     {"spoken_input": False, "think": True, "rethink_of": "t1"}),
+    ({"text": "q", "think": False}, {"spoken_input": False, "think": False, "rethink_of": None}),
+    ({"text": "q", "think": "yes", "rethink_of": 7},
+     {"spoken_input": False, "think": None, "rethink_of": None}),
+    ({"text": "q", "think": 1}, {"spoken_input": False, "think": None, "rethink_of": None}),
+])
+async def test_user_message_think_and_rethink_forwarded(monkeypatch, payload, expected):
+    calls = []
+
+    async def fake_run_turn(session, deps, text, cancel, **kw):
+        calls.append((text, kw))
+
+    monkeypatch.setattr("zygos.api.websocket.run_turn", fake_run_turn)
+    session = Session("s1", root_context(InProcessEventBus(), session_id="s1"), created_at=0.0)
+    await _dispatch(session, None, Frame(channel=CHAT, type="user_message", payload=payload))
+    await session.active_task
+    assert calls == [("q", expected)]

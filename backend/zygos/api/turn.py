@@ -14,7 +14,9 @@ Stability: Experimental.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -27,6 +29,7 @@ from zygos.api.frames import CHAT, TOOLS, Frame
 from zygos.api.modality import TurnModality, render_modality
 from zygos.api.session import Session
 from zygos.api.speech import speak_reply
+from zygos.api.thinking import THINKING_PREFIX, resolve_think
 from zygos.api.voice_gate import VoiceGate
 from zygos.memory.service import MemoryService
 from zygos.personalization import Personalization, PreferencesStore
@@ -36,6 +39,8 @@ from zygos.reasoning.service import ReasoningService
 from zygos.reasoning.types import ReasoningInput
 from zygos.runtime.context import CancelToken
 from zygos.services.model import ModelService
+from zygos.thinking.capture import ThinkingRecorder
+from zygos.thinking.support import ThinkingSupportChecker
 from zygos.tools.service import ToolService
 from zygos.tools.types import Tool
 from zygos.voice import VoiceService
@@ -58,6 +63,9 @@ class TurnDeps:
     duck_gain: float = 0.2
     duck_timeout_s: float = 2.0
     preferences: PreferencesStore | None = None
+    # RFC-0012: configured thinking default (providers.think) and support gate
+    think_default: bool | None = False
+    thinking_support: ThinkingSupportChecker | None = None
 
 
 def _json_safe(value):
@@ -104,25 +112,42 @@ def _speaks_reply(session: Session, deps: TurnDeps) -> bool:
 
 
 async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelToken,
-                   *, spoken_input: bool) -> None:
+                   *, spoken_input: bool, think: bool | None,
+                   rethink_of: str | None = None) -> None:
     turn_id = deps.new_id()
-    modality = TurnModality(spoken_input=spoken_input, spoken_output=_speaks_reply(session, deps))
+    session.last_user_text = text
+    session.last_turn_id = turn_id
+    speaks = _speaks_reply(session, deps)
+    modality = TurnModality(spoken_input=spoken_input, spoken_output=speaks)
     prefs = Personalization()
     if deps.preferences is not None:
         try:
             prefs = deps.preferences.get()
         except Exception:  # noqa: BLE001 - personalization is advisory (RFC-0010)
             logger.warning("preferences read failed; degrading to no identity", exc_info=True)
+    effective, unsupported_reason = await resolve_think(session, deps, think)
+    recorder = ThinkingRecorder(turn_id)
     ctx = session.root.child(turn_id, cancel=cancel)
     session.begin_turn()
-    session.enqueue(Frame(channel=CHAT, type="turn.start", payload={"turn_id": turn_id}))
+    session.enqueue(Frame(channel=CHAT, type="turn.start", payload={
+        "turn_id": turn_id, "think": effective, "rethink_of": rethink_of}))
+
+    def _think_fields() -> dict:
+        return {"think": effective, "thinking_ms": recorder.total_ms,
+                "think_unsupported_reason": unsupported_reason}
+
     final = ""
     end_extra: dict = {}
+    prefix: asyncio.Task | None = None
     try:
         if ctx.cancelled:
             session.enqueue(Frame(channel=CHAT, type="turn.end",
-                                  payload={"text": "", "cancelled": True}))
+                                  payload={"text": "", "cancelled": True, **_think_fields()}))
             return
+
+        if spoken_input and effective is True and speaks:
+            prefix = asyncio.create_task(
+                speak_reply(session, deps.voice_service, ctx, THINKING_PREFIX, turn_id))
 
         context: tuple[str, ...] = ()
         if deps.memory_service is not None:
@@ -153,21 +178,34 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
 
             agent_result = await run_agentic_loop(
                 ctx, model_service=deps.model_service, tool_service=deps.tool_service,
-                tools=deps.tools, messages=messages, config=deps.tool_loop_config, observer=_frame)
+                tools=deps.tools, messages=messages, config=deps.tool_loop_config, observer=_frame,
+                think=effective, thinking=recorder)
             final = agent_result.text
             end_extra = {"stop_reason": agent_result.stop_reason, "iterations": agent_result.iterations}
         elif not deps.reasoning_enabled:
-            request = GenerationRequest(messages=build_messages(context, text, modality, prefs))
+            request = GenerationRequest(messages=build_messages(context, text, modality, prefs),
+                                        think=effective)
+            thinking_text = ""
+            started = time.monotonic()
+            first_text_at: float | None = None
             async for chunk in deps.model_service.stream(ctx, request):
+                if chunk.thinking:
+                    thinking_text += chunk.thinking
                 if ctx.cancelled:
                     break
                 if chunk.text:
+                    if first_text_at is None:
+                        first_text_at = time.monotonic()
                     final += chunk.text
                     session.enqueue(Frame(channel=CHAT, type="token", payload={"text": chunk.text}))
+            ended = first_text_at if first_text_at is not None else time.monotonic()
+            await recorder.record(ctx, step="direct", index=0, text=thinking_text,
+                                  elapsed_ms=int((ended - started) * 1000))
         else:
             reasoning = deps.reasoning_factory()
             result = await reasoning.run(ctx, ReasoningInput(
-                prompt=text, context=context, system=system_texts(modality, prefs)))
+                prompt=text, context=context, system=system_texts(modality, prefs),
+                think=effective), thinking=recorder)
             final = result.text
             end_extra = {
                 "confidence": result.final_confidence,
@@ -178,19 +216,25 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
 
         if ctx.cancelled:
             session.enqueue(Frame(channel=CHAT, type="turn.end",
-                                  payload={"text": final, "cancelled": True}))
+                                  payload={"text": final, "cancelled": True, **_think_fields()}))
             return
 
         if deps.memory_service is not None:
             deps.memory_service.store(ctx, text=format_exchange(text, final))
 
-        payload = {"text": final, **end_extra}
+        payload = {"text": final, **end_extra, **_think_fields()}
         session.enqueue(Frame(channel=CHAT, type="turn.end", payload=payload))
 
-        if _speaks_reply(session, deps) and final:
+        if prefix is not None:
+            await prefix
+        if _speaks_reply(session, deps) and final and not ctx.cancelled:
             await speak_reply(session, deps.voice_service, ctx, final, turn_id)
     except Exception:  # noqa: BLE001 - a failed turn must not kill the session
         logger.exception("turn failed")
         session.enqueue(Frame(channel=CHAT, type="error", payload={"message": "generation failed"}))
     finally:
+        if prefix is not None:
+            if not prefix.done():
+                prefix.cancel()
+            await asyncio.gather(prefix, return_exceptions=True)
         session.end_turn()

@@ -50,6 +50,11 @@ class Session:
         self._writer: asyncio.Task | None = None
         self._conn: object | None = None
         self.audio = None  # api.audio.AudioTurn | None — in-flight transcription (Task 11)
+        # RFC-0012: sticky per-session thinking choice (None = config default),
+        # and the last turn's input/id, for rethink.
+        self.think: bool | None = None
+        self.last_user_text: str | None = None
+        self.last_turn_id: str | None = None
 
     def enqueue(self, frame: Frame) -> None:
         self.outbound.put_nowait(frame)

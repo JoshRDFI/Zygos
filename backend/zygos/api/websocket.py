@@ -64,6 +64,10 @@ def _acquire_voice_or_warn(session: Session, deps: TurnDeps) -> bool:
 async def _dispatch(session: Session, deps: TurnDeps, frame: Frame) -> None:
     if frame.channel == CHAT and frame.type == "user_message":
         text = str(frame.payload.get("text", ""))
+        think = frame.payload.get("think")
+        think = think if isinstance(think, bool) else None
+        rethink_of = frame.payload.get("rethink_of")
+        rethink_of = rethink_of if isinstance(rethink_of, str) else None
         if session.active_task is not None and not session.active_task.done():
             if session.active_cancel is not None:
                 session.active_cancel.trip()
@@ -71,7 +75,8 @@ async def _dispatch(session: Session, deps: TurnDeps, frame: Frame) -> None:
         token = CancelToken()
         session.active_cancel = token
         session.active_task = asyncio.create_task(
-            run_turn(session, deps, text, token, spoken_input=False))
+            run_turn(session, deps, text, token, spoken_input=False,
+                     think=think, rethink_of=rethink_of))
     elif frame.channel == CONTROL and frame.type == "cancel":
         if session.active_cancel is not None:
             session.active_cancel.trip()

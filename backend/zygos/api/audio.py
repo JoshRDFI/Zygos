@@ -69,7 +69,7 @@ async def start_audio_turn(session, deps: TurnDeps) -> None:
                     token = CancelToken()
                     session.active_cancel = token
                     session.active_task = asyncio.create_task(
-                        run_turn(session, deps, ev.text, token, spoken_input=True))
+                        run_turn(session, deps, ev.text, token, spoken_input=True, think=None))
         except Exception:  # noqa: BLE001 - a failed transcription must not kill the socket
             session.enqueue(Frame(channel=CHAT, type="error",
                                   payload={"message": "transcription failed"}))

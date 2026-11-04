@@ -74,7 +74,7 @@ async def _run_reasoning_turn(bus, reg):
     deps = TurnDeps(model_service=model,
                     reasoning_factory=lambda: DefaultReasoningService(model, ReasoningConfig(enabled=True, profile="shallow")),
                     reasoning_enabled=True, memory_service=None, new_id=lambda: "t1")
-    await run_turn(session, deps, "q", CancelToken(), spoken_input=False)
+    await run_turn(session, deps, "q", CancelToken(), spoken_input=False, think=None)
     return [f for f in _all(session) if f.channel == "chat"]
 
 

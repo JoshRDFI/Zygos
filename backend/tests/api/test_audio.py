@@ -250,4 +250,4 @@ async def test_stt_final_starts_a_turn_marked_as_spoken(monkeypatch):
     await session.audio.consumer
     await session.active_task
 
-    assert calls == [("what time is it", {"spoken_input": True})]
+    assert calls == [("what time is it", {"spoken_input": True, "think": None})]

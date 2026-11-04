@@ -78,7 +78,7 @@ def _drain(session):
 async def test_tools_turn_emits_call_result_then_turn_end():
     session = _session()
     model = _model([_call("echo", {"value": "hi"}), "the echo was hi"])
-    await run_turn(session, _deps(model), "echo hi", CancelToken(), spoken_input=False)
+    await run_turn(session, _deps(model), "echo hi", CancelToken(), spoken_input=False, think=None)
     kinds = [(f.channel, f.type) for f in _drain(session)]
     assert kinds[0] == (CHAT, "turn.start")
     assert (TOOLS, "call") in kinds
@@ -90,7 +90,7 @@ async def test_tools_turn_emits_call_result_then_turn_end():
 async def test_tools_turn_result_payload_and_final_text():
     session = _session()
     model = _model([_call("echo", {"value": "hi"}), "final answer"])
-    await run_turn(session, _deps(model), "echo hi", CancelToken(), spoken_input=False)
+    await run_turn(session, _deps(model), "echo hi", CancelToken(), spoken_input=False, think=None)
     frames = _drain(session)
     result = next(f for f in frames if f.type == "result")
     assert result.payload["ok"] is True
@@ -104,7 +104,7 @@ async def test_tools_turn_result_payload_and_final_text():
 async def test_tools_present_overrides_reasoning_enabled():
     session = _session()
     model = _model(["no tools here"])   # model returns plain text on first call
-    await run_turn(session, _deps(model, reasoning=True), "hi", CancelToken(), spoken_input=False)
+    await run_turn(session, _deps(model, reasoning=True), "hi", CancelToken(), spoken_input=False, think=None)
     frames = _drain(session)
     # went through the agentic loop (no chat:token frames), ended with the loop's answer
     assert not any(f.type == "token" for f in frames)
@@ -116,7 +116,7 @@ async def test_no_tools_falls_through_to_streaming():
     session = _session()
     model = _model(["alpha beta"])
     deps = _deps(model, tools=())
-    await run_turn(session, deps, "hi", CancelToken(), spoken_input=False)
+    await run_turn(session, deps, "hi", CancelToken(), spoken_input=False, think=None)
     frames = _drain(session)
     assert [f.payload["text"] for f in frames if f.type == "token"] == ["alpha", "beta"]
 
@@ -127,6 +127,6 @@ async def test_cancelled_before_start_ends_cancelled():
     model = _model(["unused"])
     token = CancelToken()
     token.trip()
-    await run_turn(session, _deps(model), "hi", token, spoken_input=False)
+    await run_turn(session, _deps(model), "hi", token, spoken_input=False, think=None)
     frames = _drain(session)
     assert frames[-1].payload.get("cancelled") is True
