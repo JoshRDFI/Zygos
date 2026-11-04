@@ -1,6 +1,6 @@
 # RFC-0013: Model Picker, Model Profiles, and Best-Model-Per-Task Routing
 
-- **Status:** Draft
+- **Status:** Accepted (2026-11-04)
 - **Author:** Zygos maintainers
 - **Created:** 2026-11-04
 - **Governs:** how Zygos knows what each model can do and whether it fits the
