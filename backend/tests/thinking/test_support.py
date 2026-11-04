@@ -91,3 +91,21 @@ async def test_hung_probe_is_bounded_and_not_cached(monkeypatch):
     assert time.monotonic() - start < 2
     assert result == ThinkingSupport(supported=False, reason="couldn't check the model")
     assert checker.cached(OLLAMA) is None
+
+
+async def test_check_selected_survives_a_raising_checker():
+    from zygos.thinking.support import UNCHECKED_REASON, check_selected
+
+    class Boom:
+        async def check(self, route):
+            raise RuntimeError("boom")
+
+    result = await check_selected(Boom(), lambda: OLLAMA)
+    assert result == ThinkingSupport(supported=False, reason=UNCHECKED_REASON)
+
+
+async def test_check_selected_without_a_checker_is_unchecked():
+    from zygos.thinking.support import UNCHECKED_REASON, check_selected
+
+    result = await check_selected(None, lambda: OLLAMA)
+    assert result == ThinkingSupport(supported=False, reason=UNCHECKED_REASON)

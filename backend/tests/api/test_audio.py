@@ -368,3 +368,17 @@ async def test_say_synthesizes_when_speaker_on_and_is_silent_otherwise(monkeypat
     s.speak = False
     await speech.say(s, D(), "Thinking off.")
     assert len(spoken) == 1
+
+
+async def test_thinking_on_by_voice_on_unsupported_model_speaks_the_reason(monkeypatch):
+    from zygos.thinking.support import ThinkingSupport
+
+    async def unsupported(deps):
+        return ThinkingSupport(supported=False, reason="gemma3:4b can't think")
+
+    monkeypatch.setattr("zygos.api.thinking._check_support", unsupported)
+    monkeypatch.setattr(_PhraseDeps, "thinking_support", object())
+    session, turns, said = await _drive(monkeypatch, "turn thinking on")
+    (state,) = _frames(session, "think.state")
+    assert state.payload["supported"] is False
+    assert said == ["Gemma3:4b can't think."]

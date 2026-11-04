@@ -15,7 +15,7 @@ import logging
 
 from zygos.api.frames import CHAT, Frame
 from zygos.api.speech import say
-from zygos.api.thinking import send_think_state
+from zygos.api.thinking import send_think_state, spoken_toggle_confirmation
 from zygos.api.turn import TurnDeps, run_turn
 from zygos.api.voice_commands import parse_voice_command
 from zygos.runtime.context import CancelToken
@@ -60,8 +60,8 @@ async def _dispatch_final(session, deps: TurnDeps, text: str, token: CancelToken
     else:  # think_on / think_off
         on = cmd.command == "think_on"
         session.think = on
-        await send_think_state(session, deps)
-        await say(session, deps, "Thinking on." if on else "Thinking off.")
+        support = await send_think_state(session, deps)
+        await say(session, deps, spoken_toggle_confirmation(on, support))
 
 
 async def start_audio_turn(session, deps: TurnDeps) -> None:

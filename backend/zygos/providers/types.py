@@ -95,3 +95,16 @@ class EmbedResult(BaseModel):
     model: str
     dim: int
     usage: Usage = Usage()
+
+
+PROBE_TIMEOUT_S = 5.0
+"""Upper bound on a thinking-support probe (RFC-0012 §5); far below the generation timeout."""
+
+
+class ThinkingSupport(BaseModel):
+    """Whether a model can think natively; ``reason`` says why not (RFC-0012 §5)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    supported: bool
+    reason: str | None = None

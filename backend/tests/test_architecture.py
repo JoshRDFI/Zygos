@@ -36,3 +36,24 @@ def test_runtime_core_never_imports_web_frameworks():
         if imported & FORBIDDEN:
             offenders.append(str(file))
     assert offenders == [], f"Runtime core imports web frameworks: {offenders}"
+
+
+def _imported_modules(source: str) -> set[str]:
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            found.add(node.module)
+    return found
+
+
+def test_providers_never_import_the_thinking_package():
+    """RFC-0012: providers are the lower layer; zygos.thinking builds on them."""
+    offenders = [
+        str(file)
+        for file in (PACKAGE_ROOT / "providers").rglob("*.py")
+        if any(m == "zygos.thinking" or m.startswith("zygos.thinking.")
+               for m in _imported_modules(file.read_text(encoding="utf-8")))
+    ]
+    assert offenders == [], f"providers import zygos.thinking: {offenders}"

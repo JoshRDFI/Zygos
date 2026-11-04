@@ -8,20 +8,14 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping
 
-from pydantic import BaseModel, ConfigDict
-
 from zygos.providers.base import Provider
+from zygos.providers.types import PROBE_TIMEOUT_S, ThinkingSupport
 from zygos.services.router import RouteChoice
 
-PROBE_TIMEOUT_S = 5.0
+__all__ = ["PROBE_TIMEOUT_S", "UNCHECKED_REASON", "ThinkingSupport", "ThinkingSupportChecker",
+           "check_selected"]
+
 UNCHECKED_REASON = "couldn't check the model"
-
-
-class ThinkingSupport(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    supported: bool
-    reason: str | None = None
 
 
 class ThinkingSupportChecker:
@@ -59,10 +53,12 @@ async def check_selected(checker, select: Callable[[], RouteChoice]) -> Thinking
     """Pick a route with ``select`` and check it; never raises.
 
     A route that cannot be picked (e.g. ``ProviderUnavailable``: every circuit
-    open) counts as unsupported with :data:`UNCHECKED_REASON`.
+    open), a missing checker, or a checker that raises all count as unsupported
+    with :data:`UNCHECKED_REASON`.
     """
-    try:
-        route = select()
-    except Exception:  # noqa: BLE001 - an unroutable model is simply unsupported
+    if checker is None:
         return ThinkingSupport(supported=False, reason=UNCHECKED_REASON)
-    return await checker.check(route)
+    try:
+        return await checker.check(select())
+    except Exception:  # noqa: BLE001 - an unroutable or unprobeable model is simply unsupported
+        return ThinkingSupport(supported=False, reason=UNCHECKED_REASON)

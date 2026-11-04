@@ -11,10 +11,10 @@ import httpx
 from zygos.errors import ProviderProtocolError
 from zygos.providers.base import ProviderSettings, ensure_ok, translate_transport_error
 from zygos.providers.types import (
-    EmbedRequest, EmbedResult, GenerationChunk, GenerationRequest, GenerationResult, ToolInvocation, Usage,
+    PROBE_TIMEOUT_S, EmbedRequest, EmbedResult, GenerationChunk, GenerationRequest, GenerationResult,
+    ThinkingSupport, ToolInvocation, Usage,
 )
 from zygos.runtime.capabilities import Capability
-from zygos.thinking.support import PROBE_TIMEOUT_S, ThinkingSupport
 
 
 class OllamaProvider:

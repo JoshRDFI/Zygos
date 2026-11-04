@@ -10,10 +10,9 @@ import httpx
 
 from zygos.providers.base import ProviderSettings
 from zygos.providers.types import (
-    EmbedRequest, EmbedResult, GenerationChunk, GenerationRequest, GenerationResult, Usage,
+    EmbedRequest, EmbedResult, GenerationChunk, GenerationRequest, GenerationResult, ThinkingSupport, Usage,
 )
 from zygos.runtime.capabilities import Capability
-from zygos.thinking.support import ThinkingSupport
 
 
 class FakeProvider:

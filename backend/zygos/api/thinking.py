@@ -44,16 +44,24 @@ def _enqueue_state(session, deps, supported: bool, reason: str | None) -> None:
                           payload={"enabled": enabled, "supported": supported, "reason": reason}))
 
 
-async def send_think_state(session, deps) -> None:
+async def send_think_state(session, deps) -> ThinkingSupport:
     """Enqueue ``control:think.state {enabled, supported, reason}`` (RFC-0012 §2).
 
     Always re-checks support (a cache hit once a probe has succeeded) and always
-    sends; the sent ``(supported, reason)`` is kept on the session."""
-    supported, reason = True, None
+    sends; the sent ``(supported, reason)`` is kept on the session and returned."""
+    support = ThinkingSupport(supported=True)
     if deps.thinking_support is not None:
         support = await _check_support(deps)
-        supported, reason = support.supported, support.reason
-    _enqueue_state(session, deps, supported, reason)
+    _enqueue_state(session, deps, support.supported, support.reason)
+    return support
+
+
+def spoken_toggle_confirmation(on: bool, support: ThinkingSupport) -> str:
+    """What to say after a spoken thinking toggle (RFC-0012 §4): the plain
+    confirmation, or the reason when thinking was asked for but can't happen."""
+    if on and not support.supported and support.reason:
+        return f"{support.reason[0].upper()}{support.reason[1:]}."
+    return "Thinking on." if on else "Thinking off."
 
 
 async def announce_if_changed(session, deps) -> None:
