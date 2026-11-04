@@ -326,3 +326,109 @@ async def test_run_turn_requires_an_explicit_modality():
     model, _ = _recording_model(text="ok")
     with pytest.raises(TypeError):
         await run_turn(_session(), _deps(model), "hi", CancelToken())
+
+
+# --- RFC-0010 §3 identity injection ---------------------------------------
+import logging  # noqa: E402
+import sqlite3  # noqa: E402
+
+from zygos.personalization import Personalization  # noqa: E402
+
+
+class _DictStore:
+    def __init__(self, prefs=None):
+        self.prefs = prefs or Personalization()
+
+    def get(self):
+        return self.prefs
+
+    def set(self, prefs):
+        self.prefs = prefs
+
+
+def _prefs_deps(model, store, **kw):
+    return TurnDeps(model_service=model, reasoning_factory=lambda: None,
+                    reasoning_enabled=False, memory_service=None,
+                    new_id=lambda: "turn-1", preferences=store, **kw)
+
+
+def test_build_messages_empty_prefs_is_byte_identical():
+    assert build_messages(("m",), "hi") == build_messages(
+        ("m",), "hi", TurnModality(), Personalization())
+
+
+def test_build_messages_orders_identity_modality_memory():
+    msgs = build_messages(("fact",), "hi", TurnModality(spoken_input=True),
+                          Personalization(user_name="Josh"))
+    assert [m.role for m in msgs] == ["system", "system", "system", "user"]
+    assert "Josh" in msgs[0].content
+    assert "speech-to-text" in msgs[1].content
+    assert "fact" in msgs[2].content
+
+
+@pytest.mark.asyncio
+async def test_turn_reads_store_each_turn():
+    model, provider = _recording_model(text="ok")
+    store = _DictStore()
+    deps = _prefs_deps(model, store)
+    await run_turn(_session(), deps, "hi", CancelToken(), spoken_input=False)
+    assert _system_texts(provider.requests[0]) == []
+    store.set(Personalization(user_name="Josh"))
+    await run_turn(_session(), deps, "hi", CancelToken(), spoken_input=False)
+    (system,) = _system_texts(provider.requests[1])
+    assert "Josh" in system
+
+
+@pytest.mark.asyncio
+async def test_broken_store_degrades_turn(caplog):
+    class _Broken:
+        def get(self):
+            raise sqlite3.OperationalError("locked")
+
+    model, provider = _recording_model(text="ok")
+    session = _session()
+    with caplog.at_level(logging.WARNING, logger="zygos.api.turn"):
+        await run_turn(session, _prefs_deps(model, _Broken()), "hi", CancelToken(),
+                       spoken_input=False)
+    assert _system_texts(provider.requests[0]) == []
+    assert any(f.type == "turn.end" for f in _drain(session))
+    assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_reasoning_path_receives_identity():
+    seen = {}
+
+    class _CapturingReasoning:
+        async def run(self, ctx, input):
+            seen["input"] = input
+            from zygos.reasoning.types import ReasoningResult
+            return ReasoningResult(text="r", loops_used=1, final_confidence=1.0,
+                                   halted_early=False, model="m")
+
+    model, _ = _recording_model(text="ok")
+    deps = TurnDeps(model_service=model, reasoning_factory=_CapturingReasoning,
+                    reasoning_enabled=True, memory_service=None, new_id=lambda: "turn-1",
+                    preferences=_DictStore(Personalization(assistant_name="Rommie")))
+    await run_turn(_session(), deps, "hi", CancelToken(), spoken_input=False)
+    assert "Rommie" in seen["input"].system[0]
+
+
+@pytest.mark.asyncio
+async def test_tools_path_receives_identity(monkeypatch):
+    captured = {}
+
+    async def fake_loop(ctx, *, messages, **kw):
+        captured["messages"] = messages
+
+        class _R:
+            text, stop_reason, iterations = "done", "final", 1
+        return _R()
+
+    monkeypatch.setattr("zygos.api.turn.run_agentic_loop", fake_loop)
+    model, _ = _recording_model(text="ok")
+    deps = _prefs_deps(model, _DictStore(Personalization(assistant_name="Rommie")),
+                       tools=(object(),))
+    await run_turn(_session(), deps, "hi", CancelToken(), spoken_input=False)
+    systems = [m.content for m in captured["messages"] if m.role == "system"]
+    assert "Rommie" in systems[0]

@@ -29,6 +29,8 @@ from zygos.api.session import Session
 from zygos.api.speech import speak_reply
 from zygos.api.voice_gate import VoiceGate
 from zygos.memory.service import MemoryService
+from zygos.personalization import Personalization, PreferencesStore
+from zygos.personalization.render import render_identity
 from zygos.providers.types import GenerationRequest, Message
 from zygos.reasoning.service import ReasoningService
 from zygos.reasoning.types import ReasoningInput
@@ -55,6 +57,7 @@ class TurnDeps:
     voice_gate: "VoiceGate | None" = None
     duck_gain: float = 0.2
     duck_timeout_s: float = 2.0
+    preferences: PreferencesStore | None = None
 
 
 def _json_safe(value):
@@ -66,18 +69,23 @@ def _json_safe(value):
     return str(value)
 
 
-def system_texts(modality: TurnModality) -> tuple[str, ...]:
-    """Runtime-authored system messages for this turn, ahead of memory (RFC-0010 §3a).
+def system_texts(modality: TurnModality,
+                 prefs: Personalization = Personalization()) -> tuple[str, ...]:
+    """Runtime-authored system messages for this turn, ahead of memory (RFC-0010 §3, §3a).
+
+    Identity first, then modality.
 
     One rendering site shared by the message-list paths and the reasoning path.
     """
-    rendered = render_modality(modality)
-    return (rendered,) if rendered else ()
+    texts = (render_identity(prefs), render_modality(modality))
+    return tuple(t for t in texts if t)
 
 
 def build_messages(context: tuple[str, ...], text: str,
-                   modality: TurnModality = TurnModality()) -> tuple[Message, ...]:
-    messages: list[Message] = [Message(role="system", content=t) for t in system_texts(modality)]
+                   modality: TurnModality = TurnModality(),
+                   prefs: Personalization = Personalization()) -> tuple[Message, ...]:
+    messages: list[Message] = [Message(role="system", content=t)
+                               for t in system_texts(modality, prefs)]
     if context:
         joined = "\n".join(context)
         messages.append(Message(role="system", content=f"Relevant memory:\n{joined}"))
@@ -99,6 +107,12 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
                    *, spoken_input: bool) -> None:
     turn_id = deps.new_id()
     modality = TurnModality(spoken_input=spoken_input, spoken_output=_speaks_reply(session, deps))
+    prefs = Personalization()
+    if deps.preferences is not None:
+        try:
+            prefs = deps.preferences.get()
+        except Exception:  # noqa: BLE001 - personalization is advisory (RFC-0010)
+            logger.warning("preferences read failed; degrading to no identity", exc_info=True)
     ctx = session.root.child(turn_id, cancel=cancel)
     session.begin_turn()
     session.enqueue(Frame(channel=CHAT, type="turn.start", payload={"turn_id": turn_id}))
@@ -120,7 +134,7 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
                 context = ()
 
         if deps.tools:
-            messages = build_messages(context, text, modality)
+            messages = build_messages(context, text, modality, prefs)
 
             def _frame(event: ToolEvent) -> None:
                 if isinstance(event, ToolCallStarted):
@@ -143,7 +157,7 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
             final = agent_result.text
             end_extra = {"stop_reason": agent_result.stop_reason, "iterations": agent_result.iterations}
         elif not deps.reasoning_enabled:
-            request = GenerationRequest(messages=build_messages(context, text, modality))
+            request = GenerationRequest(messages=build_messages(context, text, modality, prefs))
             async for chunk in deps.model_service.stream(ctx, request):
                 if ctx.cancelled:
                     break
@@ -153,7 +167,7 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
         else:
             reasoning = deps.reasoning_factory()
             result = await reasoning.run(ctx, ReasoningInput(
-                prompt=text, context=context, system=system_texts(modality)))
+                prompt=text, context=context, system=system_texts(modality, prefs)))
             final = result.text
             end_extra = {
                 "confidence": result.final_confidence,
