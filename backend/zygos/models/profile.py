@@ -13,8 +13,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-Source = Literal["user", "eval", "measured", "modelfile", "ollama", "name"]
-PRECEDENCE: tuple[Source, ...] = ("user", "eval", "measured", "modelfile", "ollama", "name")
+Source = Literal["user", "eval", "measured", "modelfile", "ollama", "server", "name"]
+PRECEDENCE: tuple[Source, ...] = ("user", "eval", "measured", "modelfile", "ollama", "server", "name")
 
 
 class Sourced(BaseModel):

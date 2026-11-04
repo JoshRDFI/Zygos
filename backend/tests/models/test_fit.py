@@ -178,3 +178,190 @@ def test_fit_without_gpu_says_gpu_not_detected_even_when_size_is_unknown():
     assert f.level == "unknown" and f.reason == "GPU not detected; context size unknown"
     f = fit(_profile(download=None), None)
     assert f.level == "unknown" and f.reason == "GPU not detected; size unknown"
+
+
+# --- llama.cpp: launch-aware estimates (RFC-0014 §4) ---
+
+import pytest  # noqa: E402
+
+from zygos.backends.launch import LaunchSettings  # noqa: E402
+from zygos.models.fit import KV_TYPE_BYTES, estimate_llamacpp  # noqa: E402
+from zygos.models.profile import resolve  # noqa: E402
+
+MB = 1024**2
+LAYER = 100 * MB
+OTHER = 500 * MB
+KV_LAYER_4096 = 8 * (128 * 2 + 128 * 2) * 4096  # 16 MiB per layer, f16, 4096 tokens
+
+
+def _lc_profile(blocks=36, layer=LAYER, experts=None, other=OTHER, geometry=True, tensors=True):
+    p = ModelProfile(provider="llamacpp", model="m", names=["m"])
+    vals = {"identity.download_size_bytes": blocks * layer + other}
+    if geometry:
+        vals.update({"identity.block_count": blocks, "identity.kv_heads": 8,
+                     "identity.key_length": 128, "identity.value_length": 128})
+    if tensors:
+        vals["identity.tensor_bytes"] = {
+            "layers": {str(i): layer for i in range(blocks)},
+            "experts": {str(i): experts for i in range(blocks)} if experts else {},
+            "other": other}
+    for key, val in vals.items():
+        p = record(p, key, val, "modelfile", T0)
+    return p
+
+
+def test_kv_type_bytes_exact():
+    assert KV_TYPE_BYTES == {"f32": 4.0, "f16": 2.0, "bf16": 2.0, "q8_0": 34 / 32, "q4_0": 18 / 32,
+                             "q4_1": 20 / 32, "q5_0": 22 / 32, "q5_1": 24 / 32, "iq4_nl": 18 / 32}
+
+
+def test_llamacpp_all_gpu_defaults_are_assumed():
+    e = estimate_llamacpp(_lc_profile(), LaunchSettings())
+    gpu = 36 * LAYER + OTHER + 36 * KV_LAYER_4096 + RUNTIME_OVERHEAD_BYTES
+    assert (e.gpu_bytes, e.cpu_bytes, e.split_by) == (gpu, 0, None)
+    assert e.total_bytes == gpu
+    assert e.model_bytes == 36 * LAYER + OTHER
+    assert e.context_bytes == 36 * KV_LAYER_4096
+    assert e.context_tokens == 4096 and e.context_assumed is True
+    assert e.measured is False
+    assert e.assumptions == ("context 4096 tokens (assumed)",
+                             "all layers on GPU (llama-server default assumed)")
+
+
+def test_llamacpp_explicit_settings_have_no_assumptions():
+    e = estimate_llamacpp(_lc_profile(), LaunchSettings(ctx_size=8192, n_gpu_layers="all"))
+    assert e.assumptions == ()
+    assert e.context_tokens == 8192 and e.context_assumed is False
+    assert e.context_bytes == 36 * KV_LAYER_4096 * 2
+    assert e.split_by is None
+
+
+def test_llamacpp_ngl_at_or_above_block_count_is_all():
+    e = estimate_llamacpp(_lc_profile(), LaunchSettings(n_gpu_layers=36))
+    assert e.cpu_bytes == 0 and e.split_by is None
+
+
+def test_llamacpp_ngl_20_of_36_splits_by_settings():
+    e = estimate_llamacpp(_lc_profile(), LaunchSettings(n_gpu_layers=20))
+    assert e.gpu_bytes == 20 * LAYER + 20 * KV_LAYER_4096 + RUNTIME_OVERHEAD_BYTES
+    assert e.cpu_bytes == 16 * LAYER + OTHER + 16 * KV_LAYER_4096
+    assert e.total_bytes == e.gpu_bytes + e.cpu_bytes
+    assert e.split_by == "settings"
+    assert e.assumptions == ("context 4096 tokens (assumed)",)
+
+
+def test_llamacpp_ngl_uses_the_last_layers():
+    p = _lc_profile(blocks=4)
+    tb = resolve(p, "identity.tensor_bytes").value
+    tb = {**tb, "layers": {"0": 1 * MB, "1": 2 * MB, "2": 4 * MB, "3": 8 * MB}}
+    p = record(p, "identity.tensor_bytes", tb, "modelfile", T0)
+    e = estimate_llamacpp(p, LaunchSettings(n_gpu_layers=1, no_kv_offload=True))
+    assert e.gpu_bytes == 8 * MB + RUNTIME_OVERHEAD_BYTES
+
+
+def test_llamacpp_n_cpu_moe_keeps_first_layers_experts_on_cpu():
+    p = _lc_profile(blocks=10, layer=1000 * MB, experts=900 * MB)
+    e = estimate_llamacpp(p, LaunchSettings(n_cpu_moe=8, ctx_size=4096))
+    assert e.gpu_bytes == 10 * 1000 * MB - 8 * 900 * MB + OTHER + 10 * KV_LAYER_4096 + RUNTIME_OVERHEAD_BYTES
+    assert e.cpu_bytes == 8 * 900 * MB
+    assert e.split_by == "settings"
+
+
+def test_llamacpp_n_cpu_moe_ignores_layers_already_on_cpu():
+    p = _lc_profile(blocks=10, layer=1000 * MB, experts=900 * MB)
+    e = estimate_llamacpp(p, LaunchSettings(n_cpu_moe=8, n_gpu_layers=4, ctx_size=4096))
+    # GPU holds layers 6..9; of those only 6 and 7 are among the first 8.
+    assert e.gpu_bytes == 4 * 1000 * MB - 2 * 900 * MB + 4 * KV_LAYER_4096 + RUNTIME_OVERHEAD_BYTES
+    assert e.cpu_bytes == 6 * 1000 * MB + 2 * 900 * MB + OTHER + 6 * KV_LAYER_4096
+
+
+def test_llamacpp_quantized_cache_types():
+    e = estimate_llamacpp(_lc_profile(), LaunchSettings(cache_type_k="q4_0", cache_type_v="q8_0"))
+    per_layer = 8 * (128 * 18 / 32 + 128 * 34 / 32) * 4096
+    assert e.context_bytes == round(36 * per_layer)
+
+
+def test_llamacpp_no_kv_offload_puts_all_kv_in_ram():
+    e = estimate_llamacpp(_lc_profile(), LaunchSettings(n_gpu_layers="all", no_kv_offload=True))
+    assert e.gpu_bytes == 36 * LAYER + OTHER + RUNTIME_OVERHEAD_BYTES
+    assert e.cpu_bytes == 36 * KV_LAYER_4096
+    assert e.split_by == "settings"
+
+
+def test_llamacpp_unknown_cache_type_is_unknown():
+    e = estimate_llamacpp(_lc_profile(), LaunchSettings(cache_type_v="q3_k"))
+    assert e.total_bytes is None and e.gpu_bytes is None and e.cpu_bytes is None
+    assert e.reason == "unknown cache type q3_k"
+    f = fit(_lc_profile(), _hw(free_gb=16, ram_gb=32), needs=e)
+    assert f.level == "unknown" and f.reason == "unknown cache type q3_k"
+
+
+@pytest.mark.parametrize("kw", [{"geometry": False}, {"tensors": False}])
+def test_llamacpp_missing_geometry_or_tensors_is_unknown(kw):
+    e = estimate_llamacpp(_lc_profile(**kw), LaunchSettings())
+    assert e.total_bytes is None and e.split_by is None
+    assert fit(_lc_profile(**kw), _hw(free_gb=16, ram_gb=32), needs=e).level == "unknown"
+
+
+def _split():
+    p = _lc_profile()
+    return p, estimate_llamacpp(p, LaunchSettings(n_gpu_layers=20))
+
+
+def test_fit_split_partial_when_each_side_fits():
+    p, e = _split()
+    f = fit(p, _hw(free_bytes=e.gpu_bytes, ram_gb=32), needs=e)
+    assert f.level == "partial"
+    assert (f.gpu_bytes, f.cpu_bytes, f.split_by) == (e.gpu_bytes, e.cpu_bytes, "settings")
+
+
+def test_fit_split_no_when_gpu_side_exceeds_vram_even_if_total_fits():
+    p, e = _split()
+    f = fit(p, _hw(free_bytes=e.gpu_bytes - 1, ram_gb=64), needs=e)
+    assert f.level == "no"
+
+
+def test_fit_split_no_when_cpu_side_exceeds_ram():
+    p, e = _split()
+    f = fit(p, _hw(free_gb=24, ram_gb=1), needs=e)
+    assert f.level == "no"
+
+
+def test_fit_split_unknown_when_a_side_is_unknown():
+    p, e = _split()
+    assert fit(p, _hw(free_gb=24), needs=e).level == "unknown"
+    assert fit(p, _hw(free_gb=24), needs=e).reason == "RAM unknown"
+    assert fit(p, _hw(ram_gb=64), needs=e).level == "unknown"
+
+
+def test_fit_unsplit_llamacpp_judged_like_ollama():
+    p = _lc_profile()
+    e = estimate_llamacpp(p, LaunchSettings())
+    assert fit(p, _hw(free_bytes=e.total_bytes, ram_gb=1), needs=e).level == "gpu"
+    assert fit(p, _hw(free_bytes=e.total_bytes - 1, ram_gb=1), needs=e).level == "partial"
+    assert fit(p, _hw(free_gb=1, ram_gb=1), needs=e).level == "no"
+    assert fit(p, _hw(free_gb=1, ram_gb=1), needs=e).split_by is None
+
+
+def test_existing_fit_has_new_fields_defaulted():
+    f = fit(_profile(), _hw(free_gb=16))
+    assert (f.gpu_bytes, f.cpu_bytes, f.split_by) == (None, None, None)
+    assert f.needs.assumptions == () and f.needs.reason is None
+
+
+def test_describe_split_exact():
+    p, e = _split()
+    f = fit(p, _hw(free_gb=8, ram_gb=32), needs=e)
+    assert describe(f) == (
+        "needs ≈2.8 GB on GPU + 2.3 GB in RAM (split by your settings): "
+        "4.0 GB model + 0.6 GB context (4096 tokens, assumed) + 0.5 GB overhead; 8.0 GB free"
+        "; assumed: context 4096 tokens (assumed)")
+
+
+def test_describe_unsplit_llamacpp_exact():
+    p = _lc_profile()
+    e = estimate_llamacpp(p, LaunchSettings(ctx_size=8192))
+    f = fit(p, _hw(free_gb=8, ram_gb=32), needs=e)
+    assert describe(f) == (
+        "needs ≈5.6 GB: 4.0 GB model + 1.1 GB context (8192 tokens) + 0.5 GB overhead; 8.0 GB free"
+        "; assumed: all layers on GPU (llama-server default assumed)")
