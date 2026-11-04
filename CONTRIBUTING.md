@@ -30,27 +30,35 @@ Code and documentation conventions are catalogued in the [Style Guide](./STYLE_G
 
 ## Development Setup
 
-### v2 (Python backend)
+### v2 backend (Python)
 
 ```bash
 cd backend
 python3.12 -m venv .venv
-.venv/bin/pip install -e '.[dev]'
+.venv/bin/pip install -e '.[dev,server,embeddings]'
 .venv/bin/pytest
 ```
 
-A clean setup should report **28 passed** as of milestone M1. If you see fewer, your
-environment is incomplete.
+The default run excludes tests that need a live Ollama, real voice models, or a GPU
+(`-m live`, `-m live_voice`, `-m live_gpu` run them). Add the `voice` extra to work on
+the real speech engines.
+
+### v2 frontend (React)
+
+```bash
+cd frontend
+npm install
+npm run test
+npm run build
+```
+
+See [frontend/README.md](./frontend/README.md) for running the UI against a local
+backend and the manual voice smoke tests.
 
 ### v1 (TypeScript, bugfixes only)
 
-```bash
-npm install
-npm run verify
-npm test
-```
-
-All commands run from the repository root.
+v1 lives on the [`v1` branch](https://github.com/JoshRDFI/Zygos/tree/v1). Check it out
+and run `npm install && npm run verify && npm test` from its root.
 
 ## The RFC Process
 
@@ -73,8 +81,10 @@ out to be wrong, write a new RFC that supersedes it.
 ## Pull Requests
 
 1. **Branch from `main`.**
-2. **Keep both test suites green.** Every PR must pass `npm test` (v1) and
-   `backend/.venv/bin/pytest` (v2) before review. Failing tests are not acceptable
+2. **Keep the test suites green.** Every PR to `main` must pass the backend suite
+   (`backend/.venv/bin/pytest`) and the frontend suite and build
+   (`npm run test && npm run build` in `frontend/`). v1 bugfixes target
+   the `v1` branch and must pass its `npm test`. Failing tests are not acceptable
    as a work-in-progress signal — use a draft PR for that instead.
 3. **Follow the commit style.** Commits use the form `type(scope): subject`, where
    `type` is one of `feat`, `fix`, `docs`, `test`, or `chore`, and `scope` identifies

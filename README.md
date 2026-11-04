@@ -102,9 +102,71 @@ downloaded — a design goal of the local-first path (verify it for your configu
 tool you invoke — like fetching a web page you asked for — reaches the network by design;
 that's a capability you control and can see, not a data leak.
 
+## Quick start (v2 web app, local)
+
+This runs the v2 server and web UI from this branch, fully local with Ollama. v2 is
+early: expect rough edges, and the Files and Memory panels and the model picker are still
+placeholders.
+
+**Prerequisites:** Python 3.12, [Node.js](https://nodejs.org) 18+, and
+[Ollama](https://ollama.com) running locally with the default model pulled:
+`ollama pull qwen3:8b`.
+
+**1. Backend** (terminal 1):
+
+```bash
+cd backend
+python3.12 -m venv .venv
+.venv/bin/pip install -e '.[server]'
+.venv/bin/python -m zygos.cli doctor     # checks the wiring; should end with "healthy"
+.venv/bin/python -m zygos.cli serve      # http://127.0.0.1:8000
+```
+
+**2. Web UI** (terminal 2):
+
+```bash
+cd frontend
+npm install
+npm run build
+npm run preview                          # open http://localhost:5173
+```
+
+The UI proxies to the backend on port 8000; if that port is taken, start `serve` with
+`--port 8010` and the UI with `ZYGOS_BACKEND=http://127.0.0.1:8010 npm run preview`.
+`npm run dev` also works for UI work, but voice needs the built app (`build` + `preview`),
+because the dev server won't serve the speech-detection model files.
+
+**Configuration.** With no config file Zygos uses its defaults. To change the model, use a
+public provider, or turn on memory or voice, copy
+[`backend/config.example.yaml`](./backend/config.example.yaml), edit it, and pass it
+before the subcommand: `.venv/bin/python -m zygos.cli --config zygos.yaml serve`. API keys
+are read from your environment (for example `export OPENAI_API_KEY=...`); v2 does not
+read `.env` files.
+
+**Voice (optional).** Install the local engines and enable them in your config:
+
+```bash
+.venv/bin/pip install -e '.[server,voice]'
+```
+
+```yaml
+voice:
+  enabled: true
+  stt: { engine: faster_whisper }
+  tts: { engine: kokoro }
+```
+
+Models download on first use. In the UI, turn on **Voice**, then **Speaker**, then either
+**Mic** (push to talk) or **Always-on** (hands-free). Use headphones with Always-on so the
+assistant doesn't hear itself. For GPU speech synthesis, see [GPU TTS](#gpu-tts-optional)
+above.
+
+**Semantic memory (optional).** `memory.enabled: true` gives keyword recall out of the box;
+`retrieval_mode: hybrid` adds local embeddings and needs `pip install -e '.[server,embeddings]'`.
+
 ## Quick start (v1 CLI, local)
 
-The usable runtime today is the v1 CLI, which lives on the
+The stable but frozen v1 CLI lives on the
 [`v1` branch](https://github.com/JoshRDFI/Zygos/tree/v1). This path keeps everything local
 with Ollama.
 

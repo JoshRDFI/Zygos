@@ -1,0 +1,46 @@
+# Zygos v2 example configuration.
+#
+# Every key is optional: with no config file at all, Zygos runs with the defaults
+# shown here (local Ollama `qwen3:8b`, tools on, memory and voice off).
+# Copy this file, edit what you need, and pass it with --config:
+#
+#   cp config.example.yaml zygos.yaml
+#   .venv/bin/python -m zygos.cli --config zygos.yaml serve
+#
+# Any string value written exactly as "${VAR}" is read from the environment.
+# Zygos v2 does not load .env files: export variables in your shell instead.
+
+providers:
+  primary:
+    provider: ollama          # ollama | vllm | openai | anthropic
+    model: qwen3:8b           # `ollama pull qwen3:8b` first
+  # Native model thinking (qwen3/gemma4 reasoning tokens). Off by default because it
+  # adds seconds before the first word of a reply (ADR-0007).
+  think: false
+
+  # To use a public provider, swap the primary route and add a credential:
+  # primary:
+  #   provider: openai
+  #   model: gpt-4o-mini
+  # credentials:
+  #   openai:
+  #     api_key: ${OPENAI_API_KEY}
+
+server:
+  host: 127.0.0.1             # loopback only; change deliberately to expose it
+  port: 8000
+
+memory:
+  enabled: false              # true = layered memory in a local SQLite file
+  db_path: .zygos/memory.db
+  retrieval_mode: fts5        # vector / hybrid need the `embeddings` extra
+
+voice:
+  enabled: false              # true = speech in/out in the web UI
+  stt:
+    engine: fake              # faster_whisper needs the `voice` extra
+    model: base.en
+  tts:
+    engine: fake              # kokoro needs the `voice` extra
+    voice: af_heart
+    device: cpu               # cuda after `zygos voice setup-gpu`

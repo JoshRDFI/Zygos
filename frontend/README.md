@@ -8,19 +8,26 @@ Self-hosted React + TypeScript + Vite + Tailwind UI for the Zygos runtime.
    (defaults to `127.0.0.1:8000`).
 2. From `frontend/`: `npm install` then `npm run dev`.
 3. Open the printed `localhost` URL (default `http://localhost:5173`). Vite
-   proxies `/sessions`, `/runtime`, and `/ws` to the backend.
+   proxies `/sessions`, `/runtime`, and `/ws` to the backend. If the backend runs
+   on another port, set `ZYGOS_BACKEND`, e.g.
+   `ZYGOS_BACKEND=http://127.0.0.1:8010 npm run dev`.
+
+**Voice needs the built app.** The dev server won't serve the vendored VAD model
+files under `public/vad`, so for anything involving the mic use
+`npm run build && npm run preview` (same port, same proxy) instead of `npm run dev`.
 
 ## Test / build
 
 - `npm run test` — Vitest unit/component suite.
 - `npm run build` — type-check + production build.
 
-## Status (increment 1b)
+## Status
 
 Live: Chat (streaming), Inspect, Doctor, Models/Tools lists, and the **voice
 audio round-trip** — Mic (click-to-toggle capture → STT), Speaker (TTS
 playback), Voice master toggle, and **Always-on** (hands-free with browser VAD
-+ duck-then-stop barge-in). Placeholder: Files, Memory, model selection.
++ duck-then-stop barge-in). Placeholder: Files, Memory, model selection. Not yet
+built: a thinking on/off toggle, file drag-and-drop into chat.
 
 ## Voice round-trip smoke test (increment 1b)
 
@@ -28,13 +35,14 @@ Automated tests cover the pure logic (Vitest/jsdom has no Web Audio); the live
 round-trip is a manual check:
 
 1. **Backend with real engines.** From `backend/`: `.venv/bin/python -m pip
-   install '.[voice]'`, then run `serve` with config
+   install -e '.[server,voice]'`, then run `serve` with config
    `voice.enabled=true`, `voice.stt.engine=faster_whisper`,
    `voice.tts.engine=kokoro` (first run downloads the models). Fake engines
    (`voice.stt.engine=fake` / `voice.tts.engine=fake`) exercise the same
    pipeline with a canned transcript and silent PCM if you only want to test
    the plumbing.
-2. **Frontend.** `cd frontend && npm run dev`; open `http://localhost:5173`.
+2. **Frontend.** `cd frontend && npm run build && npm run preview`; open
+   `http://localhost:5173`.
 3. **Round-trip.** Click **Voice** (master on) → Mic and Speaker enable. Click
    **Speaker** on. Click **Mic**, speak a sentence, click **Mic** again to
    commit → the transcript appears as a user message and drives a reply; with
@@ -52,7 +60,7 @@ barge-in path is a manual check. Assets are self-hosted under `public/vad`
 
 1. **Backend with real engines** — as in the 1b smoke test: `.[voice]` installed,
    `voice.enabled=true`, `voice.stt.engine=faster_whisper`, `voice.tts.engine=kokoro`.
-2. **Frontend** — `npm run dev`; open `http://localhost:5173`. **Use headphones**
+2. **Frontend** — `npm run build && npm run preview`; open `http://localhost:5173`. **Use headphones**
    so the assistant's own audio does not re-trigger the mic.
 3. **Hands-free turn.** Click **Voice**, then **Speaker**, then **Always-on**
    (Mic disables; "listening…" shows). Speak a sentence and pause → it transcribes
