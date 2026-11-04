@@ -37,13 +37,14 @@ def _yes(answer: str) -> bool:
 
 def summarize(settings: BackendsSettings) -> list[str]:
     ll = settings.llamacpp
-    vllm = settings.vllm[0].base_url if settings.vllm else "not set"
-    return [
-        f"Ollama: {settings.ollama.base_url or 'default address'}",
-        f"llama.cpp: server {ll.server_path or 'not set'}; models {ll.models_dir or 'not set'}; "
-        f"launch settings: {ll.default_args or 'none'}",
-        f"vLLM: {vllm}",
-    ]
+    llama_line = (
+        "llama.cpp: not set up"
+        if ll == LlamaCppBackend()
+        else f"llama.cpp: server {ll.server_path or 'not set'}; models {ll.models_dir or 'not set'}; "
+        f"launch settings: {ll.default_args or 'none'}"
+    )
+    vllm_line = f"vLLM: {settings.vllm[0].base_url}" if settings.vllm else "vLLM: not set up"
+    return [f"Ollama: {settings.ollama.base_url or 'default address'}", llama_line, vllm_line]
 
 
 async def _ask_llama_server(
@@ -64,6 +65,9 @@ async def _ask_llama_server(
             answer = ask(f"llama-server path (Enter keeps {shown}): ").strip()
             if not answer:
                 return current
+    if current:
+        say("Keeping the current llama-server path.")
+        return current
     say("Keeping the llama-server path unset.")
     return None
 
@@ -116,6 +120,8 @@ async def run_backend_setup(
                 default_args=args,
                 model_args=old.llamacpp.model_args,
             )
+        elif old.llamacpp != LlamaCppBackend():
+            llamacpp = LlamaCppBackend()  # saved before, now declined: drop it (on confirm)
         else:
             say(_INSTALL)
 
@@ -131,6 +137,8 @@ async def run_backend_setup(
                 if ids:
                     say("Models served: " + ", ".join(ids))
                 vllm = [VllmEndpoint(base_url=url)]
+        else:
+            vllm = []
 
         # 4. Review and save
         new = BackendsSettings(ollama=ollama, llamacpp=llamacpp, vllm=vllm)
@@ -142,8 +150,13 @@ async def run_backend_setup(
         store.set(new)
         old_vllm = old.vllm[0].base_url if old.vllm else None
         new_vllm = new.vllm[0].base_url if new.vllm else None
-        if new.ollama.base_url != old.ollama.base_url or new_vllm != old_vllm:
+        new_ollama = new.ollama.base_url
+        ollama_changed = new_ollama != old.ollama.base_url and (
+            new_ollama is None or new_ollama.rstrip("/") != current_ollama_url.rstrip("/")
+        )
+        if ollama_changed or new_vllm != old_vllm:
             say("Restart Zygos for address changes to apply.")
         return True
     except EOFError:
+        say("Nothing was saved.")
         return False
