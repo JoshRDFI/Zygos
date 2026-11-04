@@ -128,3 +128,17 @@ def test_serve_no_hint_when_set(cfg, served, capsys):
     assert main([*base, "serve"]) == 0
     assert "not personalized" not in capsys.readouterr().err
     assert served
+
+
+def test_interrupt_escaping_asyncio_run_exits_130(cfg, monkeypatch, capsys):
+    # Real Ctrl-C under asyncio.run: the runner re-raises KeyboardInterrupt
+    # from asyncio.run itself, outside the coroutine.
+    base, _ = cfg
+
+    def fake_run(coro):
+        coro.close()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("zygos.cli.__main__.asyncio.run", fake_run)
+    assert main([*base, "personalize"]) == 130
+    assert "Traceback" not in capsys.readouterr().err

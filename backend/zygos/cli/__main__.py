@@ -51,12 +51,9 @@ async def _personalize(runtime, args: argparse.Namespace) -> int:
     store = runtime.preferences
     sub = args.personalize_command
     if sub is None:
-        try:
-            await run_onboarding(
-                runtime.new_context(), runtime.model_service, store, ask=input, say=print
-            )
-        except KeyboardInterrupt:
-            return 130
+        await run_onboarding(
+            runtime.new_context(), runtime.model_service, store, ask=input, say=print
+        )
         return 0
     if sub == "show":
         prefs = store.get()
@@ -152,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
             run_server(runtime, host=host, port=port)
             return 0
         return asyncio.run(_amain(args))
+    except KeyboardInterrupt:
+        return 130  # asyncio.run re-raises Ctrl-C itself; _amain's finally already closed the runtime
     except ConfigError as error:
         print(f"zygos: configuration error: {error}", file=sys.stderr)
         return 1
