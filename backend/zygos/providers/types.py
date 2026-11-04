@@ -5,7 +5,7 @@ Stability: Experimental.
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 
 class ToolSchema(BaseModel):
@@ -108,3 +108,41 @@ class ThinkingSupport(BaseModel):
 
     supported: bool
     reason: str | None = None
+
+
+class OllamaModel(BaseModel):
+    """One installed model, flattened from an ``/api/tags`` entry (RFC-0013 §2)."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    name: str
+    size: int
+    digest: str
+    family: str | None = None
+    parameter_size: str | None = None
+    quantization_level: str | None = None
+    context_length: int | None = None
+    capabilities: tuple[str, ...] = ()
+
+
+class OllamaRunning(BaseModel):
+    """One loaded model from ``/api/ps``."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    name: str
+    digest: str
+    size: int
+    size_vram: int
+    context_length: int | None = None
+
+
+class OllamaShow(BaseModel):
+    """The parts of ``/api/show`` the picker reads."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    capabilities: tuple[str, ...] = ()
+    model_info: dict[str, Any] = {}
+    parameters: str | None = None
+    details: dict[str, Any] = {}

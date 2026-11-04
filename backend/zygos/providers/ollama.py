@@ -7,12 +7,13 @@ import json
 from typing import AsyncIterator
 
 import httpx
+from pydantic import ValidationError
 
 from zygos.errors import ProviderProtocolError
 from zygos.providers.base import ProviderSettings, ensure_ok, translate_transport_error
 from zygos.providers.types import (
     PROBE_TIMEOUT_S, EmbedRequest, EmbedResult, GenerationChunk, GenerationRequest, GenerationResult,
-    ThinkingSupport, ToolInvocation, Usage,
+    OllamaModel, OllamaRunning, OllamaShow, ThinkingSupport, ToolInvocation, Usage,
 )
 from zygos.runtime.capabilities import Capability
 
@@ -109,6 +110,44 @@ class OllamaProvider:
         if "thinking" in capabilities:
             return ThinkingSupport(supported=True)
         return ThinkingSupport(supported=False, reason=f"{model} can't think")
+
+    async def _read(self, method: str, path: str, **kwargs) -> object:
+        """Bounded JSON call shared by the catalog reads."""
+        try:
+            response = await self._client.request(
+                method, f"{self._settings.base_url}{path}", timeout=PROBE_TIMEOUT_S, **kwargs)
+        except httpx.HTTPError as error:
+            raise translate_transport_error(self.name, error) from error
+        ensure_ok(self.name, response)
+        try:
+            return response.json()
+        except ValueError as error:
+            raise ProviderProtocolError(f"ollama returned malformed body: {error}", provider=self.name) from error
+
+    async def list_models(self) -> tuple[OllamaModel, ...]:
+        """Installed models (GET /api/tags), ``details`` lifted up."""
+        payload = await self._read("GET", "/api/tags")
+        try:
+            return tuple(
+                OllamaModel(**{**entry, **(entry.get("details") or {})}) for entry in payload["models"])
+        except (ValidationError, KeyError, TypeError, AttributeError) as error:
+            raise ProviderProtocolError(f"ollama returned malformed body: {error}", provider=self.name) from error
+
+    async def running_models(self) -> tuple[OllamaRunning, ...]:
+        """Models currently loaded (GET /api/ps)."""
+        payload = await self._read("GET", "/api/ps")
+        try:
+            return tuple(OllamaRunning(**entry) for entry in payload["models"])
+        except (ValidationError, KeyError, TypeError) as error:
+            raise ProviderProtocolError(f"ollama returned malformed body: {error}", provider=self.name) from error
+
+    async def show(self, model: str) -> OllamaShow:
+        """Model metadata (POST /api/show)."""
+        payload = await self._read("POST", "/api/show", json={"model": model})
+        try:
+            return OllamaShow(**payload)
+        except (ValidationError, TypeError) as error:
+            raise ProviderProtocolError(f"ollama returned malformed body: {error}", provider=self.name) from error
 
     async def embed(self, request: EmbedRequest) -> EmbedResult:
         try:
