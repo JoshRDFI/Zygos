@@ -68,6 +68,7 @@ class GenerationResult(BaseModel):
     usage: Usage = Usage()
     tool_calls: tuple[ToolInvocation, ...] = ()
     finish_reason: Literal["stop", "tool_calls", "length"] = "stop"
+    thinking: str | None = None   # the model's native thinking text, when it produced any
 
 
 class GenerationChunk(BaseModel):
@@ -75,6 +76,7 @@ class GenerationChunk(BaseModel):
 
     text: str
     done: bool = False
+    thinking: str | None = None
 
 
 class EmbedRequest(BaseModel):

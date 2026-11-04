@@ -13,6 +13,7 @@ from zygos.providers.types import (
     EmbedRequest, EmbedResult, GenerationChunk, GenerationRequest, GenerationResult, Usage,
 )
 from zygos.runtime.capabilities import Capability
+from zygos.thinking.support import ThinkingSupport
 
 
 class FakeProvider:
@@ -27,9 +28,18 @@ class FakeProvider:
         *,
         script: list["str | Exception | GenerationResult"] | None = None,
         text: str = "fake response",
+        thinking: str | None = None,
+        think_capable: bool | None = None,
     ) -> None:
         self._script = list(script) if script is not None else None
         self._text = text
+        self._thinking = thinking
+        if think_capable is not None:
+            async def thinking_support(model: str) -> ThinkingSupport:
+                if think_capable:
+                    return ThinkingSupport(supported=True)
+                return ThinkingSupport(supported=False, reason=f"{model} can't think")
+            self.thinking_support = thinking_support
 
     def _next_item(self):
         if self._script is None:
@@ -47,11 +57,14 @@ class FakeProvider:
         return GenerationResult(
             text=text, model=request.model, provider=self.name,
             usage=Usage(input_tokens=len(request.messages), output_tokens=len(text.split())),
+            thinking=self._thinking,
         )
 
     async def stream(self, request: GenerationRequest) -> AsyncIterator[GenerationChunk]:
         item = self._next_item()
         text = item.text if isinstance(item, GenerationResult) else item
+        if self._thinking:
+            yield GenerationChunk(text="", thinking=self._thinking)
         for word in text.split():
             yield GenerationChunk(text=word)
         yield GenerationChunk(text="", done=True)

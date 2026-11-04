@@ -17,7 +17,9 @@ router = APIRouter()
 
 @router.get("/runtime", response_model=Manifest)
 async def get_runtime(request: Request) -> Manifest:
-    return runtime_manifest(request.app.state.runtime)
+    runtime = request.app.state.runtime
+    await runtime.thinking_support.check(runtime.model_service.select_model())
+    return runtime_manifest(runtime)
 
 
 @router.get("/runtime/health", response_model=RuntimeHealth)

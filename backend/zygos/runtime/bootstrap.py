@@ -38,6 +38,7 @@ from zygos.runtime.context import ExecutionContext, root_context
 from zygos.runtime.events import EventBus, InProcessEventBus, Subscriber
 from zygos.services.model import DefaultModelService, ModelService
 from zygos.services.router import ProviderRouter, RouterSnapshot, RouteChoice
+from zygos.thinking.support import ThinkingSupportChecker
 from zygos.tools.build import ToolBuildContext
 from zygos.tools.permissions import PermissionPolicy
 from zygos.tools.registry import ToolRegistry
@@ -65,6 +66,7 @@ class RuntimeAssembly:
     event_bus: EventBus
     capability_registry: CapabilityRegistry
     providers: Mapping[str, Provider]
+    thinking_support: ThinkingSupportChecker
     tool_service: ToolService
     tools: tuple[Tool, ...]
     tool_loop_config: ToolLoopConfig
@@ -296,6 +298,7 @@ def build_runtime(
         event_bus=bus,
         capability_registry=registry,
         providers=providers,
+        thinking_support=ThinkingSupportChecker(providers),
         tool_service=tool_service,
         tools=tools,
         tool_loop_config=tool_loop_config,

@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 from zygos.runtime.capabilities import Capability, CapabilityBinding
+from zygos.services.router import RouteChoice
+from zygos.thinking.support import ThinkingSupport
 from zygos.voice.contract import SttHealth, TtsHealth
 
 if TYPE_CHECKING:
@@ -61,6 +63,7 @@ class Manifest(BaseModel):
     reasoning_enabled: bool
     versions: dict[str, str]
     voice: VoiceManifest | None = None
+    thinking: ThinkingSupport | None = None   # primary route, from the checker cache
 
 
 def _package_version() -> str:
@@ -99,4 +102,7 @@ def runtime_manifest(runtime: "RuntimeAssembly") -> Manifest:
         reasoning_enabled=config.reasoning.enabled,
         versions={"zygos": _package_version(), "python": platform.python_version()},
         voice=voice,
+        thinking=runtime.thinking_support.cached(
+            RouteChoice(provider=config.providers.primary.provider, model=config.providers.primary.model)
+        ),
     )

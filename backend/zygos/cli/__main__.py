@@ -133,6 +133,7 @@ async def _amain(args: argparse.Namespace) -> int:
     runtime = build_runtime(args.config)
     try:
         if args.command == "inspect":
+            await runtime.thinking_support.check(runtime.model_service.select_model())
             print(render_manifest(runtime_manifest(runtime)))
             return 0
         if args.command == "doctor":

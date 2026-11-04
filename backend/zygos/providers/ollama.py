@@ -14,6 +14,7 @@ from zygos.providers.types import (
     EmbedRequest, EmbedResult, GenerationChunk, GenerationRequest, GenerationResult, ToolInvocation, Usage,
 )
 from zygos.runtime.capabilities import Capability
+from zygos.thinking.support import ThinkingSupport
 
 
 class OllamaProvider:
@@ -75,6 +76,7 @@ class OllamaProvider:
             payload = response.json()
             message = payload["message"]
             text = message.get("content") or ""
+            thinking = message.get("thinking") or None
             tool_calls = tuple(
                 ToolInvocation(id=f"call_{i}", name=tc["function"]["name"],
                                arguments=tc["function"].get("arguments", {}))
@@ -87,8 +89,19 @@ class OllamaProvider:
             text=text, model=request.model, provider=self.name,
             usage=Usage(input_tokens=payload.get("prompt_eval_count", 0),
                         output_tokens=payload.get("eval_count", 0)),
-            tool_calls=tool_calls, finish_reason=finish_reason,
+            tool_calls=tool_calls, finish_reason=finish_reason, thinking=thinking,
         )
+
+    async def thinking_support(self, model: str) -> ThinkingSupport:
+        """Ask Ollama whether the model can think (POST /api/show capabilities)."""
+        response = await self._client.post(
+            f"{self._settings.base_url}/api/show", json={"model": model},
+            timeout=self._settings.timeout_s,
+        )
+        response.raise_for_status()
+        if "thinking" in (response.json().get("capabilities") or []):
+            return ThinkingSupport(supported=True)
+        return ThinkingSupport(supported=False, reason=f"{model} can't think")
 
     async def embed(self, request: EmbedRequest) -> EmbedResult:
         try:
@@ -131,6 +144,8 @@ class OllamaProvider:
                     if payload.get("done"):
                         yield GenerationChunk(text="", done=True)
                         return
-                    yield GenerationChunk(text=payload.get("message", {}).get("content", ""))
+                    message = payload.get("message", {})
+                    yield GenerationChunk(text=message.get("content", ""),
+                                          thinking=message.get("thinking") or None)
         except httpx.HTTPError as error:
             raise translate_transport_error(self.name, error) from error

@@ -61,3 +61,19 @@ def test_scrub_error_truncates():
 
 def test_scrub_error_keeps_non_path_slashes():
     assert _scrub_error("retry and/or fail, ratio 1/2") == "retry and/or fail, ratio 1/2"
+
+
+async def test_manifest_thinking_from_cache():
+    from zygos.providers.fake import FakeProvider
+
+    runtime = build_runtime()
+    try:
+        runtime.providers["ollama"].__class__  # providers exist
+        route = runtime.model_service.select_model()
+        assert runtime_manifest(runtime).thinking is None
+        runtime.thinking_support._providers = {route.provider: FakeProvider(think_capable=True)}
+        result = await runtime.thinking_support.check(route)
+        assert result.supported is True
+        assert runtime_manifest(runtime).thinking == result
+    finally:
+        await runtime.aclose()

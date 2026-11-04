@@ -202,3 +202,48 @@ async def test_request_think_overrides_settings_default():
     provider = OllamaProvider(settings=settings, client=make_client(lambda r: None))
     req = GenerationRequest(model="m", messages=(Message(role="user", content="hi"),), think=True)
     assert (await _captured_body(provider, req, stream=False))["think"] is True
+
+
+async def test_generate_returns_thinking():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"message": {"content": "hi", "thinking": "hmm"}, "done": True})
+
+    result = await _make(make_client(handler)).generate(contract_request())
+    assert result.text == "hi"
+    assert result.thinking == "hmm"
+
+    def plain(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"message": {"content": "hi"}, "done": True})
+
+    assert (await _make(make_client(plain)).generate(contract_request())).thinking is None
+
+
+async def test_stream_chunks_carry_thinking():
+    lines = [
+        json.dumps({"message": {"content": "", "thinking": "a"}, "done": False}),
+        json.dumps({"message": {"content": "", "thinking": "b"}, "done": False}),
+        json.dumps({"message": {"content": "yo"}, "done": False}),
+        json.dumps({"message": {"content": ""}, "done": True}),
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="\n".join(lines) + "\n")
+
+    chunks = [c async for c in _make(make_client(handler)).stream(contract_request())]
+    assert [c.thinking for c in chunks if c.thinking] == ["a", "b"]
+    assert "".join(c.text for c in chunks) == "yo"
+
+
+async def test_thinking_support_reads_capabilities():
+    def make(caps):
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.url.path == "/api/show"
+            assert json.loads(request.content) == {"model": "qwen3:8b"}
+            return httpx.Response(200, json={"capabilities": caps})
+        return _make(make_client(handler))
+
+    ok = await make(["completion", "thinking"]).thinking_support("qwen3:8b")
+    assert ok.supported is True
+    no = await make(["completion"]).thinking_support("qwen3:8b")
+    assert no.supported is False
+    assert no.reason == "qwen3:8b can't think"
