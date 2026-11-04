@@ -3,7 +3,8 @@
 Produces chat frames directly onto the session's outbound queue — never through
 the event bus (output is load-bearing, not observational; RFC-0002). Memory is
 guarded by presence and advisory (a retrieve failure degrades, never aborts).
-Reasoning-off streams tokens; reasoning-on constructs a fresh ReasoningService
+Reasoning-off streams tokens (with the speaker on, speaking them sentence by sentence
+as they arrive); reasoning-on constructs a fresh ReasoningService
 per turn and delivers the answer at turn.end. Tools-present (deps.tools non-empty)
 wins over both: it drives the agentic loop (RFC-0008), emitting live `tools:call`/
 `tools:result` frames and delivering the answer whole at turn.end (no chat:token
@@ -29,6 +30,7 @@ from zygos.api.frames import CHAT, TOOLS, Frame
 from zygos.api.modality import TurnModality, render_modality
 from zygos.api.session import Session
 from zygos.api.speech import speak_reply
+from zygos.api.speech_stream import SpeechPacer, StreamingSpeaker
 from zygos.api.thinking import THINKING_PREFIX, resolve_think, schedule_think_state
 from zygos.api.voice_gate import VoiceGate
 from zygos.memory.service import MemoryService
@@ -114,6 +116,7 @@ def _speaks_reply(session: Session, deps: TurnDeps) -> bool:
 async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelToken,
                    *, spoken_input: bool, think: bool | None,
                    rethink_of: str | None = None) -> None:
+    turn_started_at = time.monotonic()
     turn_id = deps.new_id()
     session.last_user_text = text
     session.last_turn_id = turn_id
@@ -139,6 +142,8 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
     final = ""
     end_extra: dict = {}
     prefix: asyncio.Task | None = None
+    pacer: SpeechPacer | None = None
+    speaker: StreamingSpeaker | None = None
     try:
         if ctx.cancelled:
             session.enqueue(Frame(channel=CHAT, type="turn.end",
@@ -186,6 +191,10 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
             request = GenerationRequest(messages=build_messages(context, text, modality, prefs),
                                         think=effective)
             thinking = TailBuffer()  # bounded, filled chunk by chunk (RFC-0012 §6)
+            if speaks:  # speak sentence by sentence as the reply streams
+                pacer = SpeechPacer()
+                speaker = StreamingSpeaker(session, deps.voice_service, ctx, turn_id,
+                                           turn_started_at=turn_started_at, wait_for=prefix)
             started = time.monotonic()
             first_text_at: float | None = None
             async for chunk in deps.model_service.stream(ctx, request):
@@ -198,6 +207,8 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
                         first_text_at = time.monotonic()
                     final += chunk.text
                     session.enqueue(Frame(channel=CHAT, type="token", payload={"text": chunk.text}))
+                    if speaker is not None:
+                        speaker.say(pacer.feed(chunk.text))
             ended = first_text_at if first_text_at is not None else time.monotonic()
             await recorder.record(ctx, step="direct", index=0, text=thinking,
                                   elapsed_ms=int((ended - started) * 1000))
@@ -225,18 +236,26 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
         payload = {"text": final, **end_extra, **_think_fields()}
         session.enqueue(Frame(channel=CHAT, type="turn.end", payload=payload))
 
+        if speaker is not None:
+            speaker.say(pacer.finish())
+            await speaker.close(pacer)
         if prefix is not None:
             await prefix
-        if _speaks_reply(session, deps) and final and not ctx.cancelled:
+        if speaker is None and _speaks_reply(session, deps) and final and not ctx.cancelled:
             await speak_reply(session, deps.voice_service, ctx, final, turn_id)
     except Exception:  # noqa: BLE001 - a failed turn must not kill the session
         logger.exception("turn failed")
+        if speaker is not None:  # speak what was complete, then report the failure
+            speaker.say(pacer.flush_complete())
+            await speaker.close(pacer)
         session.enqueue(Frame(channel=CHAT, type="error", payload={"message": "generation failed"}))
     finally:
         if prefix is not None:
             if not prefix.done():
                 prefix.cancel()
             await asyncio.gather(prefix, return_exceptions=True)
+        if speaker is not None:
+            await speaker.abort(pacer)  # no-op once closed; ends a cancelled speech
         session.end_turn()
         # RFC-0012 §2: a support change (e.g. Ollama warmed up since connect) is
         # re-announced. Backgrounded: barge-in awaits this task, and a cold probe

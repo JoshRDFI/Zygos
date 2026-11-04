@@ -194,24 +194,6 @@ def _system_texts(request):
     return [m.content for m in request.messages if m.role == "system"]
 
 
-class _SpeakingVoice:
-    """Just enough VoiceService for run_turn's spoken-output gate."""
-
-    tts_available = True
-
-
-@pytest.fixture
-def no_speech(monkeypatch):
-    """Skip real TTS; record that run_turn tried to speak."""
-    spoken = []
-
-    async def fake_speak_reply(session, voice, ctx, text, turn_id):
-        spoken.append(text)
-
-    monkeypatch.setattr("zygos.api.turn.speak_reply", fake_speak_reply)
-    return spoken
-
-
 def test_build_messages_default_is_unchanged_by_modality_seam():
     assert build_messages(("fact",), "hi") == build_messages(("fact",), "hi", TurnModality())
 
@@ -240,17 +222,18 @@ async def test_spoken_turn_tells_model_input_is_a_transcript():
 
 
 @pytest.mark.asyncio
-async def test_speaker_on_tells_model_reply_is_read_aloud(no_speech):
+async def test_speaker_on_tells_model_reply_is_read_aloud():
     model, provider = _recording_model(text="ok")
     session = _session()
     session.speak = True
+    voice = _RecordingVoice()  # the direct path streams speech, so it needs a real-ish voice
     deps = TurnDeps(model_service=model, reasoning_factory=lambda: None,
                     reasoning_enabled=False, memory_service=None,
-                    new_id=lambda: "turn-1", voice_service=_SpeakingVoice())
+                    new_id=lambda: "turn-1", voice_service=voice)
     await run_turn(session, deps, "hi", CancelToken(), spoken_input=False, think=None)
     (system,) = _system_texts(provider.requests[0])
     assert "text-to-speech" in system
-    assert no_speech == ["ok"]  # same gate drove the actual speech
+    assert voice.texts == ["ok"]  # same gate drove the actual speech
 
 
 @pytest.mark.asyncio
@@ -814,3 +797,208 @@ async def test_turn_end_carries_rethink_of():
     await run_turn(session, _think_deps(model), "hi", token, spoken_input=False,
                    think=True, rethink_of="t2")
     assert _end(_drain(session)).payload["rethink_of"] == "t2"
+
+
+# --- Sentence-streaming speech: run_turn's direct path (2026-11-04 spec §3, §5) ----------
+
+from zygos.api.frames import AUDIO_OUT, Frame  # noqa: E402
+
+
+class _ScriptedStreamProvider(_RecordingProvider):
+    """Streams scripted items: a str is a text chunk, a GenerationChunk is sent as is,
+    an asyncio.Event is awaited (a gate), an Exception is raised."""
+
+    def __init__(self, items, **kw):
+        super().__init__(**kw)
+        self.items = items
+
+    async def stream(self, request):
+        self.requests.append(request)
+        for item in self.items:
+            if isinstance(item, asyncio.Event):
+                await item.wait()
+            elif isinstance(item, Exception):
+                raise item
+            elif isinstance(item, GenerationChunk):
+                yield item
+            else:
+                yield GenerationChunk(text=item)
+        yield GenerationChunk(text="", done=True)
+
+
+def _scripted_model(items):
+    provider = _ScriptedStreamProvider(items)
+    return DefaultModelService(ProviderRouter([RouteChoice("fake", "m")], {"fake": provider}))
+
+
+def _speech_events(bus):
+    events = []
+
+    async def on_event(e):
+        if e.type == "speech.timing":
+            events.append(e.payload)
+
+    bus.subscribe(on_event)
+    return events
+
+
+def _tts(frames, kind):
+    return [f for f in frames if isinstance(f, Frame) and f.channel == AUDIO_OUT and f.type == kind]
+
+
+def _kinds(frames):
+    """Frame order as labels: 'turn.end', 'tts.begin', 'tts.end', 'pcm', 'error', ..."""
+    return ["pcm" if isinstance(f, bytes) else f.type for f in frames]
+
+
+async def _until(pred, n=200):
+    for _ in range(n):
+        if pred():
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("condition never became true")
+
+
+S1 = "One two three four five six seven eight nine ten."
+S2 = "Eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty."
+
+
+def _speaking_session(bus=None):
+    session = _session(bus)
+    session.speak = True
+    return session
+
+
+async def test_long_reply_starts_speaking_before_turn_end():
+    gate = asyncio.Event()
+    voice = _RecordingVoice()
+    session = _speaking_session()
+    model = _scripted_model([S1 + " ", S2 + " ", gate, "Done."])
+    turn = asyncio.create_task(run_turn(session, _think_deps(model, voice_service=voice), "hi",
+                                        CancelToken(), spoken_input=False, think=None))
+    await _until(lambda: len(voice.texts) == 2 and session.outbound.qsize() >= 6)
+    early = _drain(session)
+    kinds = _kinds(early)
+    assert "turn.end" not in kinds
+    assert "tts.begin" in kinds and "pcm" in kinds
+    assert voice.texts == [S1, S2]
+    gate.set()
+    await asyncio.wait_for(turn, 1.0)
+    frames = early + _drain(session)
+    assert len(_tts(frames, "tts.begin")) == 1
+    (end,) = _tts(frames, "tts.end")
+    assert end.payload["reason"] == "complete"
+    assert voice.texts == [S1, S2, "Done."]
+
+
+async def test_short_reply_turn_end_before_tts_begin():
+    bus = InProcessEventBus()
+    timings = _speech_events(bus)
+    voice = _RecordingVoice()
+    session = _speaking_session(bus)
+    model = _scripted_model(["Hi ", "there."])
+    await run_turn(session, _think_deps(model, voice_service=voice), "hi", CancelToken(),
+                   spoken_input=False, think=None)
+    kinds = _kinds(_drain(session))
+    assert kinds.index("turn.end") < kinds.index("tts.begin")
+    assert kinds.count("tts.begin") == 1 and kinds.count("tts.end") == 1
+    assert voice.texts == ["Hi there."]
+    (timing,) = timings
+    assert timing.reason == "complete" and timing.words_at_start == 2
+
+
+async def test_barge_in_while_waiting_for_next_sentence():
+    gate = asyncio.Event()
+    voice = _RecordingVoice()
+    session = _speaking_session()
+    token = CancelToken()
+    model = _scripted_model([S1 + " ", gate, S2 + " ", "More words here."])
+    turn = asyncio.create_task(run_turn(session, _think_deps(model, voice_service=voice), "hi",
+                                        token, spoken_input=False, think=None))
+    await _until(lambda: voice.texts == [S1] and any(
+        isinstance(f, bytes) for f in list(session.outbound._queue)))
+    pcm_before = sum(isinstance(f, bytes) for f in list(session.outbound._queue))
+    token.trip()
+    gate.set()
+    await asyncio.wait_for(turn, 1.0)
+    frames = _drain(session)
+    (turn_end,) = [f for f in frames if isinstance(f, Frame) and f.type == "turn.end"]
+    assert turn_end.payload["cancelled"] is True
+    (end,) = _tts(frames, "tts.end")
+    assert end.payload["reason"] == "cancelled"
+    assert sum(isinstance(f, bytes) for f in frames) == pcm_before
+    assert voice.texts == [S1]
+    kinds = _kinds(frames)
+    assert "pcm" not in kinds[kinds.index("tts.end"):]
+
+
+async def test_generation_error_speaks_complete_sentences_then_errors():
+    voice = _RecordingVoice()
+    session = _speaking_session()
+    model = _scripted_model(["One two ", "three. ", "Four", RuntimeError("boom")])
+    await run_turn(session, _think_deps(model, voice_service=voice), "hi", CancelToken(),
+                   spoken_input=False, think=None)
+    frames = _drain(session)
+    assert voice.texts == ["One two three."]
+    kinds = _kinds(frames)
+    assert kinds.count("tts.end") == 1
+    assert kinds.index("tts.end") < kinds.index("error")
+    (err,) = [f for f in frames if isinstance(f, Frame) and f.type == "error"]
+    assert err.channel == CHAT and err.payload == {"message": "generation failed"}
+
+
+async def test_empty_reply_speaks_nothing():
+    bus = InProcessEventBus()
+    timings = _speech_events(bus)
+    voice = _RecordingVoice()
+    session = _speaking_session(bus)
+    model = _scripted_model(["  ", "\n", " "])
+    await run_turn(session, _think_deps(model, voice_service=voice), "hi", CancelToken(),
+                   spoken_input=False, think=None)
+    frames = _drain(session)
+    assert _tts(frames, "tts.begin") == []
+    assert voice.texts == []
+    assert timings == []
+
+
+async def test_thinking_chunks_do_not_start_the_pacer():
+    bus = InProcessEventBus()
+    timings = _speech_events(bus)
+    voice = _RecordingVoice()
+    session = _speaking_session(bus)
+    model = _scripted_model([
+        GenerationChunk(text="", thinking="Lots of private thinking. Words that are many. "),
+        GenerationChunk(text="", thinking="Even more thinking words here. "),
+        "Hello there ", "friend."])
+    await run_turn(session, _think_deps(model, voice_service=voice), "hi", CancelToken(),
+                   spoken_input=False, think=True)
+    assert voice.texts == ["Hello there friend."]
+    (timing,) = timings
+    assert timing.words_at_start == 3
+
+
+@pytest.mark.parametrize("path", ["tools", "reasoning"])
+async def test_tools_and_reasoning_paths_still_speak_whole_reply(path):
+    model, _ = _recording_model(text="ok")
+    voice = _RecordingVoice()
+    session = _speaking_session()
+    await run_turn(session, _think_deps(model, voice_service=voice, **_path_kwargs(path)), "hi",
+                   CancelToken(), spoken_input=False, think=None)
+    frames = _drain(session)
+    final = _end(frames).payload["text"]
+    assert final
+    assert voice.texts == [final]
+    assert len(_tts(frames, "tts.begin")) == 1 and len(_tts(frames, "tts.end")) == 1
+
+
+async def test_speaker_off_unchanged():
+    bus = InProcessEventBus()
+    timings = _speech_events(bus)
+    voice = _RecordingVoice()
+    session = _session(bus)  # speak stays False
+    model = _scripted_model([S1 + " ", S2])
+    await run_turn(session, _think_deps(model, voice_service=voice), "hi", CancelToken(),
+                   spoken_input=False, think=None)
+    frames = _drain(session)
+    assert [f for f in frames if isinstance(f, bytes) or f.channel == AUDIO_OUT] == []
+    assert voice.texts == [] and timings == []
