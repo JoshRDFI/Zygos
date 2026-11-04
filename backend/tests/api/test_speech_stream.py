@@ -347,3 +347,32 @@ async def test_speech_timing_null_when_nothing_synthesized_and_cancelled_reason(
     await sp.close(SpeechPacer())
     # cancelled before tts.begin: nothing sent, no event
     assert _frames(s) == [] and seen == []
+
+
+class _RaisingVoice(_Voice):
+    def synthesize_stream(self, ctx, text):
+        self.texts.append(text)
+        raise SynthesisFailed("no engine")
+
+
+async def test_synthesize_stream_raising_ends_error():
+    s = _sess()
+    v = _RaisingVoice({})
+    sp = _speaker(s, v)
+    sp.say(["A.", "B."])
+    await sp.close(SpeechPacer())  # must not raise
+    items = _frames(s)
+    assert _types(items) == ["tts.begin", "tts.end"]
+    assert items[-1].payload["reason"] == "error"
+    assert v.texts == ["A."]
+
+
+async def test_abort_after_synthesize_failure_does_not_raise():
+    s = _sess()
+    sp = _speaker(s, _RaisingVoice({}))
+    sp.say(["A."])
+    for _ in range(10):
+        await asyncio.sleep(0)
+    await sp.abort()
+    ends = [i for i in _frames(s) if getattr(i, "type", None) == "tts.end"]
+    assert len(ends) == 1

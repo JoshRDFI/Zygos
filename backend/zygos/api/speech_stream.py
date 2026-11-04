@@ -172,9 +172,10 @@ class StreamingSpeaker:
             text = await self._queue.get()
             if text is None or self._ctx.cancelled:
                 break
-            synth = self._voice.synthesize_stream(self._ctx, text)
+            synth = None
             first_chunk = True
             try:
+                synth = self._voice.synthesize_stream(self._ctx, text)
                 async for pcm in synth.chunks():
                     if self._ctx.cancelled:
                         break
@@ -185,11 +186,12 @@ class StreamingSpeaker:
                 self._reason = "error"
                 logger.warning("synthesis failed", exc_info=True)
             finally:
-                try:
-                    await synth.cancel()
-                    await synth.aclose()
-                except Exception:  # noqa: BLE001 - teardown failure must not skip tts.end
-                    logger.debug("StreamingSpeaker: synth teardown failed", exc_info=True)
+                if synth is not None:
+                    try:
+                        await synth.cancel()
+                        await synth.aclose()
+                    except Exception:  # noqa: BLE001 - teardown failure must not skip tts.end
+                        logger.debug("StreamingSpeaker: synth teardown failed", exc_info=True)
             if self._reason == "error":
                 break
 
