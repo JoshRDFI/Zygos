@@ -46,11 +46,19 @@ class ThinkingRecorder:
         self._total_ms: int | None = None
 
     async def record(self, ctx: ExecutionContext, *, step: Step, index: int,
-                     text: str | None, elapsed_ms: int) -> None:
-        if not text:
-            return
-        buf = TailBuffer()
-        buf.append(text)
+                     text: "str | TailBuffer | None", elapsed_ms: int) -> None:
+        """Emit one ``model.thinking`` event. ``text`` is the whole thinking string,
+        or a :class:`TailBuffer` a streaming caller filled chunk by chunk (so it
+        never held more than the cap); either way ``chars`` is the true length."""
+        if isinstance(text, TailBuffer):
+            buf = text
+            if buf.chars == 0:
+                return
+        else:
+            if not text:
+                return
+            buf = TailBuffer()
+            buf.append(text)
         self._total_ms = (self._total_ms or 0) + elapsed_ms
         await ctx.emit(
             ModelThinking(turn_id=self._turn_id, step=step, index=index, text=buf.text,

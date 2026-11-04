@@ -73,6 +73,13 @@ def _package_version() -> str:
         return "unknown"
 
 
+def primary_route(config) -> RouteChoice:
+    """The configured primary route: the one ``Manifest.thinking`` reports on, and
+    the one warm-up checks (RFC-0012 §5)."""
+    return RouteChoice(provider=config.providers.primary.provider,
+                       model=config.providers.primary.model)
+
+
 def runtime_manifest(runtime: "RuntimeAssembly") -> Manifest:
     config = runtime.config
     snapshot = runtime.capability_registry.snapshot()
@@ -102,7 +109,5 @@ def runtime_manifest(runtime: "RuntimeAssembly") -> Manifest:
         reasoning_enabled=config.reasoning.enabled,
         versions={"zygos": _package_version(), "python": platform.python_version()},
         voice=voice,
-        thinking=runtime.thinking_support.cached(
-            RouteChoice(provider=config.providers.primary.provider, model=config.providers.primary.model)
-        ),
+        thinking=runtime.thinking_support.cached(primary_route(config)),
     )

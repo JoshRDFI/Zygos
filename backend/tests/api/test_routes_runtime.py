@@ -88,3 +88,34 @@ async def test_get_runtime_populates_thinking():
     finally:
         await runtime.aclose()
     assert resp.json()["thinking"] == {"supported": True, "reason": None}
+
+
+class _UnroutableModel:
+    """A model service whose every circuit is open."""
+
+    def select_model(self, *a, **k):
+        from zygos.errors import ProviderUnavailable
+        raise ProviderUnavailable("No eligible provider routes", provider="router")
+
+
+@pytest.mark.asyncio
+async def test_get_runtime_survives_unroutable_model():
+    """I2/M6: warm-up checks the config primary route, never select_model()."""
+    from dataclasses import replace
+
+    from zygos.providers.fake import FakeProvider
+    from zygos.thinking.support import ThinkingSupportChecker
+
+    runtime = build_runtime()
+    primary = runtime.config.providers.primary.provider
+    try:
+        runtime = replace(runtime, model_service=_UnroutableModel(),
+                          thinking_support=ThinkingSupportChecker(
+                              {primary: FakeProvider(think_capable=True)}))
+        app = _mount(runtime)
+        async with _client(app) as client:
+            resp = await client.get("/runtime")
+    finally:
+        await runtime.aclose()
+    assert resp.status_code == 200
+    assert resp.json()["thinking"] == {"supported": True, "reason": None}

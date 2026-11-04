@@ -21,7 +21,8 @@ from zygos.errors import ConfigError
 from zygos.personalization import PERSONALIZATION_FIELDS, Personalization
 from zygos.personalization.onboarding import run_onboarding
 from zygos.runtime.bootstrap import build_runtime
-from zygos.runtime.manifest import Manifest, runtime_manifest
+from zygos.runtime.manifest import Manifest, primary_route, runtime_manifest
+from zygos.thinking.support import check_selected
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -133,7 +134,7 @@ async def _amain(args: argparse.Namespace) -> int:
     runtime = build_runtime(args.config)
     try:
         if args.command == "inspect":
-            await runtime.thinking_support.check(runtime.model_service.select_model())
+            await check_selected(runtime.thinking_support, lambda: primary_route(runtime.config))
             print(render_manifest(runtime_manifest(runtime)))
             return 0
         if args.command == "doctor":

@@ -69,3 +69,18 @@ async def test_recorder_total_ms_sums():
     await r.record(ctx, step="prelude", index=0, text="a", elapsed_ms=100)
     await r.record(ctx, step="coda", index=1, text="b", elapsed_ms=250)
     assert r.total_ms == 350
+
+
+@pytest.mark.asyncio
+async def test_recorder_accepts_prefilled_buffer():
+    ctx, cap = _ctx()
+    rec = ThinkingRecorder("t1")
+    await rec.record(ctx, step="direct", index=0, text=TailBuffer(), elapsed_ms=5)
+    assert cap.events == [] and rec.total_ms is None  # empty buffer: nothing recorded
+    buf = TailBuffer()
+    for _ in range(40):
+        buf.append("y" * 1_000)
+    await rec.record(ctx, step="direct", index=0, text=buf, elapsed_ms=5)
+    (ev,) = cap.events
+    assert len(ev.payload.text) == 32_000 and ev.payload.chars == 40_000
+    assert ev.payload.truncated is True

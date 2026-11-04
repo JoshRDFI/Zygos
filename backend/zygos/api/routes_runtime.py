@@ -10,7 +10,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from zygos.api.health import RuntimeHealth, build_runtime_health
-from zygos.runtime.manifest import Manifest, runtime_manifest
+from zygos.runtime.manifest import Manifest, primary_route, runtime_manifest
+from zygos.thinking.support import check_selected
 
 router = APIRouter()
 
@@ -18,7 +19,8 @@ router = APIRouter()
 @router.get("/runtime", response_model=Manifest)
 async def get_runtime(request: Request) -> Manifest:
     runtime = request.app.state.runtime
-    await runtime.thinking_support.check(runtime.model_service.select_model())
+    # Warm the support cache for the config primary route (what the manifest reads).
+    await check_selected(runtime.thinking_support, lambda: primary_route(runtime.config))
     return runtime_manifest(runtime)
 
 

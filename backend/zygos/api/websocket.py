@@ -22,7 +22,7 @@ from zygos.api.duck import arm_duck, release_duck, stop_speech
 from zygos.api.frames import AUDIO_TAG_IN, CHAT, CONTROL, TOOLS, Frame, decode, encode
 from zygos.api.session import Session
 from zygos.api.turn import TurnDeps, run_turn
-from zygos.api.thinking import send_think_state
+from zygos.api.thinking import schedule_think_state
 from zygos.runtime.context import CancelToken
 
 logger = logging.getLogger("zygos.api.websocket")
@@ -86,10 +86,10 @@ async def _dispatch(session: Session, deps: TurnDeps, frame: Frame) -> None:
         session.enqueue(Frame(channel=CONTROL, type="pong", payload={}))
     elif frame.channel == CONTROL and frame.type == "hello":
         session.enqueue(Frame(channel=CONTROL, type="hello", payload={"ready": True}))
-        await send_think_state(session, deps)
+        schedule_think_state(session, deps)
     elif frame.channel == CONTROL and frame.type == "think":
         session.think = bool(frame.payload.get("enabled", False))
-        await send_think_state(session, deps)
+        schedule_think_state(session, deps)  # off the reader path (M5); always re-probes
     elif frame.channel == TOOLS and frame.type == "permission_response":
         call_id = str(frame.payload.get("call_id", ""))
         decision = frame.payload.get("decision")
@@ -138,7 +138,7 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
     session._writer = writer
 
     try:
-        await send_think_state(session, deps)
+        schedule_think_state(session, deps)  # the probe must not hold up the reader
         while True:
             message = await websocket.receive()
             if message.get("type") == "websocket.disconnect":
@@ -172,6 +172,10 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
                     # and the drain must still finish; the teardown below always runs.
                     await asyncio.shield(cancel_audio_turn(session))
                 finally:
+                    pending = session.think_state_task
+                    if pending is not None and not pending.done():
+                        pending.cancel()
+                    session.think_state_task = None
                     session.speaking = False
                     session.connected = False
                     gate = getattr(deps, "voice_gate", None)

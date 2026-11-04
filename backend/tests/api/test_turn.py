@@ -724,3 +724,93 @@ async def test_cancel_during_prefix_leaves_no_task(monkeypatch):
     assert end["think"] is True and "thinking_ms" in end and "think_unsupported_reason" in end
     assert voice.texts == ["Let me think about that."]  # final reply never synthesized
     assert created and all(t.done() for t in created)
+
+
+# --- RFC-0012 final review: M1 bounded direct buffer, M8 AC8 over every path, AC4 --------
+
+class _BigThinkingStreamProvider(_RecordingProvider):
+    """40 chunks of 1,000 thinking chars each (distinct per chunk), then the answer."""
+
+    async def stream(self, request):
+        self.requests.append(request)
+        for i in range(40):
+            yield GenerationChunk(text="", thinking=str(i % 10) * 1_000)
+        yield GenerationChunk(text="final")
+        yield GenerationChunk(text="", done=True)
+
+
+async def test_direct_thinking_buffer_is_bounded(monkeypatch):
+    import zygos.api.turn as turn_mod
+    from zygos.thinking.capture import MAX_THINKING_EVENT_CHARS, ThinkingRecorder
+
+    held = []
+
+    class _SpyRecorder(ThinkingRecorder):
+        async def record(self, ctx, *, text, **kw):
+            held.append(len(getattr(text, "text", text) or ""))
+            await super().record(ctx, text=text, **kw)
+
+    monkeypatch.setattr(turn_mod, "ThinkingRecorder", _SpyRecorder)
+    bus = InProcessEventBus()
+    events = []
+
+    async def on_event(e):
+        if e.type == "model.thinking":
+            events.append(e.payload)
+
+    bus.subscribe(on_event)
+    provider = _BigThinkingStreamProvider()
+    model = DefaultModelService(ProviderRouter([RouteChoice("fake", "m")], {"fake": provider}))
+    await run_turn(_session(bus), _think_deps(model), "hi", CancelToken(),
+                   spoken_input=False, think=True)
+    full = "".join(str(i % 10) * 1_000 for i in range(40))
+    assert held and max(held) <= MAX_THINKING_EVENT_CHARS  # never held more than the cap
+    (ev,) = events
+    assert ev.text == full[-32_000:]
+    assert ev.chars == 40_000 and ev.truncated is True
+
+
+SECRET = "SECRET-THOUGHT-XYZ"
+
+
+class _SpyMemory:
+    def __init__(self):
+        self.stored = []
+
+    async def retrieve(self, ctx, *, query, **kw):
+        return []
+
+    def store(self, ctx, *, text, **kw):
+        self.stored.append(text)
+
+
+@pytest.mark.parametrize("path", ["direct", "tools", "reasoning"])
+async def test_ac8_thinking_stays_out_of_chat_and_memory(path):
+    provider = _RecordingProvider(text="final answer", thinking=SECRET)
+    model = DefaultModelService(ProviderRouter([RouteChoice("fake", "m")], {"fake": provider}))
+    mem = _SpyMemory()
+    session = _session()
+    await run_turn(session, _think_deps(model, memory=mem, **_path_kwargs(path)), "hi",
+                   CancelToken(), spoken_input=False, think=True)
+    frames = _drain(session)
+    for f in frames:
+        assert SECRET not in str(f.payload), f
+    assert mem.stored and all(SECRET not in s for s in mem.stored)
+    end = _end(frames).payload
+    assert isinstance(end["thinking_ms"], int) and end["thinking_ms"] >= 0
+
+
+async def test_turn_end_carries_rethink_of():
+    model, _ = _recording_model(text="ok")
+    session = _session()
+    await run_turn(session, _think_deps(model), "hi", CancelToken(), spoken_input=False,
+                   think=True, rethink_of="t1")
+    assert _end(_drain(session)).payload["rethink_of"] == "t1"
+    await run_turn(session, _think_deps(model), "hi", CancelToken(), spoken_input=False,
+                   think=None)
+    assert _end(_drain(session)).payload["rethink_of"] is None
+    token = CancelToken()
+    token.trip()
+    await run_turn(session, _think_deps(model), "hi", token, spoken_input=False,
+                   think=True, rethink_of="t2")
+    assert _end(_drain(session)).payload["rethink_of"] == "t2"

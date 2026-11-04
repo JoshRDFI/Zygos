@@ -6,7 +6,7 @@ Stability: Experimental.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
@@ -14,6 +14,7 @@ from zygos.providers.base import Provider
 from zygos.services.router import RouteChoice
 
 PROBE_TIMEOUT_S = 5.0
+UNCHECKED_REASON = "couldn't check the model"
 
 
 class ThinkingSupport(BaseModel):
@@ -49,6 +50,19 @@ class ThinkingSupportChecker:
         try:
             result = await asyncio.wait_for(probe(route.model), PROBE_TIMEOUT_S)
         except Exception:
-            return ThinkingSupport(supported=False, reason="couldn't check the model")
+            return ThinkingSupport(supported=False, reason=UNCHECKED_REASON)
         self._cache[key] = result
         return result
+
+
+async def check_selected(checker, select: Callable[[], RouteChoice]) -> ThinkingSupport:
+    """Pick a route with ``select`` and check it; never raises.
+
+    A route that cannot be picked (e.g. ``ProviderUnavailable``: every circuit
+    open) counts as unsupported with :data:`UNCHECKED_REASON`.
+    """
+    try:
+        route = select()
+    except Exception:  # noqa: BLE001 - an unroutable model is simply unsupported
+        return ThinkingSupport(supported=False, reason=UNCHECKED_REASON)
+    return await checker.check(route)

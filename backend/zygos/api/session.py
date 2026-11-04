@@ -55,6 +55,10 @@ class Session:
         self.think: bool | None = None
         self.last_user_text: str | None = None
         self.last_turn_id: str | None = None
+        # RFC-0012 §2: last think.state (supported, reason) sent, and the in-flight
+        # background send (held so it is not GC'd; cancelled on WS teardown).
+        self.think_support_sent: tuple[bool, str | None] | None = None
+        self.think_state_task: asyncio.Task | None = None
 
     def enqueue(self, frame: Frame) -> None:
         self.outbound.put_nowait(frame)

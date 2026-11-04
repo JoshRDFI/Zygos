@@ -539,6 +539,7 @@ def test_think_toggle_applies_to_next_turn(monkeypatch):
     async def run():
         await _dispatch(session, deps, Frame(channel=CONTROL, type="think", payload={"enabled": True}))
         assert session.think is True
+        await session.think_state_task  # sent off the reader path (M5)
         frames = _drain_ws(session)
         assert frames[-1].type == "think.state" and frames[-1].payload["enabled"] is True
         await _dispatch(session, deps, Frame(channel=CHAT, type="user_message", payload={"text": "q"}))
@@ -580,7 +581,7 @@ def test_connect_survives_unroutable_model():
     app = _app()
 
     def boom(*a, **k):
-        raise ProviderUnavailable("No eligible provider routes")
+        raise ProviderUnavailable("No eligible provider routes", provider="router")
 
     app.state.turn_deps.model_service.select_model = boom
     app.state.turn_deps = dataclasses.replace(
@@ -594,3 +595,123 @@ def test_connect_survives_unroutable_model():
         assert first["payload"]["reason"] == "couldn't check the model"
         ws.send_text(_ctl("ping"))
         assert json.loads(ws.receive_text())["type"] == "pong"
+
+
+# --- RFC-0012 §2 (final-review I1, M5): re-announce support changes; never block the reader
+
+class _SequenceChecker:
+    """Returns each queued support in turn, then repeats the last."""
+
+    def __init__(self, *supports):
+        self._supports = list(supports)
+        self.calls = 0
+
+    async def check(self, route):
+        self.calls += 1
+        if len(self._supports) > 1:
+            return self._supports.pop(0)
+        return self._supports[0]
+
+
+def test_support_change_reannounced_after_turn():
+    from zygos.thinking.support import ThinkingSupport
+
+    app = _app(script=["one", "two"])
+    app.state.turn_deps = dataclasses.replace(
+        app.state.turn_deps, thinking_support=_SequenceChecker(
+            ThinkingSupport(supported=False, reason="couldn't check the model"),
+            ThinkingSupport(supported=True)))
+    client = TestClient(app)
+    sid = client.post("/sessions").json()["id"]
+    with client.websocket_connect(f"/ws/session/{sid}") as ws:
+        first = _next_think_state(ws)
+        assert first["supported"] is False and first["reason"] == "couldn't check the model"
+        ws.send_text(_um("hi"))
+        _collect_until_turn_end(ws)
+        after_first = _frames_until_pong(ws)
+        assert [f["payload"] for f in after_first if f["type"] == "think.state"] == [
+            {"enabled": False, "supported": True, "reason": None}]
+        ws.send_text(_um("again"))
+        _collect_until_turn_end(ws)
+        after_second = _frames_until_pong(ws)
+        assert [f for f in after_second if f["type"] == "think.state"] == []  # unchanged
+
+
+def _frames_until_pong(ws):
+    """Send a ping and collect every frame up to its pong (a no-hang 'nothing else')."""
+    ws.send_text(_ctl("ping"))
+    frames = []
+    while True:
+        f = json.loads(ws.receive_text())
+        if f["type"] == "pong":
+            return frames
+        frames.append(f)
+
+
+def _support(supported, reason=None):
+    from zygos.thinking.support import ThinkingSupport
+    return ThinkingSupport(supported=supported, reason=reason)
+
+
+def _announce_deps(checker):
+    model = SimpleNamespace(select_model=lambda: RouteChoice("fake", "m"))
+    return SimpleNamespace(think_default=False, thinking_support=checker, model_service=model)
+
+
+async def test_announce_if_changed_sends_nothing_when_unchanged():
+    from zygos.api.thinking import announce_if_changed, send_think_state
+
+    session = Session("s1", root_context(InProcessEventBus(), session_id="s1"), created_at=0.0)
+    deps = _announce_deps(_SequenceChecker(_support(True)))
+    await send_think_state(session, deps)
+    assert len(_drain_ws(session)) == 1
+    await announce_if_changed(session, deps)
+    assert _drain_ws(session) == []
+
+
+async def test_announce_if_changed_sends_on_change():
+    from zygos.api.thinking import announce_if_changed, send_think_state
+
+    session = Session("s1", root_context(InProcessEventBus(), session_id="s1"), created_at=0.0)
+    deps = _announce_deps(_SequenceChecker(_support(False, "couldn't check the model"),
+                                           _support(True)))
+    await send_think_state(session, deps)
+    _drain_ws(session)
+    await announce_if_changed(session, deps)
+    frames = _drain_ws(session)
+    assert [f.type for f in frames] == ["think.state"]
+    assert frames[0].payload == {"enabled": False, "supported": True, "reason": None}
+
+
+async def test_control_think_always_reprobes():
+    """control:think is an explicit request: it re-checks and always answers."""
+    checker = _SequenceChecker(_support(True))
+    session = Session("s1", root_context(InProcessEventBus(), session_id="s1"), created_at=0.0)
+    deps = _announce_deps(checker)
+    for enabled in (True, True):
+        await _dispatch(session, deps, Frame(channel=CONTROL, type="think",
+                                             payload={"enabled": enabled}))
+        await session.think_state_task
+    assert checker.calls == 2
+    assert [f.type for f in _drain_ws(session)] == ["think.state", "think.state"]
+
+
+class _SlowChecker:
+    async def check(self, route):
+        await asyncio.sleep(0.5)
+        return _support(True)
+
+
+def test_slow_probe_does_not_block_reader():
+    app = _app()
+    app.state.turn_deps = dataclasses.replace(app.state.turn_deps, thinking_support=_SlowChecker())
+    client = TestClient(app)
+    sid = client.post("/sessions").json()["id"]
+    with client.websocket_connect(f"/ws/session/{sid}") as ws:
+        ws.send_text(_ctl("ping"))
+        first = json.loads(ws.receive_text())
+        assert (first["channel"], first["type"]) == ("control", "pong")
+        ws.send_text(_ctl("think", {"enabled": True}))
+        ws.send_text(_ctl("ping"))
+        nxt = json.loads(ws.receive_text())
+        assert nxt["type"] == "pong"

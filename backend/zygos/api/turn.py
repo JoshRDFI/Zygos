@@ -29,7 +29,7 @@ from zygos.api.frames import CHAT, TOOLS, Frame
 from zygos.api.modality import TurnModality, render_modality
 from zygos.api.session import Session
 from zygos.api.speech import speak_reply
-from zygos.api.thinking import THINKING_PREFIX, resolve_think
+from zygos.api.thinking import THINKING_PREFIX, resolve_think, schedule_think_state
 from zygos.api.voice_gate import VoiceGate
 from zygos.memory.service import MemoryService
 from zygos.personalization import Personalization, PreferencesStore
@@ -39,7 +39,7 @@ from zygos.reasoning.service import ReasoningService
 from zygos.reasoning.types import ReasoningInput
 from zygos.runtime.context import CancelToken
 from zygos.services.model import ModelService
-from zygos.thinking.capture import ThinkingRecorder
+from zygos.thinking.capture import TailBuffer, ThinkingRecorder
 from zygos.thinking.support import ThinkingSupportChecker
 from zygos.tools.service import ToolService
 from zygos.tools.types import Tool
@@ -134,7 +134,7 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
 
     def _think_fields() -> dict:
         return {"think": effective, "thinking_ms": recorder.total_ms,
-                "think_unsupported_reason": unsupported_reason}
+                "think_unsupported_reason": unsupported_reason, "rethink_of": rethink_of}
 
     final = ""
     end_extra: dict = {}
@@ -185,12 +185,12 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
         elif not deps.reasoning_enabled:
             request = GenerationRequest(messages=build_messages(context, text, modality, prefs),
                                         think=effective)
-            thinking_text = ""
+            thinking = TailBuffer()  # bounded, filled chunk by chunk (RFC-0012 §6)
             started = time.monotonic()
             first_text_at: float | None = None
             async for chunk in deps.model_service.stream(ctx, request):
                 if chunk.thinking:
-                    thinking_text += chunk.thinking
+                    thinking.append(chunk.thinking)
                 if ctx.cancelled:
                     break
                 if chunk.text:
@@ -199,7 +199,7 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
                     final += chunk.text
                     session.enqueue(Frame(channel=CHAT, type="token", payload={"text": chunk.text}))
             ended = first_text_at if first_text_at is not None else time.monotonic()
-            await recorder.record(ctx, step="direct", index=0, text=thinking_text,
+            await recorder.record(ctx, step="direct", index=0, text=thinking,
                                   elapsed_ms=int((ended - started) * 1000))
         else:
             reasoning = deps.reasoning_factory()
@@ -238,3 +238,8 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
                 prefix.cancel()
             await asyncio.gather(prefix, return_exceptions=True)
         session.end_turn()
+        # RFC-0012 §2: a support change (e.g. Ollama warmed up since connect) is
+        # re-announced. Backgrounded: barge-in awaits this task, and a cold probe
+        # can take PROBE_TIMEOUT_S. Normally a cache hit, sending nothing.
+        if getattr(deps, "thinking_support", None) is not None and session.connected:
+            schedule_think_state(session, deps, only_if_changed=True)

@@ -75,7 +75,7 @@ async def test_resolve_false_never_checks(requested, default):
 class _UnroutableModel:
     def select_model(self, *a, **k):
         from zygos.errors import ProviderUnavailable
-        raise ProviderUnavailable("No eligible provider routes")
+        raise ProviderUnavailable("No eligible provider routes", provider="router")
 
 
 def _unroutable_deps():
