@@ -42,7 +42,7 @@ def test_malformed_file_is_never_overwritten(tmp_path, caplog):
     f.write_bytes(b"{not json")
     s = ProfileStore(tmp_path)
     s.load_all()
-    assert s.error_for("ollama", "qwen3_8b") is not None or s.error_for("ollama", "qwen3:8b") is not None
+    assert s.error_for("ollama", "qwen3:8b") is not None
     with caplog.at_level(logging.WARNING, logger="zygos.models"):
         s.save(_p())
     assert f.read_bytes() == b"{not json"
@@ -72,3 +72,32 @@ def test_find_by_digest_and_add_name_share_one_file(tmp_path):
     s2.load_all()
     assert s2.get("ollama", "qwen3:latest") is not None
     assert s2.find_by_digest("ollama", "d") is not None
+
+
+def test_filename_collision_refuses_and_leaks_nothing(tmp_path, caplog):
+    s = ProfileStore(tmp_path)
+    s.save(_p("qwen3:8b"))
+    f = tmp_path / "ollama" / "qwen3_8b.json"
+    data = json.loads(f.read_text())
+    data["user"] = {"notes": "private"}
+    f.write_text(json.dumps(data))
+    before = f.read_bytes()
+    with caplog.at_level(logging.WARNING, logger="zygos.models"):
+        s.save(_p("qwen3_8b"))
+    assert f.read_bytes() == before
+    assert any(r.name == "zygos.models" for r in caplog.records)
+    assert s.get("ollama", "qwen3_8b") is None
+
+
+def test_failed_replace_leaves_no_temp_file(tmp_path, monkeypatch):
+    import pytest
+
+    import zygos.models.store as store_mod
+
+    def boom(*a, **k):
+        raise OSError("disk")
+
+    monkeypatch.setattr(store_mod.os, "replace", boom)
+    with pytest.raises(OSError):
+        ProfileStore(tmp_path).save(_p())
+    assert list((tmp_path / "ollama").iterdir()) == []

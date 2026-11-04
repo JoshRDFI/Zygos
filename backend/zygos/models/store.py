@@ -81,11 +81,21 @@ class ProfileStore:
             if on_disk is None:
                 log.warning("refusing to overwrite unparseable profile %s: %s", path, self._errors[path].reason)
                 return
+            if on_disk.model != profile.model and not set(on_disk.names) & set(profile.names):
+                log.warning(
+                    "refusing to save %r: %s belongs to a different model (%r)", profile.model, path, on_disk.model
+                )
+                return
             profile = profile.model_copy(update={"user": on_disk.user})
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(f".{path.name}.tmp")
-        tmp.write_text(profile.model_dump_json(indent=2), encoding="utf-8")
-        os.replace(tmp, path)
+        try:
+            tmp.write_text(profile.model_dump_json(indent=2), encoding="utf-8")
+            os.replace(tmp, path)
+        except OSError as exc:
+            tmp.unlink(missing_ok=True)
+            log.warning("failed to write profile %s: %s", path, exc)
+            raise
         self._index_profile(path, profile)
 
     def add_name(self, profile: ModelProfile, name: str) -> ModelProfile:
