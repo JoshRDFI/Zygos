@@ -1,6 +1,12 @@
 # RFC-0009: Best-Model-Per-Task Routing and Multimodal Capabilities
 
-- **Status:** Draft
+- **Status:** Draft — **narrowed 2026-11-04:** §1, §2, §4 Path C, §6 and §7 (per-turn
+  authoring selection, text-specialist routing, model residency, context fit) move to
+  [RFC-0013](RFC-0013-Model-Picker-Profiles-and-Task-Routing.md), which replaces the
+  config-only Path C with profile-driven suggestion and opt-in auto-switching. This RFC
+  keeps vision input (Path A), image generation (Path B), the two capability contracts
+  and backend placement, and depends on RFC-0013 for selection and residency. The moved
+  sections are left below, marked, for the record.
 - **Author:** Zygos maintainers
 - **Created:** 2026-07-13
 - **Governs:** how Zygos routes each turn to the **best-suited model** and reaches
@@ -108,6 +114,8 @@ conservative by default and every decision is inspectable.
 
 ### 1. The session thread is the context; the authoring model is per-turn
 
+> **Moved to RFC-0013** (2026-11-04). Kept here for the record; RFC-0013 governs.
+
 The session (RFC-0007) already holds the message history. This RFC makes that the
 **single, provider-agnostic source of truth** for conversation context. Because all
 text providers consume the same `Message` list (RFC-0001 §7, extended by RFC-0008),
@@ -120,6 +128,8 @@ turn and generates against it. The "orchestrator" that holds the conversation an
 call tools is whichever text model authors the current turn.
 
 ### 2. `ModelService` selection becomes load-bearing (amends RFC-0001 §2)
+
+> **Moved to RFC-0013** (2026-11-04). Kept here for the record; RFC-0013 governs.
 
 `select_model(classification)` stays, but generation now honors a selected route:
 
@@ -180,7 +190,7 @@ resolution. The model calls it through the existing agentic loop; the call passe
 existing permission resolver; the returned artifact folds back as a tool result on the
 thread and the `tools` channel. No new invocation machinery.
 
-**Path C — text-specialist routing (config-declared, conservative default).** Per-turn
+**Path C — text-specialist routing — moved to RFC-0013** (2026-11-04), which replaces it with profile-driven suggestion and opt-in auto-switching. Original text, for the record: *(config-declared, conservative default).* Per-turn
 authoring selection among text models (code / reasoning / fast / default) via
 `classify_task` → `task_routes`. **By default there are no task routes**, so one chat
 model authors every text turn; specialist routing activates only when the operator
@@ -201,6 +211,8 @@ so that RFC needs no changes here.
 
 ### 6. Model-residency (swap) orchestration
 
+> **Moved to RFC-0013** (2026-11-04). Kept here for the record; RFC-0013 governs.
+
 Before invoking a **local** model (authoring or specialist), an `ensure_resident` step
 loads it and may unload another to free VRAM (for Ollama, via `keep_alive` / explicit
 load-unload). Cloud and remote backends are no-ops. Swap latency is surfaced as a trace
@@ -213,6 +225,8 @@ highest swap latency of any path and is the flagship motivator for cloud or
 remote-ephemeral placement.
 
 ### 7. Context-fit across models
+
+> **Moved to RFC-0013** (2026-11-04). Kept here for the record; RFC-0013 governs.
 
 This RFC does **not** reinvent context management. The canonical thread stays put; when
 a turn is authored by a model with a smaller window, the existing memory /
