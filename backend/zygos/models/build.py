@@ -55,7 +55,7 @@ def modelfile_num_ctx(parameters: str | None) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def _specialty(name: str) -> list[str]:
+def specialty(name: str) -> list[str]:
     lowered = name.lower()
     found: list[str] = []
     for needle, label in SPECIALTY_HINTS:
@@ -83,7 +83,7 @@ def _record_ollama_values(
         ("identity.context_length_max", ctx_max, "ollama"),
         ("identity.kv_bytes_per_token", kv_bytes_per_token(info), "ollama"),
         ("identity.num_ctx", modelfile_num_ctx(show.parameters) if show is not None else None, "modelfile"),
-        ("identity.specialty", _specialty(model.name) or None, "name"),
+        ("identity.specialty", specialty(model.name) or None, "name"),
     ]
     for cap in ("tools", "vision", "thinking", "embedding"):
         entries.append((f"capabilities.{cap}", cap in caps, "ollama"))

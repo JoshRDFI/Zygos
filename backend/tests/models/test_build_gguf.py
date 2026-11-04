@@ -148,12 +148,23 @@ def test_quantization_unknown_is_omitted(tmp_path, ftype):
 def test_quant_table_matches_llama_ftype():
     assert QUANT_NAMES[2] == "Q4_0" and QUANT_NAMES[3] == "Q4_1" and QUANT_NAMES[8] == "Q5_0"
     assert QUANT_NAMES[21] == "Q2_K_S" and QUANT_NAMES[31] == "IQ1_M"
-    assert set(QUANT_NAMES) == {0, 1, 2, 3, 7, 8, 9, *range(10, 33)}
+    assert QUANT_NAMES[36] == "TQ1_0" and QUANT_NAMES[37] == "TQ2_0" and QUANT_NAMES[38] == "MXFP4_MOE"
+    assert set(QUANT_NAMES) == {0, 1, 2, 3, 7, 8, 9, *range(10, 33), 36, 37, 38}
 
 
 def test_specialty_from_name_and_vision_from_mmproj(tmp_path):
     p = profile_from_gguf(_model(tmp_path, name="Qwen2.5-VL-7B-Instruct", mmproj=True), _header(), at=T0)
     assert _v(p, "identity.specialty") == (["instruct", "vision"], "name")
+    assert _v(p, "capabilities.vision") == (True, "modelfile")
+    assert _v(p, "identity.mmproj_bytes") == (1, "modelfile")
+
+
+def test_no_mmproj_bytes_without_projector_or_when_unreadable(tmp_path):
+    assert resolve(profile_from_gguf(_model(tmp_path), _header(), at=T0), "identity.mmproj_bytes") is None
+    m = _model(tmp_path, mmproj=True)
+    m.mmproj.unlink()
+    p = profile_from_gguf(m, _header(), at=T0)
+    assert resolve(p, "identity.mmproj_bytes") is None
     assert _v(p, "capabilities.vision") == (True, "modelfile")
 
 

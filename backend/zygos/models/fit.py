@@ -19,8 +19,8 @@ KV_TYPE_BYTES: dict[str, float] = {
     "f32": 4.0, "f16": 2.0, "bf16": 2.0, "q8_0": 34 / 32, "q4_0": 18 / 32,
     "q4_1": 20 / 32, "q5_0": 22 / 32, "q5_1": 24 / 32, "iq4_nl": 18 / 32,
 }
-ASSUMED_CONTEXT_NOTE = f"context {ASSUMED_CONTEXT_TOKENS} tokens (assumed)"
-ASSUMED_ALL_LAYERS_NOTE = "all layers on GPU (llama-server default assumed)"
+ASSUMED_CONTEXT_NOTE = f"context {ASSUMED_CONTEXT_TOKENS} tokens"
+ASSUMED_ALL_LAYERS_NOTE = "all layers on GPU (llama-server default)"
 
 FitLevel = Literal["gpu", "partial", "no", "unknown"]
 
@@ -116,11 +116,18 @@ def estimate_llamacpp(profile: ModelProfile, launch: LaunchSettings) -> FitEstim
     ``-ngl N`` puts the last N layers on GPU; ``--n-cpu-moe N`` keeps the expert
     tensors of the first N layers on CPU; non-layer tensors go to GPU only when
     every layer does. ``-np`` splits the context across slots, so it adds nothing.
+    ``-c 0`` means the model's training context. A paired projector (Zygos
+    passes ``--mmproj``) is loaded on GPU.
     """
     assumptions: list[str] = []
-    tokens = launch.ctx_size or ASSUMED_CONTEXT_TOKENS
-    if not launch.ctx_size:
+    context_assumed = launch.ctx_size is None
+    if launch.ctx_size is None:
+        tokens: int | None = ASSUMED_CONTEXT_TOKENS
         assumptions.append(ASSUMED_CONTEXT_NOTE)
+    elif launch.ctx_size == 0:
+        tokens = _int(profile, "identity.context_length_max")
+    else:
+        tokens = launch.ctx_size
     blocks = _int(profile, "identity.block_count")
     ngl = launch.n_gpu_layers
     all_on_gpu = ngl is None or ngl == "all" or (blocks is not None and ngl >= blocks)
@@ -130,8 +137,8 @@ def estimate_llamacpp(profile: ModelProfile, launch: LaunchSettings) -> FitEstim
     def unknown(model_bytes: int | None, context_bytes: int | None = None,
                 reason: str | None = None) -> FitEstimate:
         return FitEstimate(
-            model_bytes=model_bytes, context_bytes=context_bytes, context_tokens=tokens,
-            context_assumed=not launch.ctx_size, overhead_bytes=RUNTIME_OVERHEAD_BYTES,
+            model_bytes=model_bytes, context_bytes=context_bytes, context_tokens=tokens or 0,
+            context_assumed=context_assumed, overhead_bytes=RUNTIME_OVERHEAD_BYTES,
             total_bytes=None, measured=False, assumptions=tuple(assumptions), reason=reason)
 
     tb = resolve(profile, "identity.tensor_bytes")
@@ -141,7 +148,10 @@ def estimate_llamacpp(profile: ModelProfile, launch: LaunchSettings) -> FitEstim
     other = None if table is None else table.get("other")
     if layers is None or experts is None or not isinstance(other, int) or isinstance(other, bool):
         return unknown(None)
-    model_bytes = sum(layers.values()) + other
+    mmproj = _int(profile, "identity.mmproj_bytes") or 0
+    model_bytes = sum(layers.values()) + other + mmproj
+    if tokens is None:
+        return unknown(model_bytes, reason="context length unknown")
 
     for t in (launch.cache_type_k, launch.cache_type_v):
         if t is not None and t not in KV_TYPE_BYTES:
@@ -162,6 +172,7 @@ def estimate_llamacpp(profile: ModelProfile, launch: LaunchSettings) -> FitEstim
     gpu_weights -= sum(experts.get(i, 0) for i in on_gpu if i < cpu_moe)
     if all_on_gpu:
         gpu_weights += other
+    gpu_weights += mmproj
     gpu_kv_layers = 0 if launch.no_kv_offload else (blocks if all_on_gpu else min(blocks, max(0, ngl)))
     context_bytes = round(kv_per_layer * blocks)
     gpu_kv = round(kv_per_layer * gpu_kv_layers)
@@ -169,7 +180,7 @@ def estimate_llamacpp(profile: ModelProfile, launch: LaunchSettings) -> FitEstim
     cpu = (model_bytes - gpu_weights) + (context_bytes - gpu_kv)
     return FitEstimate(
         model_bytes=model_bytes, context_bytes=context_bytes, context_tokens=tokens,
-        context_assumed=not launch.ctx_size, overhead_bytes=RUNTIME_OVERHEAD_BYTES,
+        context_assumed=context_assumed, overhead_bytes=RUNTIME_OVERHEAD_BYTES,
         total_bytes=gpu + cpu, measured=False, gpu_bytes=gpu, cpu_bytes=cpu,
         split_by="settings" if cpu > 0 else None, assumptions=tuple(assumptions))
 

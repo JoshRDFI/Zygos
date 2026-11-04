@@ -10,7 +10,7 @@ import re
 from datetime import datetime
 from typing import Any
 
-from zygos.models.build import _specialty
+from zygos.models.build import specialty
 from zygos.models.fit import KV_BYTES_PER_ELEMENT
 from zygos.models.gguf import GgufHeader
 from zygos.models.gguf_scan import GgufModel
@@ -25,6 +25,7 @@ QUANT_NAMES: dict[int, str] = {
     16: "Q5_K_S", 17: "Q5_K_M", 18: "Q6_K", 19: "IQ2_XXS", 20: "IQ2_XS", 21: "Q2_K_S",
     22: "IQ3_XS", 23: "IQ3_XXS", 24: "IQ1_S", 25: "IQ4_NL", 26: "IQ3_S", 27: "IQ3_M",
     28: "IQ2_S", 29: "IQ2_M", 30: "IQ4_XS", 31: "IQ1_M", 32: "BF16",
+    36: "TQ1_0", 37: "TQ2_0", 38: "MXFP4_MOE",
 }
 
 _LAYER = re.compile(r"^blk\.(\d+)\.")
@@ -43,6 +44,15 @@ def _digest(model: GgufModel) -> str | None:
         except OSError:
             continue
     return f"size:{model.size_bytes}:mtime:{max(mtimes)}" if mtimes else None
+
+
+def _mmproj_bytes(model: GgufModel) -> int | None:
+    if model.mmproj is None:
+        return None
+    try:
+        return model.mmproj.stat().st_size
+    except OSError:
+        return None
 
 
 def tensor_bytes(header: GgufHeader) -> dict[str, Any]:
@@ -98,7 +108,8 @@ def profile_from_gguf(model: GgufModel, header: GgufHeader, *, at: datetime) -> 
         ("identity.value_length", value_len, "modelfile"),
         ("identity.kv_bytes_per_token", kv_per_token, "modelfile"),
         ("identity.tensor_bytes", tensor_bytes(header) if header.tensors else None, "modelfile"),
-        ("identity.specialty", _specialty(model.name) or None, "name"),
+        ("identity.specialty", specialty(model.name) or None, "name"),
+        ("identity.mmproj_bytes", _mmproj_bytes(model), "modelfile"),
         ("capabilities.vision", True if model.mmproj is not None else None, "modelfile"),
     ]
     for key, value, source in entries:

@@ -1,16 +1,21 @@
 from datetime import datetime, timezone
 
+import pytest
+
+from zygos.backends.launch import LaunchSettings
 from zygos.hardware.probe import Gpu, HardwareSnapshot
 from zygos.models.fit import (
     ASSUMED_CONTEXT_TOKENS,
+    KV_TYPE_BYTES,
     RUNTIME_OVERHEAD_BYTES,
     Fit,
     VramContext,
     describe,
     estimate,
+    estimate_llamacpp,
     fit,
 )
-from zygos.models.profile import ModelProfile, record
+from zygos.models.profile import ModelProfile, record, resolve
 
 T0 = datetime(2026, 11, 4, tzinfo=timezone.utc)
 GB = 1024**3
@@ -182,21 +187,20 @@ def test_fit_without_gpu_says_gpu_not_detected_even_when_size_is_unknown():
 
 # --- llama.cpp: launch-aware estimates (RFC-0014 §4) ---
 
-import pytest  # noqa: E402
-
-from zygos.backends.launch import LaunchSettings  # noqa: E402
-from zygos.models.fit import KV_TYPE_BYTES, estimate_llamacpp  # noqa: E402
-from zygos.models.profile import resolve  # noqa: E402
-
 MB = 1024**2
 LAYER = 100 * MB
 OTHER = 500 * MB
 KV_LAYER_4096 = 8 * (128 * 2 + 128 * 2) * 4096  # 16 MiB per layer, f16, 4096 tokens
 
 
-def _lc_profile(blocks=36, layer=LAYER, experts=None, other=OTHER, geometry=True, tensors=True):
+def _lc_profile(blocks=36, layer=LAYER, experts=None, other=OTHER, geometry=True, tensors=True,
+                ctx_max=None, mmproj=None):
     p = ModelProfile(provider="llamacpp", model="m", names=["m"])
     vals = {"identity.download_size_bytes": blocks * layer + other}
+    if ctx_max is not None:
+        vals["identity.context_length_max"] = ctx_max
+    if mmproj is not None:
+        vals["identity.mmproj_bytes"] = mmproj
     if geometry:
         vals.update({"identity.block_count": blocks, "identity.kv_heads": 8,
                      "identity.key_length": 128, "identity.value_length": 128})
@@ -224,8 +228,8 @@ def test_llamacpp_all_gpu_defaults_are_assumed():
     assert e.context_bytes == 36 * KV_LAYER_4096
     assert e.context_tokens == 4096 and e.context_assumed is True
     assert e.measured is False
-    assert e.assumptions == ("context 4096 tokens (assumed)",
-                             "all layers on GPU (llama-server default assumed)")
+    assert e.assumptions == ("context 4096 tokens",
+                             "all layers on GPU (llama-server default)")
 
 
 def test_llamacpp_explicit_settings_have_no_assumptions():
@@ -247,7 +251,7 @@ def test_llamacpp_ngl_20_of_36_splits_by_settings():
     assert e.cpu_bytes == 16 * LAYER + OTHER + 16 * KV_LAYER_4096
     assert e.total_bytes == e.gpu_bytes + e.cpu_bytes
     assert e.split_by == "settings"
-    assert e.assumptions == ("context 4096 tokens (assumed)",)
+    assert e.assumptions == ("context 4096 tokens",)
 
 
 def test_llamacpp_ngl_uses_the_last_layers():
@@ -355,7 +359,7 @@ def test_describe_split_exact():
     assert describe(f) == (
         "needs ≈2.8 GB on GPU + 2.3 GB in RAM (split by your settings): "
         "4.0 GB model + 0.6 GB context (4096 tokens, assumed) + 0.5 GB overhead; 8.0 GB free"
-        "; assumed: context 4096 tokens (assumed)")
+        "; assumed: context 4096 tokens")
 
 
 def test_describe_unsplit_llamacpp_exact():
@@ -364,4 +368,26 @@ def test_describe_unsplit_llamacpp_exact():
     f = fit(p, _hw(free_gb=8, ram_gb=32), needs=e)
     assert describe(f) == (
         "needs ≈5.6 GB: 4.0 GB model + 1.1 GB context (8192 tokens) + 0.5 GB overhead; 8.0 GB free"
-        "; assumed: all layers on GPU (llama-server default assumed)")
+        "; assumed: all layers on GPU (llama-server default)")
+
+
+def test_llamacpp_ctx_zero_uses_training_context_not_assumed():
+    e = estimate_llamacpp(_lc_profile(ctx_max=8192), LaunchSettings(ctx_size=0, n_gpu_layers="all"))
+    assert e.context_tokens == 8192 and e.context_assumed is False
+    assert e.context_bytes == 36 * KV_LAYER_4096 * 2
+    assert e.assumptions == ()
+
+
+def test_llamacpp_ctx_zero_without_training_context_is_unknown():
+    p = _lc_profile()
+    e = estimate_llamacpp(p, LaunchSettings(ctx_size=0, n_gpu_layers="all"))
+    assert e.total_bytes is None and e.reason == "context length unknown"
+    assert fit(p, _hw(free_gb=16, ram_gb=32), needs=e).reason == "context length unknown"
+
+
+def test_llamacpp_projector_counts_on_gpu_and_in_model_bytes():
+    plain = estimate_llamacpp(_lc_profile(), LaunchSettings(n_gpu_layers=20))
+    e = estimate_llamacpp(_lc_profile(mmproj=600 * MB), LaunchSettings(n_gpu_layers=20))
+    assert e.gpu_bytes == plain.gpu_bytes + 600 * MB
+    assert e.cpu_bytes == plain.cpu_bytes
+    assert e.model_bytes == plain.model_bytes + 600 * MB
