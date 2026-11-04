@@ -231,21 +231,40 @@ eval suites costs API money and says so, with the number of requests, before sta
   time to first token and writing speed (the sentence-streaming pacer).
 - **Quality for `code` and `reasoning`** comes from **eval runs**, started by "Test
   this model" or `python -m zygos.eval <suite> --model <provider>:<model>`, scored
-  **without a judge model**: `code` by running the model's code against test cases
-  (the harness's existing `code_exec` scorer), `reasoning` by checked answers
+  **without a judge model**: `code` by running the model's code (below), `reasoning`
+  by checked answers
   (`exact_match` / `normalized_match`). Only one model is loaded during a run. The
   existing reasoning suite's `llm_judge` items stay available to the research harness
   but don't count towards profile scores (my call). Each run writes the score, sample
   count, suite version and date to the profile. Runs can take many minutes on local
   hardware and say so before starting.
+- **A code item** (maintainer's call) is: (a) a **prompt** describing the code to
+  write; (b) **our working, completed reference solution**; and (c) the tests that
+  define "works". The model's code is scored on **functionality only**: it passes if
+  it behaves like the reference under the tests (run by the harness's existing
+  `code_exec` scorer, sandboxed). Style, naming, and comments missing or added never
+  count against it. The reference solution must pass its own tests — the suite's own
+  check that each item is correct — and inputs the tests use may also be run through
+  the reference to produce the expected outputs.
 - **Quality for `chat` is scored by the user** (maintainer's call — a judge model
-  would have to run alongside the chat model, which local hardware won't do well).
-  "Rate this model" runs the chat suite's prompts through the model, then shows the
-  answers one at a time for the user to rate **good / okay / poor** (my call: three
-  levels, scored 1 / 0.5 / 0). When rating more than one model, answers are shown
-  **without the model's name** and in mixed order, so the rating isn't swayed by
-  which model wrote it (my call). The rating is the score; `MIN_EVAL_SAMPLES` applies,
-  so a model needs at least 10 rated answers before it can be suggested for chat.
+  would have to run alongside the chat model, which local hardware won't do well),
+  and rating is **never required** (maintainer's call):
+  - **"How was this conversation?"** — occasionally, a small dismissible card asks
+    for a rating **outside the conversation** (not as a chat message, never blocking
+    input), like the rating prompts in hosted assistants. My calls: it appears only
+    after a conversation has gone quiet (no turn for a while) or when the user leaves
+    it, at most once per conversation and at most once a day, never during voice
+    playback, and it can be switched off (`ratings.ask`, on by default). Ignoring or
+    dismissing it records nothing.
+  - **"Rate this model"** on the Models page, optional: runs the chat suite's prompts
+    through the model and shows the answers to rate; when rating several models,
+    answers are shown **without model names** and in mixed order (my call).
+  - Ratings are **good / okay / poor**, scored 1 / 0.5 / 0 (my call). A conversation
+    rating counts for a model only if that model answered every chat turn in it (my
+    call — a mixed conversation can't be credited fairly). `MIN_EVAL_SAMPLES` applies:
+    at least 10 ratings before a model can be suggested for chat. Conversation ratings
+    are a weaker signal than a suite (they depend on what was asked), so the chat
+    score shows its count and source.
 - **Starter suites** for `code`, `reasoning` and `chat` are written by the builder
   and ship with Zygos, versioned. Their contents — how many items, and how easy or
   hard — are **agreed with the maintainer before Phase 4 is built**: a suite every
@@ -278,6 +297,7 @@ included. Switching the authoring model only changes which limit applies.
   `POST /models/pull {name}` (returns a pull id), `DELETE /models/pull/{id}` (cancel),
   `POST /models/{provider}/{model}/eval {suite}` (code/reasoning runs; for `chat` it
   returns the answers to rate), `POST /models/ratings {items: [{answer_id, rating}]}`,
+  `POST /sessions/{id}/rating {rating}` (the conversation prompt),
   `PATCH /models/{provider}/{model}/profile` (user section only).
 - WS: `control:models.pull {id, status, completed, total}` progress frames;
   `chat:turn.end` gains optional `model {provider, model}`, `category`, and
@@ -285,7 +305,8 @@ included. Switching the authoring model only changes which limit applies.
   `route {provider, model}` and `reask_of` (the suggested re-ask).
 - Settings: `routing.mode: suggest | auto` (default `suggest`),
   `routing.auto_categories`, `routing.auto_in_voice: false`,
-  `routing.allow_partial_fit: false`, `routing.include_cloud: false`. Stored with `default_model` in a separate
+  `routing.allow_partial_fit: false`, `routing.include_cloud: false`,
+  `ratings.ask: true`. Stored with `default_model` in a separate
   `model_choices` record in the same local preferences directory as RFC-0010's store
   (not inside the personalization schema), per install (Zygos is single-user), and
   edited through `PUT /models/default` and `PUT /models/routing` — not through
@@ -342,7 +363,7 @@ default, behaviour is exactly today's: one model from config, no suggestions.
   opt-in and per category, voice excluded by default, and load time shown in Inspect.
 - **Eval suites too small to mean much.** Mitigated by showing sample counts beside
   every score; suites are versioned so old scores are recognisable.
-- **Chat rating is work for the user**, so chat scores may stay empty. Accepted: no
+- **Chat rating is optional**, so chat scores fill slowly or stay empty. Accepted: no
   chat score simply means no chat suggestion; code and reasoning work without it.
 - **Cloud suggestions send data off the machine.** Mitigated by never auto-switching
   to cloud, an off-by-default setting, and a notice on every cloud suggestion.
@@ -374,9 +395,11 @@ default, behaviour is exactly today's: one model from config, no suggestions.
    labelled, a swap shows "loading <model>…", and voice turns don't switch unless
    `routing.auto_in_voice` is on.
 9. "Test this model" / `python -m zygos.eval … --model` writes `code` and `reasoning`
-   scores with sample counts and dates to the profile, using no judge model; "Rate this
-   model" records the user's chat ratings as the `chat` score, blind when more than one
-   model is rated.
+   scores with sample counts and dates to the profile, using no judge model; a code
+   item passes on behaviour alone (comments and style never count) and every
+   reference solution passes its own tests. Chat ratings, from the occasional
+   conversation card or "Rate this model", become the `chat` score; rating is never
+   required, dismissing the card records nothing, and `ratings.ask: false` stops it.
 10. Every selection, suggestion, load and fit decision appears as a trace event and in
     Inspect.
 11. With defaults, a fresh install behaves exactly as before this RFC.
