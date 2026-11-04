@@ -1,6 +1,6 @@
 # RFC-0012: Native Thinking Controls — Per-Turn Toggle, Re-Ask, and Voice Phrases
 
-- **Status:** Draft
+- **Status:** Accepted (2026-11-03)
 - **Author:** Zygos maintainers
 - **Created:** 2026-11-03
 - **Governs:** how a user turns the model's **native thinking** (hidden reasoning
