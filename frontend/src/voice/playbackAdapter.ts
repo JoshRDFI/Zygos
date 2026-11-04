@@ -41,13 +41,16 @@ export function createPlayback(): PlaybackController {
       }
     },
     begin(): void {
-      if (enabled) { ensure().reset(); rampGain(1.0); } // fresh utterance starts at full volume
+      // Fresh utterance at full volume. The cursor is kept: scheduling uses
+      // max(currentTime, cursor), so an utterance that begins while the previous one
+      // (e.g. the "Let me think" prefix) is still playing queues after it.
+      if (enabled) { ensure(); rampGain(1.0); }
     },
     enqueue(body: ArrayBuffer): void {
       if (enabled) ensure().enqueue(body);
     },
     end(): void {
-      sched?.reset();
+      // Nothing to do: queued audio plays out; interrupt() is what drops it.
     },
     duck(value: number): void {
       rampGain(value); // tts.duck {gain:0.2}

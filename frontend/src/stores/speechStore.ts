@@ -15,13 +15,13 @@ const CAP = 20;
 const secs = (ms: number) => (ms / 1000).toFixed(1);
 
 export function formatSpeechTiming(t: SpeechTimingView): string {
-  if (t.firstAudioMs === null) return "nothing spoken";
+  const tail = t.reason === "complete" ? "" : ` · ${t.reason}`;
+  if (t.firstAudioMs === null) return `nothing spoken${tail}`;
   const rate = t.rateWps === null ? "" : ` at ${t.rateWps} w/s`;
   const gaps =
     t.gaps === 0
       ? "no gaps"
       : `${t.gaps} ${t.gaps === 1 ? "gap" : "gaps"} (${secs(t.gapMs)} s, estimated)`;
-  const tail = t.reason === "complete" ? "" : ` · ${t.reason}`;
   return `first word ${secs(t.firstAudioMs)} s · started after ${t.wordsAtStart ?? 0} words${rate} · ${gaps}${tail}`;
 }
 

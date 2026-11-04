@@ -21,6 +21,9 @@ test("format: nothing spoken, null rate, cancelled", () => {
   expect(formatSpeechTiming({ ...base, rateWps: null })).not.toContain(" at ");
   expect(formatSpeechTiming({ ...base, reason: "cancelled" })).toMatch(/ · cancelled$/);
   expect(formatSpeechTiming({ ...base, reason: "error" })).toMatch(/ · error$/);
+  expect(formatSpeechTiming({ ...base, firstAudioMs: null, reason: "error" })).toBe("nothing spoken · error");
+  expect(formatSpeechTiming({ ...base, firstAudioMs: null, reason: "cancelled" })).toBe("nothing spoken · cancelled");
+  expect(formatSpeechTiming({ ...base, firstAudioMs: null, reason: "complete" })).toBe("nothing spoken");
 });
 test("store accepts flat payload, ignores others, caps at 20", () => {
   const s = useSpeechStore.getState();
