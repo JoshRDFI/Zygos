@@ -121,7 +121,8 @@ class StreamingSpeaker:
     ``say`` is sync and only queues; a single consumer task synthesizes in order. The
     consumer first awaits ``wait_for`` (e.g. the "Let me think" prefix) before sending
     ``tts.begin``. ``close`` drains and ends; ``abort`` cancels and ends. A synthesis
-    failure ends the speech with reason ``error`` and never raises out of close/abort;
+    failure — or any other unexpected error — ends the speech with reason ``error`` and
+    never raises out of close/abort;
     the consumer stops at once (``speaking`` drops, later sentences are dropped) and the
     one ``tts.end`` still goes out at close/abort. Speaker turned off mid-reply stops
     synthesis at the next sentence (reason ``cancelled``).
@@ -165,6 +166,14 @@ class StreamingSpeaker:
             self._task = asyncio.create_task(self._consume())
 
     async def _consume(self) -> None:
+        """Run the speech; any unexpected failure ends it as ``error`` (never raises)."""
+        try:
+            await self._speak_queued()
+        except Exception:  # noqa: BLE001 - close/abort must never raise into the turn
+            logger.warning("streaming speech failed", exc_info=True)
+            self._stop("error")
+
+    async def _speak_queued(self) -> None:
         if self._wait_for is not None:
             await asyncio.wait([self._wait_for])  # never raises; prefix errors are its own
         if self._ctx.cancelled:
@@ -229,16 +238,19 @@ class StreamingSpeaker:
         self._ended = True
         self._session.speaking = False
         clear_duck_state(self._session)
-        self._session.enqueue(Frame(channel=AUDIO_OUT, type="tts.end",
-                                    payload={"turn_id": self._turn_id, "reason": reason}))
-        rate = pacer.rate_wps
-        await self._ctx.emit(
-            SpeechTiming(turn_id=self._turn_id, first_audio_ms=self._first_audio_ms,
-                         words_at_start=pacer.words_at_start,
-                         rate_wps=None if rate is None else round(rate, 1),
-                         gaps=self._gaps, gap_ms=round(self._gap_s * 1000), reason=reason),
-            source="speech",
-        )
+        try:
+            self._session.enqueue(Frame(channel=AUDIO_OUT, type="tts.end",
+                                        payload={"turn_id": self._turn_id, "reason": reason}))
+            rate = pacer.rate_wps
+            await self._ctx.emit(
+                SpeechTiming(turn_id=self._turn_id, first_audio_ms=self._first_audio_ms,
+                             words_at_start=pacer.words_at_start,
+                             rate_wps=None if rate is None else round(rate, 1),
+                             gaps=self._gaps, gap_ms=round(self._gap_s * 1000), reason=reason),
+                source="speech",
+            )
+        except Exception:  # noqa: BLE001 - ending speech must never raise into the turn
+            logger.warning("ending streaming speech failed", exc_info=True)
 
     async def close(self, pacer: SpeechPacer) -> None:
         if self._ended or self._task is None:

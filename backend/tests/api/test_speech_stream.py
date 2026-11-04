@@ -459,3 +459,57 @@ async def test_speaker_off_mid_reply_stops_at_next_sentence():
     ends = [i for i in items if getattr(i, "type", None) == "tts.end"]
     assert len(ends) == 1 and ends[0].payload["reason"] == "cancelled"
     assert s.speaking is False
+
+
+# --- Never raises, by construction: unexpected failures outside synthesis -----------------
+
+class _BrokenQueueSession(Session):
+    """A session whose outbound queue fails for chosen frame types (or for PCM)."""
+
+    def __init__(self, fail_on):
+        super().__init__("s", root_context(InProcessEventBus()), created_at=0.0)
+        self.speak = True
+        self.fail_on = fail_on
+
+    def enqueue(self, frame):
+        if frame.type in self.fail_on:
+            raise RuntimeError(f"outbound full ({frame.type})")
+        super().enqueue(frame)
+
+    def enqueue_audio(self, pcm):
+        if "pcm" in self.fail_on:
+            raise RuntimeError("outbound full (pcm)")
+        super().enqueue_audio(pcm)
+
+
+async def test_failure_sending_tts_begin_never_raises_out_of_close():
+    s = _BrokenQueueSession({"tts.begin"})
+    v = _Voice({})
+    sp = _speaker(s, v)
+    sp.say(["A.", "B."])
+    await sp.close(SpeechPacer())  # must not raise
+    await sp.abort()  # nor this
+    assert s.speaking is False
+    assert v.texts == []  # nothing synthesized once speech couldn't start
+
+
+async def test_failure_sending_audio_ends_speech_as_error():
+    s = _BrokenQueueSession({"pcm"})
+    v = _Voice({})
+    sp = _speaker(s, v)
+    sp.say(["A.", "B."])
+    await sp.close(SpeechPacer())  # must not raise
+    items = _frames(s)
+    assert _types(items) == ["tts.begin", "tts.end"]
+    assert items[-1].payload["reason"] == "error"
+    assert v.texts == ["A."]
+    assert s.speaking is False
+
+
+async def test_failure_sending_tts_end_never_raises_out_of_close():
+    s = _BrokenQueueSession({"tts.end"})
+    sp = _speaker(s, _Voice({}))
+    sp.say(["A."])
+    await sp.close(SpeechPacer())  # must not raise
+    await sp.abort()  # idempotent, must not raise
+    assert s.speaking is False
