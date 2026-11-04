@@ -46,8 +46,10 @@ an answer needs it. Three controls set it, all per turn underneath:
    STT transcript before the turn runs. The UI shows when a phrase was heard.
 
 The model's thinking text, which the Ollama provider currently discards, is kept
-and shown collapsed under the answer ("Show reasoning") — never spoken, never
-stored in memory. Each turn records whether it thought. The controls are enabled
+and made observable **step by step on the trace channel** (one event per model
+call), where the Inspect surface shows it. The chat window stays clean: a thinking
+answer carries only a small "thought for N s" label that links to that turn in
+Inspect. Thinking text is never spoken and never stored in memory. Each turn records whether it thought. The controls are enabled
 only when the active model declares thinking support; otherwise they are disabled
 with a reason.
 
@@ -101,7 +103,7 @@ same way as `spoken_input` (RFC-0010 Risks): no silent default.
 | `control:think.state` | →cli | `{enabled: bool, supported: bool, reason: str \| null}` | Current toggle + support. Sent after `hello`, after every change from any source (UI or voice), and when support changes. |
 | `chat:user_message` | →srv | existing `{text}` + optional `think: bool`, optional `rethink_of: turn_id` | Per-turn override; `rethink_of` marks a re-ask. |
 | `chat:turn.start` | →cli | existing + `think: bool`, `rethink_of: turn_id \| null` | Lets the UI show "Thinking…" from the start. |
-| `chat:turn.end` | →cli | existing + `think: bool`, `thinking: str \| null`, `think_unsupported_reason: str \| null` | What actually happened. |
+| `chat:turn.end` | →cli | existing + `think: bool`, `thinking_ms: int \| null`, `think_unsupported_reason: str \| null` | What actually happened; `thinking_ms` drives the "thought for N s" label. No thinking text. |
 | `chat:voice_command` | →cli | `{command: "think_turn" \| "rethink" \| "think_on" \| "think_off", phrase: str}` | A voice phrase was recognized (§4). |
 
 `control:think.state` is the single source of truth for the UI toggle, so a voice
@@ -166,14 +168,38 @@ Support is exposed in the runtime manifest (`GET /runtime`, `zygos inspect`) as
 
 `GenerationResult` and `GenerationChunk` gain `thinking: str | None` (default
 `None`). The Ollama provider fills it from `message.thinking` (non-streaming) and
-from each chunk's `message.thinking` (streaming). The turn concatenates thinking
-from every model call it makes (separated by a blank line) and returns it in
-`chat:turn.end.thinking`; it is **not** streamed live in this RFC. Thinking text is:
+from each chunk's `message.thinking` (streaming).
 
-- shown collapsed under the answer as "Show reasoning";
+**Observation, not chat.** After each model call that returned thinking, the turn
+emits one bus event, `model.thinking`, mirrored on the existing `trace:event`
+channel (RFC-0007 §10):
+
+```
+{type: "model.thinking", turn_id, step, index, text, truncated, chars, elapsed_ms}
+```
+
+- `step` names where in the turn it happened: `direct`, `tool_loop`, or the RDT
+  stage (`prelude`, `recurrent`, `judge`, `coda`); `index` orders events within
+  the turn (tool-loop iteration / RDT pass).
+- `text` is capped at `MAX_THINKING_EVENT_CHARS = 32_000` per event; longer
+  thinking is cut at the cap with `truncated: true`, and `chars` gives the full
+  length.
+- `elapsed_ms` is that call's time to its first answer token, summed into
+  `turn.end.thinking_ms`.
+
+The Inspect surface groups these events by turn and shows them in order, so the
+user can follow the model's thinking through tool calls and reasoning passes. The
+chat surface shows only the "thought for N s" label, which opens that turn in
+Inspect. Thinking events are emitted when they happen (not held to `turn.end`),
+so Inspect fills in while a long turn runs.
+
+Thinking text is:
+
+- never in chat frames (`turn.end` carries only `thinking_ms`);
 - never sent to TTS;
 - never written to memory (`format_exchange` records the answer only);
-- emitted on the trace channel only as its length, not its content.
+- kept only where trace events already go (local, in-process; RFC-0007 §10), so
+  it is the user's data on the user's machine like the rest of the trace.
 
 ### 7. Relationship to RDT reasoning
 
@@ -197,7 +223,12 @@ itself model-decided remains the separate reasoning-gating work (`cbb2e0ef`).
   routing (RFC-0009). This RFC only flips the active model's own thinking.
 - **Stream thinking tokens live.** Deferred: the tools path (the default) is
   non-streaming today, and a live reasoning pane is a UI design question of its
-  own. Delivering it at `turn.end` is enough to inspect.
+  own. One trace event per model call, as each call finishes, is enough to
+  follow the thinking step by step.
+- **Show thinking in the chat window** (collapsed under each answer). Rejected:
+  chat is for answers; thinking belongs with the other observation data (model,
+  memory, tools) in Inspect, where it can be shown per step rather than as one
+  merged block.
 - **Parse phrases in typed text too.** Rejected: typed users have direct controls;
   parsing typed text would surprise anyone who types "think about this" as part of
   a question.
@@ -217,7 +248,8 @@ today's behavior (config default, off). Order:
 5. `parse_voice_command` + the audio-path wiring + `chat:voice_command` + the
    "Let me think about that." prefix.
 6. Frontend: Think toggle, "Think it through" action, "Thinking…" state,
-   "Show reasoning" disclosure, voice-command notice, unsupported-state copy.
+   "thought for N s" label linking to Inspect, Inspect grouping of
+   `model.thinking` events by turn, voice-command notice, unsupported-state copy.
 7. README: the controls and the spoken phrases.
 
 ## Risks
@@ -231,8 +263,10 @@ today's behavior (config default, off). Order:
 - **Duplicate memory records on re-ask.** A re-ask records a second exchange for
   the same question. Acceptable: the deeper answer is the one most worth
   recalling, and recency weighting favors it. Revisit if memory quality suffers.
-- **Large thinking text.** Reasoning can run to thousands of tokens. Mitigated by
-  sending it once at `turn.end`, collapsed by default, never stored or spoken.
+- **Large thinking text.** Reasoning can run to thousands of tokens per call and
+  several calls per turn. Mitigated by one event per call, a per-event cap
+  (`MAX_THINKING_EVENT_CHARS`) with an explicit `truncated` flag, and keeping it
+  out of chat frames, TTS and memory.
 - **Support cache goes stale** if the user swaps the model behind the same name.
   Accepted for a process lifetime; restarting the server refreshes it.
 - **Toggle drift between tabs.** The toggle is per session; a second tab has its
@@ -257,14 +291,18 @@ today's behavior (config default, off). Order:
    without a model call; each emits `chat:voice_command` (tested).
 7. `run_turn` requires the `think` argument; both production callers pass it
    explicitly (tested).
-8. Ollama thinking text reaches `turn.end.thinking`; it is absent from TTS input,
-   memory records and trace payloads (tested).
+8. Each model call that returns thinking emits one `model.thinking` trace event
+   with the right `step`/`index`, capped with `truncated` set past the cap; the
+   text is absent from every chat frame, TTS input and memory record; and
+   `turn.end.thinking_ms` is set on thinking turns (tested on the direct, tools
+   and RDT paths).
 9. An Ollama model without the `thinking` capability, or any non-Ollama provider,
    reports `supported: false` with a reason in the manifest and
    `control:think.state`, and a requested think on it runs with `think=false` and
    `think_unsupported_reason` set (tested with a fake `/api/show`).
 10. The UI shows the toggle, the per-answer "Think it through" action, a
-    "Thinking…" state, a collapsed "Show reasoning", the voice-command notice,
+    "Thinking…" state, a "thought for N s" label that opens the turn in Inspect,
+    `model.thinking` events grouped by turn in Inspect, the voice-command notice,
     and disabled controls with the reason when unsupported (component tests).
 
 ## Architectural Impact
@@ -277,7 +315,8 @@ today's behavior (config default, off). Order:
   manifest. The support cache is process-local and documented.
 - **Service boundaries.** Respected: the turn loop resolves the setting and passes
   it down; providers translate it; the UI only sends frames.
-- **Constitution.** Serves "inspectable" (thinking text and state are visible)
+- **Constitution.** Serves "inspectable" (thinking is observable step by step in
+  Inspect; the thinking state is on every turn)
   and user choice (the user decides per turn; nothing is forced on a model that
   can't do it). Keeps ADR-0007's default.
 - **Independent testing.** Yes: phrase parsing, effective-value resolution,
