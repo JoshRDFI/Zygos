@@ -46,6 +46,11 @@ def _digest(model: GgufModel) -> str | None:
     return f"size:{model.size_bytes}:mtime:{max(mtimes)}" if mtimes else None
 
 
+def gguf_digest(model: GgufModel) -> str | None:
+    """Size and newest mtime of the model's files: a change means "re-read the header"."""
+    return _digest(model)
+
+
 def _mmproj_bytes(model: GgufModel) -> int | None:
     if model.mmproj is None:
         return None

@@ -323,3 +323,29 @@ def test_vllm_and_embedder_honour_record(tmp_path: Path, monkeypatch):
     config.memory.embedding.backend = "ollama"
     bootstrap._build_embedder(config, None, _Reg(), record)
     assert seen["url"] == "http://rec:2"
+
+
+def test_build_runtime_catalog_reads_the_backends_record(tmp_path: Path):
+    from zygos.backends.settings import BackendsSettings, LlamaCppBackend
+    from zygos.backends.store import SqliteBackendsStore
+    from zygos.runtime.context import root_context
+    from zygos.runtime.events import InProcessEventBus
+
+    gguf = tmp_path / "gguf"
+    gguf.mkdir()
+    (gguf / "Broken.gguf").write_bytes(b"not a gguf")
+    file = tmp_path / "config.yaml"
+    db = tmp_path / "p.db"
+    file.write_text(
+        f"personalization:\n  db_path: '{db}'\nmodels:\n  profiles_dir: '{tmp_path / 'profiles'}'\n"
+        "providers:\n  primary: {provider: fake, model: m}\n",
+        encoding="utf-8")
+    SqliteBackendsStore(db).set(BackendsSettings(llamacpp=LlamaCppBackend(models_dir=str(gguf))))
+    runtime = build_runtime(file)
+    try:
+        view = asyncio.run(runtime.model_catalog.view(root_context(InProcessEventBus())))
+    finally:
+        asyncio.run(runtime.aclose())
+    broken = {m.name: m for m in view.models}["Broken"]
+    assert broken.provider == "llamacpp"
+    assert broken.profile_error.startswith("can't read GGUF header: ")

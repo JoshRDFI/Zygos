@@ -200,3 +200,12 @@ def test_count_gguf_unreadable_subdir(tmp_path):
     finally:
         bad.chmod(0o755)
     assert c.ok and c.detail == f"1 GGUF files in {tmp_path}"
+
+
+async def test_read_vllm_max_model_len():
+    from zygos.backends.checks import read_vllm
+
+    body = {"data": [{"id": "a", "max_model_len": 32768}, {"id": "b"}, {"id": "c", "max_model_len": True}]}
+    c, models = await read_vllm(client(lambda r: httpx.Response(200, json=body)), "http://x/v1/")
+    assert c.ok
+    assert [(m.id, m.max_model_len) for m in models] == [("a", 32768), ("b", None), ("c", None)]

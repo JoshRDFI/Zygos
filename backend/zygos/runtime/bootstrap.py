@@ -346,6 +346,8 @@ def build_runtime(
         config=config,
         voice_snapshot=(voice_service.snapshot if voice_service is not None else lambda: None),
         clock=lambda: datetime.now(timezone.utc),
+        backends=backends,
+        client=client,
     )
 
     return RuntimeAssembly(

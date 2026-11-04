@@ -43,16 +43,34 @@ async def check_ollama(client: httpx.AsyncClient, base_url: str) -> Check:
         return Check(ok=False, detail=f"can't reach Ollama at {url}: {_reason(exc)}")
 
 
-async def check_vllm(client: httpx.AsyncClient, base_url: str) -> tuple[Check, list[str]]:
+class VllmModel(BaseModel):
+    """One model a vLLM server serves; ``max_model_len`` when its body states it."""
+
+    id: str
+    max_model_len: int | None = None
+
+
+def _max_len(entry: dict) -> int | None:
+    v = entry.get("max_model_len")
+    return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else None
+
+
+async def read_vllm(client: httpx.AsyncClient, base_url: str) -> tuple[Check, list[VllmModel]]:
+    """``GET <base_url>/models``: the served models, or a not-ok Check saying why."""
     url = base_url.rstrip("/")
     try:
         resp = await client.get(f"{url}/models", timeout=PROBE_TIMEOUT_S)
         if resp.status_code != 200:
             return Check(ok=False, detail=f"vLLM at {url} answered HTTP {resp.status_code}"), []
-        ids = [str(m["id"]) for m in resp.json()["data"]]
-        return Check(ok=True, detail=f"{len(ids)} models served at {url}"), ids
+        models = [VllmModel(id=str(m["id"]), max_model_len=_max_len(m)) for m in resp.json()["data"]]
+        return Check(ok=True, detail=f"{len(models)} models served at {url}"), models
     except Exception as exc:  # noqa: BLE001
         return Check(ok=False, detail=f"can't read models from {url}: {_reason(exc)}"), []
+
+
+async def check_vllm(client: httpx.AsyncClient, base_url: str) -> tuple[Check, list[str]]:
+    check, models = await read_vllm(client, base_url)
+    return check, [m.id for m in models]
 
 
 Runner = Callable[[list[str]], Awaitable[tuple[bytes, bytes]]]
