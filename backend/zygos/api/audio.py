@@ -14,7 +14,10 @@ import asyncio
 import logging
 
 from zygos.api.frames import CHAT, Frame
+from zygos.api.speech import say
+from zygos.api.thinking import send_think_state
 from zygos.api.turn import TurnDeps, run_turn
+from zygos.api.voice_commands import parse_voice_command
 from zygos.runtime.context import CancelToken
 
 logger = logging.getLogger("zygos.api.audio")
@@ -34,6 +37,31 @@ class AudioTurn:
         self.inbox = inbox
         self.pusher = pusher
         self.consumer = consumer
+
+
+async def _dispatch_final(session, deps: TurnDeps, text: str, token: CancelToken) -> None:
+    """Run the committed transcript: a thinking phrase (RFC-0012 §4) or a plain turn."""
+    cmd = parse_voice_command(text)
+    if cmd is None:
+        await run_turn(session, deps, text, token, spoken_input=True, think=None)
+        return
+    session.enqueue(Frame(channel=CHAT, type="voice_command",
+                          payload={"command": cmd.command, "phrase": cmd.phrase}))
+    if cmd.command == "think_turn":
+        await run_turn(session, deps, cmd.rest, token, spoken_input=True, think=True)
+    elif cmd.command == "rethink":
+        if session.last_user_text is None:
+            message = "There's nothing to think about yet."
+            session.enqueue(Frame(channel=CHAT, type="error", payload={"message": message}))
+            await say(session, deps, message)
+            return
+        await run_turn(session, deps, session.last_user_text, token, spoken_input=True,
+                       think=True, rethink_of=session.last_turn_id)
+    else:  # think_on / think_off
+        on = cmd.command == "think_on"
+        session.think = on
+        await send_think_state(session, deps)
+        await say(session, deps, "Thinking on." if on else "Thinking off.")
 
 
 async def start_audio_turn(session, deps: TurnDeps) -> None:
@@ -69,7 +97,7 @@ async def start_audio_turn(session, deps: TurnDeps) -> None:
                     token = CancelToken()
                     session.active_cancel = token
                     session.active_task = asyncio.create_task(
-                        run_turn(session, deps, ev.text, token, spoken_input=True, think=None))
+                        _dispatch_final(session, deps, ev.text, token))
         except Exception:  # noqa: BLE001 - a failed transcription must not kill the socket
             session.enqueue(Frame(channel=CHAT, type="error",
                                   payload={"message": "transcription failed"}))

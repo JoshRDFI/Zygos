@@ -49,3 +49,18 @@ async def speak_reply(session, voice_service, ctx, text: str, turn_id: str) -> N
             logger.debug("speak_reply: synth teardown failed", exc_info=True)
         session.enqueue(Frame(channel=AUDIO_OUT, type="tts.end",
                               payload={"turn_id": turn_id, "reason": reason}))
+
+
+async def say(session, deps, text: str) -> None:
+    """Speak a short runtime-authored line (e.g. a voice-command confirmation).
+
+    Runs under a fresh child context tied to ``session.active_cancel`` so a barge-in
+    cancels it like a turn. Silent unless the speaker is on and TTS is available
+    (the same gate as ``turn._speaks_reply``, inlined: turn.py imports this module).
+    """
+    voice_service = deps.voice_service
+    if not (session.speak and voice_service is not None and voice_service.tts_available):
+        return
+    turn_id = deps.new_id()
+    ctx = session.root.child(turn_id, cancel=session.active_cancel)
+    await speak_reply(session, voice_service, ctx, text, turn_id)

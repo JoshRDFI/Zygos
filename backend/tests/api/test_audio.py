@@ -251,3 +251,120 @@ async def test_stt_final_starts_a_turn_marked_as_spoken(monkeypatch):
     await session.active_task
 
     assert calls == [("what time is it", {"spoken_input": True, "think": None})]
+
+
+# --- RFC-0012 §4: spoken thinking phrases -------------------------------------
+
+
+class _PhraseSession(_FakeSessionForStart):
+    def __init__(self) -> None:
+        super().__init__()
+        self.think = None
+        self.last_user_text = None
+        self.last_turn_id = None
+        self.speak = True
+
+
+class _PhraseDeps(_FakeDeps):
+    think_default = False
+    thinking_support = None
+
+
+async def _drive(monkeypatch, text, session=None):
+    turns, said = [], []
+
+    async def fake_run_turn(session, deps, text, cancel, **kw):
+        turns.append((text, kw))
+
+    async def fake_say(session, deps, text):
+        said.append(text)
+
+    monkeypatch.setattr("zygos.api.audio.run_turn", fake_run_turn)
+    monkeypatch.setattr("zygos.api.audio.say", fake_say)
+    session = session or _PhraseSession()
+    deps = _PhraseDeps(_FakeVoiceService(_BlankFinalTranscription(text)))
+    await start_audio_turn(session, deps)
+    await session.audio.consumer
+    if session.active_task is not None:
+        await session.active_task
+    return session, turns, said
+
+
+def _frames(session, type_):
+    return [f for f in session.frames if f.type == type_]
+
+
+async def test_think_turn_phrase_stripped_and_thinks(monkeypatch):
+    session, turns, _ = await _drive(monkeypatch, "Think it through, what is 2+2")
+    (vc,) = _frames(session, "voice_command")
+    assert vc.channel == CHAT
+    assert vc.payload == {"command": "think_turn", "phrase": "think it through"}
+    assert turns == [("what is 2+2", {"spoken_input": True, "think": True})]
+
+
+async def test_rethink_reasks_last_text(monkeypatch):
+    s = _PhraseSession()
+    s.last_user_text, s.last_turn_id = "what is X", "t-prev"
+    session, turns, _ = await _drive(monkeypatch, "think harder", s)
+    assert _frames(session, "voice_command")[0].payload["command"] == "rethink"
+    assert turns == [("what is X", {"spoken_input": True, "think": True, "rethink_of": "t-prev"})]
+
+
+async def test_rethink_without_previous_turn(monkeypatch):
+    session, turns, said = await _drive(monkeypatch, "think harder")
+    assert len(_frames(session, "voice_command")) == 1
+    (err,) = _frames(session, "error")
+    assert err.payload == {"message": "There's nothing to think about yet."}
+    assert turns == []
+    assert said == ["There's nothing to think about yet."]
+
+
+@pytest.mark.parametrize("text,value,spoken", [
+    ("turn thinking on", True, "Thinking on."),
+    ("Thinking off.", False, "Thinking off."),
+])
+async def test_thinking_on_off_by_voice(monkeypatch, text, value, spoken):
+    session, turns, said = await _drive(monkeypatch, text)
+    assert len(_frames(session, "voice_command")) == 1
+    assert session.think is value
+    (state,) = _frames(session, "think.state")
+    assert state.payload["enabled"] is value
+    assert turns == []
+    assert said == [spoken]
+
+
+async def test_plain_utterance_unchanged(monkeypatch):
+    session, turns, said = await _drive(monkeypatch, "what time is it")
+    assert _frames(session, "voice_command") == []
+    assert turns == [("what time is it", {"spoken_input": True, "think": None})]
+    assert said == []
+
+
+async def test_say_synthesizes_when_speaker_on_and_is_silent_otherwise(monkeypatch):
+    from zygos.api import speech
+
+    spoken = []
+
+    async def fake_speak_reply(session, voice_service, ctx, text, turn_id):
+        spoken.append((text, turn_id))
+
+    monkeypatch.setattr(speech, "speak_reply", fake_speak_reply)
+
+    class Root:
+        def child(self, name, cancel=None):
+            return ("ctx", name, cancel)
+
+    class VS:
+        tts_available = True
+
+    class D:
+        voice_service = VS()
+        new_id = staticmethod(lambda: "say-1")
+
+    s = _PhraseSession()
+    s.root = Root()
+    await speech.say(s, D(), "Thinking on.")
+    assert spoken == [("Thinking on.", "say-1")]
+    s.speak = False
+    await speech.say(s, D(), "Thinking off.")
+    assert len(spoken) == 1
