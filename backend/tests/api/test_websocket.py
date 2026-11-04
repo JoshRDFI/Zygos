@@ -63,6 +63,7 @@ def test_full_turn_round_trip():
     client = TestClient(app)
     sid = client.post("/sessions").json()["id"]
     with client.websocket_connect(f"/ws/session/{sid}") as ws:
+        ws.receive_text()  # connect-time control:think.state
         ws.send_text(_um("hello"))
         frames = _collect_until_turn_end(ws)
     kinds = [(f["channel"], f["type"]) for f in frames]
@@ -85,6 +86,7 @@ def test_ping_pong():
     client = TestClient(app)
     sid = client.post("/sessions").json()["id"]
     with client.websocket_connect(f"/ws/session/{sid}") as ws:
+        ws.receive_text()  # connect-time control:think.state
         ws.send_text(json.dumps({"channel": "control", "type": "ping", "payload": {}}))
         reply = json.loads(ws.receive_text())
     assert reply["channel"] == "control" and reply["type"] == "pong"
@@ -95,6 +97,7 @@ def test_malformed_frame_returns_control_error():
     client = TestClient(app)
     sid = client.post("/sessions").json()["id"]
     with client.websocket_connect(f"/ws/session/{sid}") as ws:
+        ws.receive_text()  # connect-time control:think.state
         ws.send_text("this is not json")
         reply = json.loads(ws.receive_text())
     assert reply["channel"] == "control" and reply["type"] == "error"
@@ -460,3 +463,112 @@ async def test_user_message_think_and_rethink_forwarded(monkeypatch, payload, ex
     await _dispatch(session, None, Frame(channel=CHAT, type="user_message", payload=payload))
     await session.active_task
     assert calls == [("q", expected)]
+
+
+# --- RFC-0012 §2: session Think toggle -------------------------------------
+
+def _ctl(type_, payload=None):
+    return json.dumps({"channel": "control", "type": type_, "payload": payload or {}})
+
+
+def _next_think_state(ws):
+    while True:
+        f = json.loads(ws.receive_text())
+        if f["channel"] == "control" and f["type"] == "think.state":
+            return f["payload"]
+
+
+class _FixedChecker:
+    def __init__(self, supported, reason=None):
+        from zygos.thinking.support import ThinkingSupport
+        self._s = ThinkingSupport(supported=supported, reason=reason)
+
+    async def check(self, route):
+        return self._s
+
+
+def test_think_state_sent_on_connect():
+    app = _app()
+    client = TestClient(app)
+    sid = client.post("/sessions").json()["id"]
+    with client.websocket_connect(f"/ws/session/{sid}") as ws:
+        first = json.loads(ws.receive_text())
+    assert (first["channel"], first["type"]) == ("control", "think.state")
+    assert first["payload"] == {"enabled": False, "supported": True, "reason": None}
+
+
+def test_think_toggle_on_then_off():
+    app = _app(script=["alpha", "beta"])
+    seen = []
+    fake = next(iter(app.state.turn_deps.model_service._router._providers.values()))
+    orig_stream = fake.stream
+
+    def spy(request):
+        seen.append(request.think)
+        return orig_stream(request)
+
+    fake.stream = spy
+    client = TestClient(app)
+    sid = client.post("/sessions").json()["id"]
+    session = app.state.registry.get(sid)
+    with client.websocket_connect(f"/ws/session/{sid}") as ws:
+        _next_think_state(ws)
+        ws.send_text(_ctl("think", {"enabled": True}))
+        assert _next_think_state(ws)["enabled"] is True
+        assert session.think is True
+        ws.send_text(_um("hi"))
+        _collect_until_turn_end(ws)
+        ws.send_text(_ctl("think", {"enabled": False}))
+        assert _next_think_state(ws)["enabled"] is False
+        assert session.think is False
+        ws.send_text(_um("again"))
+        _collect_until_turn_end(ws)
+    assert seen[0] is True and seen[-1] is False
+
+
+def test_think_toggle_applies_to_next_turn(monkeypatch):
+    calls = []
+
+    async def fake_run_turn(session, deps, text, cancel, **kw):
+        calls.append(kw["think"])
+
+    monkeypatch.setattr("zygos.api.websocket.run_turn", fake_run_turn)
+    session = Session("s1", root_context(InProcessEventBus(), session_id="s1"), created_at=0.0)
+    deps = SimpleNamespace(think_default=False, thinking_support=None, model_service=None)
+
+    async def run():
+        await _dispatch(session, deps, Frame(channel=CONTROL, type="think", payload={"enabled": True}))
+        assert session.think is True
+        frames = _drain_ws(session)
+        assert frames[-1].type == "think.state" and frames[-1].payload["enabled"] is True
+        await _dispatch(session, deps, Frame(channel=CHAT, type="user_message", payload={"text": "q"}))
+        await session.active_task
+        await _dispatch(session, deps, Frame(channel=CONTROL, type="think", payload={"enabled": 0}))
+        assert session.think is False
+
+    asyncio.run(run())
+    # run_turn receives the request-level value (None); resolve_think applies session.think.
+    assert calls == [None]
+
+
+def test_think_state_reports_unsupported():
+    app = _app()
+    app.state.turn_deps = dataclasses.replace(
+        app.state.turn_deps, thinking_support=_FixedChecker(False, "m can't think"))
+    client = TestClient(app)
+    sid = client.post("/sessions").json()["id"]
+    with client.websocket_connect(f"/ws/session/{sid}") as ws:
+        first = json.loads(ws.receive_text())
+    assert first["payload"]["supported"] is False
+    assert first["payload"]["reason"] == "m can't think"
+
+
+def test_hello_also_sends_think_state():
+    app = _app()
+    client = TestClient(app)
+    sid = client.post("/sessions").json()["id"]
+    with client.websocket_connect(f"/ws/session/{sid}") as ws:
+        json.loads(ws.receive_text())  # connect-time think.state
+        ws.send_text(_ctl("hello"))
+        types = [json.loads(ws.receive_text())["type"] for _ in range(2)]
+    assert types == ["hello", "think.state"]

@@ -22,6 +22,7 @@ from zygos.api.duck import arm_duck, release_duck, stop_speech
 from zygos.api.frames import AUDIO_TAG_IN, CHAT, CONTROL, TOOLS, Frame, decode, encode
 from zygos.api.session import Session
 from zygos.api.turn import TurnDeps, run_turn
+from zygos.api.thinking import send_think_state
 from zygos.runtime.context import CancelToken
 
 logger = logging.getLogger("zygos.api.websocket")
@@ -85,6 +86,10 @@ async def _dispatch(session: Session, deps: TurnDeps, frame: Frame) -> None:
         session.enqueue(Frame(channel=CONTROL, type="pong", payload={}))
     elif frame.channel == CONTROL and frame.type == "hello":
         session.enqueue(Frame(channel=CONTROL, type="hello", payload={"ready": True}))
+        await send_think_state(session, deps)
+    elif frame.channel == CONTROL and frame.type == "think":
+        session.think = bool(frame.payload.get("enabled", False))
+        await send_think_state(session, deps)
     elif frame.channel == TOOLS and frame.type == "permission_response":
         call_id = str(frame.payload.get("call_id", ""))
         decision = frame.payload.get("decision")
@@ -131,6 +136,7 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
     session.connected = True
     writer = asyncio.create_task(_writer(websocket, session))
     session._writer = writer
+    await send_think_state(session, deps)
 
     try:
         while True:

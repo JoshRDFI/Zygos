@@ -32,6 +32,7 @@ def test_end_to_end_turn_over_real_app():
                 frames.append(f)
                 if f["channel"] == "chat" and f["type"] == "turn.end":
                     break
+    frames = [f for f in frames if f["type"] != "think.state"]  # connect-time frame
     kinds = [(f["channel"], f["type"]) for f in frames]
     assert kinds[0] == ("chat", "turn.start")
     assert kinds[-1] == ("chat", "turn.end")

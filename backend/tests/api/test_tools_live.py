@@ -27,6 +27,7 @@ import dataclasses
 import json
 
 import pytest
+from types import SimpleNamespace
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
@@ -232,7 +233,9 @@ async def test_disconnect_resolves_pending_permission_to_deny():
     app = _App()
     app.state = _State()
     app.state.registry = registry
-    app.state.turn_deps = None  # unused: disconnect happens before any frame dispatch
+    # Only the connect-time think.state reads deps; disconnect precedes any dispatch.
+    app.state.turn_deps = SimpleNamespace(think_default=False, thinking_support=None,
+                                          model_service=None)
 
     await session_ws(_ImmediateDisconnectWebSocket(app), session.id)
     await asyncio.sleep(0)  # let the handler's writer.cancel() land cleanly
