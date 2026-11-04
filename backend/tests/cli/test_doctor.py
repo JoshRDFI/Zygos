@@ -93,3 +93,69 @@ def test_doctor_ollama_address_and_vllm_down(tmp_path):
     assert by["ollama_address"].detail == "http://o:1 (from backends)"
     assert by["vllm"].warn and report.ok
     assert "backends_restart" not in by
+
+
+def test_doctor_does_not_probe_ollama(tmp_path):
+    import asyncio
+    from dataclasses import replace
+
+    import httpx
+
+    from zygos.backends.settings import BackendsSettings, LlamaCppBackend
+    from zygos.backends.store import SqliteBackendsStore
+    from zygos.cli.doctor import run_doctor
+    from zygos.runtime.bootstrap import build_runtime
+
+    config = tmp_path / "config.yaml"
+    db = tmp_path / "p.db"
+    config.write_text(f"personalization:\n  db_path: '{db}'\n"
+                      "providers:\n  primary: {provider: fake, model: fake-1}\n")
+    SqliteBackendsStore(db).set(BackendsSettings(
+        llamacpp=LlamaCppBackend(models_dir=str(tmp_path))))
+    calls = []
+
+    def handler(request):
+        calls.append(str(request.url))
+        return httpx.Response(500)
+
+    async def go():
+        runtime = build_runtime(config)
+        probe_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        try:
+            return await run_doctor(replace(runtime, http_client=probe_client),
+                                    gpu_query=lambda: None)
+        finally:
+            await probe_client.aclose()
+            await runtime.aclose()
+
+    report = asyncio.run(go())
+    assert calls == []
+    assert any(c.name == "llamacpp_models" for c in report.checks)
+
+
+def test_doctor_backends_restart_warns(tmp_path):
+    from dataclasses import replace  # noqa: F401
+    import asyncio
+
+    from zygos.backends.settings import BackendsSettings, OllamaBackend
+    from zygos.backends.store import SqliteBackendsStore
+    from zygos.cli.doctor import run_doctor
+    from zygos.runtime.bootstrap import build_runtime
+
+    config = tmp_path / "config.yaml"
+    db = tmp_path / "p.db"
+    config.write_text(f"personalization:\n  db_path: '{db}'\n"
+                      "providers:\n  primary: {provider: fake, model: fake-1}\n")
+    store = SqliteBackendsStore(db)
+
+    async def go():
+        runtime = build_runtime(config)  # started with no record
+        store.set(BackendsSettings(ollama=OllamaBackend(base_url="http://new:1")))
+        try:
+            return await run_doctor(runtime, gpu_query=lambda: None)
+        finally:
+            await runtime.aclose()
+
+    by = {c.name: c for c in asyncio.run(go()).checks}
+    assert by["backends_restart"].warn and by["backends_restart"].ok
+    assert by["ollama_address"].detail.startswith("http://new:1")

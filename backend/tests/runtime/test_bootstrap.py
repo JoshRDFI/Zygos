@@ -299,3 +299,27 @@ def test_build_runtime_records_address_sources(tmp_path: Path):
         assert runtime.addresses_at_start["ollama"] == "http://rec:2"
     finally:
         asyncio.run(runtime.aclose())
+
+
+def test_vllm_and_embedder_honour_record(tmp_path: Path, monkeypatch):
+    from zygos.backends.settings import BackendsSettings, OllamaBackend, VllmEndpoint
+    from zygos.runtime import bootstrap
+
+    record = BackendsSettings(ollama=OllamaBackend(base_url="http://rec:2"),
+                              vllm=[VllmEndpoint(base_url="http://v:3/v1")])
+    config = load_config(None)
+    assert _provider_settings(config, "vllm", record).base_url == "http://v:3/v1"
+
+    seen = {}
+
+    class _Cls:
+        def __init__(self, settings, client):
+            seen["url"] = settings.base_url
+
+    class _Reg:
+        def resolve(self, kind, name):
+            return _Cls
+
+    config.memory.embedding.backend = "ollama"
+    bootstrap._build_embedder(config, None, _Reg(), record)
+    assert seen["url"] == "http://rec:2"

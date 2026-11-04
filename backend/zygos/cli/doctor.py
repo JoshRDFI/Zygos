@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from zygos.backends.view import build_view, restart_required
+from zygos.backends.view import build_view, ollama_address, restart_required
 from zygos.config.loader import primary_route_credentialed
 from zygos.errors import PluginError
 from zygos.hardware.describe import describe_hardware
@@ -93,10 +93,11 @@ async def _backend_checks(runtime: RuntimeAssembly) -> list[DoctorCheck]:
     if not (show_ollama or show_llama or settings.vllm):
         return out
     view = await build_view(
-        settings, runtime.http_client, runtime.address_sources, runtime.addresses_at_start
+        settings, runtime.http_client, runtime.address_sources, runtime.addresses_at_start,
+        probe_ollama=False,  # doctor is passive: ollama_address shows the address only
     )
     if show_ollama:
-        url = view.settings.ollama.base_url or runtime.addresses_at_start.get("ollama", "")
+        url = ollama_address(settings, runtime.addresses_at_start)
         source = runtime.address_sources.get("ollama", "default")
         out.append(DoctorCheck("ollama_address", True, f"{url} (from {source})"))
     if show_llama:

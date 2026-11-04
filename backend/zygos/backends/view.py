@@ -58,18 +58,31 @@ def ollama_address(
     )
 
 
+async def _ollama_check(
+    client: httpx.AsyncClient,
+    settings: BackendsSettings,
+    addresses_at_start: Mapping[str, str],
+    probe: bool,
+) -> Check:
+    if not probe:
+        return Check(ok=True, detail="not probed")
+    return await check_ollama(client, ollama_address(settings, addresses_at_start))
+
+
 async def build_view(
     settings: BackendsSettings,
     client: httpx.AsyncClient,
     address_sources: Mapping[str, AddressSource],
     addresses_at_start: Mapping[str, str],
+    *,
+    probe_ollama: bool = True,
 ) -> BackendsView:
     lc = settings.llamacpp
     vllm_checks = (
         check_vllm(client, settings.vllm[0].base_url) if settings.vllm else None
     )
     ollama, server, models = await asyncio.gather(
-        check_ollama(client, ollama_address(settings, addresses_at_start)),
+        _ollama_check(client, settings, addresses_at_start, probe_ollama),
         check_llama_server(lc.server_path),
         asyncio.to_thread(count_gguf, lc.models_dir),
     )
