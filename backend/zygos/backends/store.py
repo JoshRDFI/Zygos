@@ -45,6 +45,11 @@ class SqliteBackendsStore:
             return BackendsSettings()
         try:
             with closing(sqlite3.connect(self._path)) as con:
+                has_table = con.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'backends'"
+                ).fetchone()
+                if has_table is None:
+                    return BackendsSettings()
                 row = con.execute("SELECT data FROM backends WHERE id = 1").fetchone()
         except sqlite3.Error as exc:
             _log.warning("backends store unreadable (%s); using empty", exc)

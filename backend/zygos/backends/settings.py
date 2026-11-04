@@ -54,5 +54,5 @@ def effective_args(
     """The launch text for ``model``: its own if non-blank, else the default."""
     own = settings.model_args.get(model)
     if own is not None and own.strip():
-        return own, "model"
+        return own.strip(), "model"
     return settings.default_args, "default"

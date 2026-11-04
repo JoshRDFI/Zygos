@@ -80,3 +80,16 @@ def test_effective_args():
     assert effective_args(s, "zzz") == ("-ngl 99", "default")
     assert effective_args(s, "blank") == ("-ngl 99", "default")
     assert effective_args(s, "e") == ("-ngl 99", "default")
+
+
+def test_missing_table_in_shared_db_is_plain_defaults(tmp_path, caplog):
+    db = tmp_path / "p.db"
+    SqlitePreferencesStore(db).set(Personalization(user_name="Josh"))
+    with caplog.at_level(logging.WARNING, logger="zygos.backends"):
+        assert SqliteBackendsStore(db).get() == BackendsSettings()
+    assert not [r for r in caplog.records if r.name == "zygos.backends"]
+
+
+def test_effective_args_returns_stripped_own_text():
+    s = LlamaCppBackend(model_args={"a": "  -c 1  "})
+    assert effective_args(s, "a") == ("-c 1", "model")
