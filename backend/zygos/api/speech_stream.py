@@ -10,9 +10,17 @@ Stability: Experimental.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 import time
 from collections.abc import Callable
+
+from zygos.api.duck import clear_duck_state
+from zygos.api.frames import AUDIO_OUT, Frame
+from zygos.runtime.events import SpeechTiming
+
+logger = logging.getLogger("zygos.api.speech_stream")
 
 SPEAKING_RATE_WPS = 3.0
 ASSUMED_REPLY_WORDS = 200
@@ -105,3 +113,133 @@ class SpeechPacer:
         sentences = self._split()
         self._buf = ""
         return self._drain(sentences)
+
+
+class StreamingSpeaker:
+    """Speaks a reply sentence by sentence as it is released, under one tts.begin/tts.end.
+
+    ``say`` is sync and only queues; a single consumer task synthesizes in order. The
+    consumer first awaits ``wait_for`` (e.g. the "Let me think" prefix) before sending
+    ``tts.begin``. ``close`` drains and ends; ``abort`` cancels and ends. A synthesis
+    failure ends the speech with reason ``error`` and never raises out of close/abort.
+    """
+
+    def __init__(self, session, voice_service, ctx, turn_id: str, *, turn_started_at: float,
+                 wait_for: asyncio.Task | None = None,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        self._session = session
+        self._voice = voice_service
+        self._ctx = ctx
+        self._turn_id = turn_id
+        self._turn_started_at = turn_started_at
+        self._wait_for = wait_for
+        self._clock = clock
+        self._queue: asyncio.Queue[str | None] = asyncio.Queue()
+        self._task: asyncio.Task | None = None
+        self._began = False
+        self._ended = False
+        self._reason = "complete"
+        self._first_audio_ms: int | None = None
+        self._projected_end: float | None = None
+        self._gaps = 0
+        self._gap_s = 0.0
+
+    def say(self, sentences: list[str]) -> None:
+        sentences = [s for s in sentences if s and s.strip()]
+        if not sentences:
+            return
+        for s in sentences:
+            self._queue.put_nowait(s)
+        if self._task is None:
+            self._task = asyncio.create_task(self._consume())
+
+    async def _consume(self) -> None:
+        if self._wait_for is not None:
+            await asyncio.wait([self._wait_for])  # never raises; prefix errors are its own
+        if self._ctx.cancelled:
+            return
+        fmt = self._voice.tts_format
+        self._session.enqueue(Frame(channel=AUDIO_OUT, type="tts.begin", payload={
+            "sample_rate": fmt.sample_rate,
+            "channels": fmt.channels,
+            "sample_format": fmt.sample_format,
+            "turn_id": self._turn_id,
+        }))
+        self._began = True
+        self._session.speaking = True
+        bytes_per_s = fmt.sample_rate * fmt.channels * 2
+        while True:
+            text = await self._queue.get()
+            if text is None or self._ctx.cancelled:
+                break
+            synth = self._voice.synthesize_stream(self._ctx, text)
+            first_chunk = True
+            try:
+                async for pcm in synth.chunks():
+                    if self._ctx.cancelled:
+                        break
+                    self._track(len(pcm) / bytes_per_s, first_chunk)
+                    first_chunk = False
+                    self._session.enqueue_audio(pcm)
+            except Exception:  # noqa: BLE001 - a synthesis failure must not kill the turn
+                self._reason = "error"
+                logger.warning("synthesis failed", exc_info=True)
+            finally:
+                try:
+                    await synth.cancel()
+                    await synth.aclose()
+                except Exception:  # noqa: BLE001 - teardown failure must not skip tts.end
+                    logger.debug("StreamingSpeaker: synth teardown failed", exc_info=True)
+            if self._reason == "error":
+                break
+
+    def _track(self, duration: float, first_of_sentence: bool) -> None:
+        now = self._clock()
+        if self._first_audio_ms is None:
+            self._first_audio_ms = round((now - self._turn_started_at) * 1000)
+        if self._projected_end is None:
+            self._projected_end = now
+        elif first_of_sentence and now > self._projected_end:
+            self._gaps += 1
+            self._gap_s += now - self._projected_end
+            self._projected_end = now
+        self._projected_end += duration
+
+    async def _end(self, pacer: SpeechPacer, reason: str) -> None:
+        if self._ended or not self._began:
+            self._ended = True
+            return
+        self._ended = True
+        self._session.speaking = False
+        clear_duck_state(self._session)
+        self._session.enqueue(Frame(channel=AUDIO_OUT, type="tts.end",
+                                    payload={"turn_id": self._turn_id, "reason": reason}))
+        rate = pacer.rate_wps
+        await self._ctx.emit(
+            SpeechTiming(turn_id=self._turn_id, first_audio_ms=self._first_audio_ms,
+                         words_at_start=pacer.words_at_start,
+                         rate_wps=None if rate is None else round(rate, 1),
+                         gaps=self._gaps, gap_ms=round(self._gap_s * 1000), reason=reason),
+            source="speech",
+        )
+
+    async def close(self, pacer: SpeechPacer) -> None:
+        if self._ended or self._task is None:
+            return
+        self._queue.put_nowait(None)
+        await self._task
+        reason = self._reason
+        if reason != "error" and self._ctx.cancelled:
+            reason = "cancelled"
+        await self._end(pacer, reason)
+
+    async def abort(self, pacer: SpeechPacer | None = None) -> None:
+        if self._ended:
+            return
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        await self._end(pacer or SpeechPacer(), "cancelled")

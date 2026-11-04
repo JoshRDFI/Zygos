@@ -88,3 +88,18 @@ def test_event_carries_capability_payload_via_discriminated_union():
         payload=CapabilityResolved(capability="local_inference", provider="ollama"),
     )
     assert event.type == "capability.resolved"
+
+
+def test_speech_timing_round_trips():
+    from zygos.runtime.events import SpeechTiming
+
+    ev = Event(run_id="r", span_id="s", source="speech",
+               payload=SpeechTiming(turn_id="t", first_audio_ms=1800, words_at_start=14,
+                                    rate_wps=52.0, gaps=1, gap_ms=1300, reason="complete"))
+    assert ev.type == "speech.timing"
+    again = Event.model_validate(ev.model_dump())
+    assert again == ev
+    nulls = SpeechTiming(turn_id="t", first_audio_ms=None, words_at_start=None, rate_wps=None,
+                         gaps=0, gap_ms=0, reason="error")
+    assert Event.model_validate(Event(run_id="r", span_id="s", source="speech",
+                                      payload=nulls).model_dump()).payload == nulls

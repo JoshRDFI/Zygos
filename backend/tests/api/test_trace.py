@@ -116,3 +116,20 @@ async def test_trace_bridge_mirrors_model_thinking():
     frame = session.outbound.get_nowait()
     assert frame.type == "event"
     assert frame.payload["type"] == "model.thinking" and frame.payload["text"] == "hmm"
+
+
+@pytest.mark.asyncio
+async def test_trace_bridge_mirrors_speech_timing():
+    from zygos.runtime.events import SpeechTiming
+
+    bus = InProcessEventBus()
+    reg = _registry(bus)
+    install_trace_bridge(bus, reg)
+    session = reg.create()
+    session.connected = True
+    await bus.emit(Event(run_id=session.root.run_id, span_id="span-1", source="speech",
+                         payload=SpeechTiming(turn_id="t1", first_audio_ms=900, words_at_start=12,
+                                              rate_wps=40.0, gaps=0, gap_ms=0, reason="complete")))
+    frame = session.outbound.get_nowait()
+    assert frame.type == "event"
+    assert frame.payload["type"] == "speech.timing" and frame.payload["first_audio_ms"] == 900

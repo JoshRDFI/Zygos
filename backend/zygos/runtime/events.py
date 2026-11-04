@@ -83,6 +83,17 @@ class ModelThinking(EventPayload):
     elapsed_ms: int
 
 
+class SpeechTiming(EventPayload):
+    type: Literal["speech.timing"] = "speech.timing"
+    turn_id: str
+    first_audio_ms: int | None
+    words_at_start: int | None
+    rate_wps: float | None
+    gaps: int
+    gap_ms: int
+    reason: Literal["complete", "cancelled", "error"]
+
+
 AnyPayload = Annotated[
     Union[
         RouteClaimed,
@@ -94,6 +105,7 @@ AnyPayload = Annotated[
         CapabilityResolved,
         CapabilityRenegotiated,
         ModelThinking,
+        SpeechTiming,
     ],
     Field(discriminator="type"),
 ]
