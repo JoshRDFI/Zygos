@@ -164,6 +164,8 @@ above.
 **Semantic memory (optional).** `memory.enabled: true` gives keyword recall out of the box;
 `retrieval_mode: hybrid` adds local embeddings and needs `pip install -e '.[server,embeddings]'`.
 
+**Personalize (optional).** `.venv/bin/python -m zygos.cli personalize` — describe yourself and the assistant you want; review the draft before it's saved. `personalize show|set|clear` edit it directly; changes apply on the next turn, no restart.
+
 ## Quick start (v1 CLI, local)
 
 The stable but frozen v1 CLI lives on the

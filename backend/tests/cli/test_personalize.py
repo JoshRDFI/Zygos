@@ -1,0 +1,130 @@
+import pytest
+
+from zygos.cli.__main__ import main
+from zygos.personalization import Personalization, SqlitePreferencesStore
+
+HINT = ("zygos: not personalized yet: run `zygos personalize` "
+        "to set your name and the assistant's.")
+
+
+@pytest.fixture
+def cfg(tmp_path):
+    db = tmp_path / "prefs.db"
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "providers:\n"
+        "  primary: {provider: fake, model: fake-1}\n"
+        "personalization:\n"
+        f"  db_path: {db}\n"
+    )
+    return ["--config", str(path)], SqlitePreferencesStore(db)
+
+
+def test_show_empty(cfg, capsys):
+    base, _ = cfg
+    assert main([*base, "personalize", "show"]) == 0
+    assert capsys.readouterr().out.strip() == "Not personalized."
+
+
+def test_set_then_show(cfg, capsys):
+    base, store = cfg
+    assert main([*base, "personalize", "set", "--user-name", "Josh",
+                 "--assistant-name", "Rommie"]) == 0
+    capsys.readouterr()
+    assert main([*base, "personalize", "show"]) == 0
+    out = capsys.readouterr().out
+    assert "user_name: Josh" in out
+    assert "assistant_name: Rommie" in out
+    assert store.get().user_name == "Josh"
+
+
+def test_set_merges_and_empty_string_clears(cfg):
+    base, store = cfg
+    main([*base, "personalize", "set", "--user-name", "Josh", "--tone", "dry"])
+    main([*base, "personalize", "set", "--assistant-name", "Rommie"])
+    prefs = store.get()
+    assert (prefs.user_name, prefs.tone, prefs.assistant_name) == ("Josh", "dry", "Rommie")
+    main([*base, "personalize", "set", "--tone", ""])
+    prefs = store.get()
+    assert prefs.tone is None and prefs.user_name == "Josh"
+
+
+def test_set_invalid_exits_1_and_writes_nothing(cfg, capsys):
+    base, store = cfg
+    assert main([*base, "personalize", "set", "--user-name", "x" * 5000]) == 1
+    captured = capsys.readouterr()
+    assert captured.err.strip() and "Traceback" not in captured.err
+    assert store.get().is_empty
+
+
+def test_set_without_flags_exits_2(cfg):
+    base, _ = cfg
+    with pytest.raises(SystemExit) as exc:
+        main([*base, "personalize", "set"])
+    assert exc.value.code == 2
+
+
+def test_clear(cfg, capsys):
+    base, store = cfg
+    store.set(Personalization(user_name="Josh"))
+    assert main([*base, "personalize", "clear"]) == 0
+    assert "Personalization cleared." in capsys.readouterr().out
+    assert store.get().is_empty
+
+
+def test_guided_skip(cfg, monkeypatch):
+    base, store = cfg
+    monkeypatch.setattr("builtins.input", lambda *a: "")
+    assert main([*base, "personalize"]) == 0
+    assert store.get().is_empty
+
+
+def test_guided_ctrl_c_exits_130(cfg, monkeypatch, capsys):
+    base, store = cfg
+
+    def boom(*a):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("builtins.input", boom)
+    assert main([*base, "personalize"]) == 130
+    assert "Traceback" not in capsys.readouterr().err
+    assert store.get().is_empty
+
+
+def test_doctor_warns_when_unpersonalized(cfg, capsys):
+    base, _ = cfg
+    assert main([*base, "doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "[warn] personalization: not set: run `zygos personalize`" in out
+    assert "healthy" in out
+
+
+def test_doctor_reports_set(cfg, capsys):
+    base, store = cfg
+    store.set(Personalization(user_name="Josh", assistant_name="Rommie"))
+    assert main([*base, "doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "[ok  ] personalization: set (assistant: Rommie, user: Josh)" in out
+
+
+@pytest.fixture
+def served(monkeypatch):
+    calls = []
+    monkeypatch.setattr("zygos.api.app.run_server",
+                        lambda runtime, *, host, port: calls.append((host, port)))
+    return calls
+
+
+def test_serve_prints_hint_when_empty(cfg, served, capsys):
+    base, _ = cfg
+    assert main([*base, "serve"]) == 0
+    assert HINT in capsys.readouterr().err
+    assert served
+
+
+def test_serve_no_hint_when_set(cfg, served, capsys):
+    base, store = cfg
+    store.set(Personalization(user_name="Josh"))
+    assert main([*base, "serve"]) == 0
+    assert "not personalized" not in capsys.readouterr().err
+    assert served

@@ -135,6 +135,19 @@ async def run_doctor(
         )
     )
 
+    prefs = runtime.preferences.get()
+    if prefs.is_empty:
+        checks.append(DoctorCheck(
+            "personalization", True,
+            "not set: run `zygos personalize` to set your name and the assistant's",
+            warn=True,
+        ))
+    else:
+        checks.append(DoctorCheck(
+            "personalization", True,
+            f"set (assistant: {prefs.assistant_name or '-'}, user: {prefs.user_name or '-'})",
+        ))
+
     checks.extend(_voice_device_checks(runtime, gpu_query))
 
     if probe:

@@ -13,8 +13,12 @@ import asyncio
 import sys
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from zygos.cli.doctor import DoctorReport, run_doctor
 from zygos.errors import ConfigError
+from zygos.personalization import PERSONALIZATION_FIELDS, Personalization
+from zygos.personalization.onboarding import run_onboarding
 from zygos.runtime.bootstrap import build_runtime
 from zygos.runtime.manifest import Manifest, runtime_manifest
 
@@ -33,7 +37,47 @@ def _build_parser() -> argparse.ArgumentParser:
     voice_cmds = voice.add_subparsers(dest="voice_command", required=True)
     setup_gpu = voice_cmds.add_parser("setup-gpu", help="Build the GPU TTS sidecar venv")
     setup_gpu.add_argument("--force", action="store_true", help="Delete and rebuild the venv")
+    personalize = subcommands.add_parser("personalize", help="Set your name and the assistant's")
+    personalize_cmds = personalize.add_subparsers(dest="personalize_command", required=False)
+    personalize_cmds.add_parser("show", help="Show the saved personalization")
+    personalize_cmds.add_parser("clear", help="Remove all personalization")
+    set_cmd = personalize_cmds.add_parser("set", help="Set individual fields directly")
+    for field in PERSONALIZATION_FIELDS:
+        set_cmd.add_argument(f"--{field.replace('_', '-')}", dest=field, default=None)
     return parser
+
+
+async def _personalize(runtime, args: argparse.Namespace) -> int:
+    store = runtime.preferences
+    sub = args.personalize_command
+    if sub is None:
+        try:
+            await run_onboarding(
+                runtime.new_context(), runtime.model_service, store, ask=input, say=print
+            )
+        except KeyboardInterrupt:
+            return 130
+        return 0
+    if sub == "show":
+        prefs = store.get()
+        lines = [f"{f}: {getattr(prefs, f)}" for f in PERSONALIZATION_FIELDS if getattr(prefs, f)]
+        print("\n".join(lines) if lines else "Not personalized.")
+        return 0
+    if sub == "clear":
+        store.set(Personalization())
+        print("Personalization cleared.")
+        return 0
+    given = {f: getattr(args, f) for f in PERSONALIZATION_FIELDS if getattr(args, f) is not None}
+    if not given:
+        _build_parser().error("personalize set: give at least one field flag")
+    try:
+        store.set(Personalization(**{**store.get().model_dump(), **given}))
+    except ValidationError as error:
+        first = error.errors()[0]
+        field = ".".join(str(part) for part in first["loc"]) or "value"
+        print(f"zygos: invalid {field}: {first['msg']}", file=sys.stderr)
+        return 1
+    return 0
 
 
 def render_manifest(manifest: Manifest) -> str:
@@ -79,6 +123,8 @@ async def _amain(args: argparse.Namespace) -> int:
             report = await run_doctor(runtime, probe=args.probe)
             print(render_doctor(report))
             return 0 if report.ok else 1
+        if args.command == "personalize":
+            return await _personalize(runtime, args)
         return 2
     finally:
         await runtime.aclose()
@@ -95,6 +141,12 @@ def main(argv: list[str] | None = None) -> int:
             from zygos.api.app import run_server
 
             runtime = build_runtime(args.config)
+            if runtime.preferences.get().is_empty:
+                print(
+                    "zygos: not personalized yet: run `zygos personalize` "
+                    "to set your name and the assistant's.",
+                    file=sys.stderr,
+                )
             host = args.host if args.host is not None else runtime.config.server.host
             port = args.port if args.port is not None else runtime.config.server.port
             run_server(runtime, host=host, port=port)
