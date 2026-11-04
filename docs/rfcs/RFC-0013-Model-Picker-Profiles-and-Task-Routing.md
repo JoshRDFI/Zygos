@@ -87,11 +87,23 @@ One JSON file per model, at `.zygos/models/profiles/<provider>/<model>.json` (mo
 names are made filesystem-safe; the original name is stored inside). Profiles are
 local, human-readable and hand-editable.
 
+**Model families** (maintainer's point: a user is likely to have several models of one
+family — e.g. qwen3.x in several sizes and versions plus `-instruct`, coder and OCR
+variants). My calls: every variant has **its own profile and its own scores** — a
+coder variant, a larger size or another quantization is tested separately, because
+they behave differently and inherited scores would be guesses. Two names for the
+same model (e.g. `qwen3:latest` and `qwen3:8b`, same digest) share one profile. The
+picker **groups models by family**, showing size, quantization and specialty side by
+side so variants can be told apart.
+
 Every value is a record `{value, source, at}` where `source` is one of `ollama`,
-`modelfile`, `measured`, `eval`, `user`, and `at` is a timestamp. Sections:
+`modelfile`, `measured`, `eval`, `user` or `name` (a hint read from the model's name,
+lowest precedence), and `at` is a timestamp. Sections:
 
 - **identity:** provider, model, family, parameter count, quantization, download
-  size, maximum context length.
+  size, maximum context length, content digest, and **specialty** (e.g. `coder`,
+  `instruct`, `vision`/`ocr`) — from Ollama's `details` where given, otherwise a `name`
+  hint from tags such as `-coder`, `-instruct`, `-vl`, `-ocr`.
 - **capabilities:** tools, vision, thinking, embedding (from Ollama `/api/show`
   `capabilities`, the probe RFC-0012 already uses).
 - **performance (measured in normal use, free):** writing speed (tokens and words per
@@ -147,13 +159,28 @@ The Models page (today read-only, RFC-0011) becomes:
   created.
 - **Test this model** runs the eval suites for it (§7) and fills its quality section.
 
-**Open research (must be settled before acceptance):** (a) how to learn a library
-model's download size *before* pulling — Ollama's documented API has no library
-search or size lookup; candidates are the registry manifest (undocumented) or
-falling back to "size unknown → fit unknown, confirm anyway"; (b) whether to offer
-search at all — Ollama documents no library search API; Hugging Face's Hub API can
-search GGUF repositories and give file sizes. Until settled, the first build offers
-**download by exact name**, with search later.
+- **Delete** a model (Ollama `DELETE /api/delete`), after a confirmation showing the
+  disk space freed. Not allowed for the model currently loaded or answering, or for
+  the saved default (reset or change the default first). Its profile is kept, marked
+  not installed, so scores survive a re-download.
+
+**Size before download (settled 2026-11-04, checked against the live services).**
+- Ollama library models: the registry manifest
+  (`registry.ollama.ai/v2/library/<model>/manifests/<tag>`) lists each layer's size —
+  e.g. `qwen3:8b` model layer 5,225,374,496 bytes. Undocumented, but it is the protocol
+  Ollama itself pulls with.
+- Hugging Face GGUF: the Hub's file listing (`huggingface.co/api/models/<repo>/tree/main`)
+  gives each file's size (e.g. `unsloth/Qwen3-8B-GGUF` IQ4_NL = 4,793,624,384 bytes);
+  the requested quantization is matched to its file.
+- Any lookup failure → size `unknown` → fit `unknown`, and the user confirms before
+  downloading. A broken lookup never blocks a download.
+
+**Search (settled 2026-11-04).** Ollama has no search API (ollama.com search is an
+HTML page; the registry's tag list returns 404), so there is **no Ollama search**
+unless Ollama publishes one — the picker links to ollama.com's library for browsing.
+The first build offers **download by exact name**. A later phase adds **Hugging Face
+search** (the Hub's model search with a `gguf` filter, sorted by downloads), each
+result showing its fit.
 
 ### 5. Per-turn selection (load-bearing routing)
 
@@ -180,6 +207,18 @@ it. The existing `classify_task` is a keyword heuristic returning `code`,
 (simple and standard). A better classifier is a later change behind the same
 function; misclassification only costs a wrong suggestion, never a wrong answer,
 in the default mode.
+
+A model's specialty never routes a turn by itself (my call): a `coder` tag is a
+label, not a score. Routing uses only quality scores and capabilities, so a coder
+variant gets code turns once its code score earns them. A vision or OCR variant
+matters for turns with image input, which arrive with RFC-0009's vision work and are
+routed by the `vision` capability; until then such models are picked by hand.
+
+With several close variants, **only one model is suggested**: the highest score for
+the category; if two are within the margin of each other, the faster one (measured
+writing speed) (my call). The category of every turn is shown in Inspect, so
+misclassification is visible; a better classifier is built only if those records show
+the keyword rule is the problem (maintainer agreed).
 
 ### 6. Suggest, or switch automatically
 
@@ -237,7 +276,10 @@ eval suites costs API money and says so, with the number of requests, before sta
   existing reasoning suite's `llm_judge` items stay available to the research harness
   but don't count towards profile scores (my call). Each run writes the score, sample
   count, suite version and date to the profile. Runs can take many minutes on local
-  hardware and say so before starting.
+  hardware and say so before starting. **Chat comes first** (maintainer agreed): if a
+  user turn arrives during a run, the run pauses after its current item, the turn
+  runs (loading its model if needed), and the run resumes; the Models page shows the
+  run as running or paused, with progress, and it can be cancelled.
 - **A code item** (maintainer's call) is: (a) a **prompt** describing the code to
   write; (b) **our working, completed reference solution**; and (c) the tests that
   define "works". The model's code is scored on **functionality only**: it passes if
@@ -295,6 +337,9 @@ included. Switching the authoring model only changes which limit applies.
 - REST: `GET /models` (installed + cloud, with profile summary and fit), `GET /hardware`,
   `PUT /models/default {provider, model}` / `DELETE /models/default`,
   `POST /models/pull {name}` (returns a pull id), `DELETE /models/pull/{id}` (cancel),
+  `DELETE /models/{provider}/{model}` (delete the model; refused for the loaded,
+  answering or saved-default model), `GET /models/size?name=` (pre-download size),
+  `DELETE /models/eval/{run_id}` (cancel a test run),
   `POST /models/{provider}/{model}/eval {suite}` (code/reasoning runs; for `chat` it
   returns the answers to rate), `POST /models/ratings {items: [{answer_id, rating}]}`,
   `POST /sessions/{id}/rating {rating}` (the conversation prompt),
@@ -344,7 +389,8 @@ Additive and default-preserving; built in phases, each its own cycle:
 1. **Hardware scan + profiles + fit check**, read-only on the Models page and in
    doctor/manifest.
 2. **Picker:** saved default without restart; load-bearing `route`; residency.
-3. **Download** by exact name with fit check and progress.
+3. **Download** by exact name with size lookup, fit check and progress; **delete**.
+   (Hugging Face search follows as its own later step.)
 4. **Category eval suites, "Test this model" and chat rating** filling quality —
    suite contents agreed with the maintainer first.
 5. **Suggest, then auto-switch.**
@@ -369,8 +415,8 @@ default, behaviour is exactly today's: one model from config, no suggestions.
   to cloud, an off-by-default setting, and a notice on every cloud suggestion.
 - **Downloads are large** (several GB). Mitigated by the fit and disk checks before
   starting, live progress, and cancel.
-- **Unverified Ollama behaviour** (library size lookup, search). Listed as open
-  research; the first build doesn't depend on it.
+- **Undocumented size lookups** (Ollama registry manifest). Mitigated by treating any
+  failure as size `unknown`; a download is never blocked by it.
 
 ## Acceptance Criteria
 
@@ -384,8 +430,11 @@ default, behaviour is exactly today's: one model from config, no suggestions.
 4. Setting a default in the web app takes effect on the next turn without a restart,
    survives a restart, and doesn't change the config file; reset restores the config
    model.
-5. Downloading by exact name runs the fit and disk check first, streams progress,
-   can be cancelled, and creates a profile.
+5. Downloading by exact name looks up the size, runs the fit and disk check first,
+   streams progress, can be cancelled, and creates a profile; a failed size lookup
+   gives fit `unknown` and still allows the download after confirmation. Deleting a
+   model frees its disk space, is refused for the loaded, answering or saved-default
+   model, and keeps its profile.
 6. `generate`/`stream` with `route=None` behave exactly as today; with a route, the
    turn is authored by it and falls back to the default on hard failure.
 7. With quality data meeting the margin and sample rule, a turn whose category another
@@ -406,6 +455,11 @@ default, behaviour is exactly today's: one model from config, no suggestions.
 12. A cloud model is never chosen automatically; it is suggested only with
     `routing.include_cloud` on, and every cloud suggestion shows the data and
     reduced-visibility notice.
+13. Each variant in a model family has its own profile and scores; two names for the
+    same digest share one; the picker groups by family; at most one model is
+    suggested per turn.
+14. A chat turn sent during a test run is answered without waiting for the run to
+    finish; the run pauses and resumes.
 
 ## Architectural Impact
 
