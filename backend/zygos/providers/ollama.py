@@ -14,7 +14,7 @@ from zygos.providers.types import (
     EmbedRequest, EmbedResult, GenerationChunk, GenerationRequest, GenerationResult, ToolInvocation, Usage,
 )
 from zygos.runtime.capabilities import Capability
-from zygos.thinking.support import ThinkingSupport
+from zygos.thinking.support import PROBE_TIMEOUT_S, ThinkingSupport
 
 
 class OllamaProvider:
@@ -94,12 +94,19 @@ class OllamaProvider:
 
     async def thinking_support(self, model: str) -> ThinkingSupport:
         """Ask Ollama whether the model can think (POST /api/show capabilities)."""
-        response = await self._client.post(
-            f"{self._settings.base_url}/api/show", json={"model": model},
-            timeout=self._settings.timeout_s,
-        )
-        response.raise_for_status()
-        if "thinking" in (response.json().get("capabilities") or []):
+        try:
+            response = await self._client.post(
+                f"{self._settings.base_url}/api/show", json={"model": model},
+                timeout=PROBE_TIMEOUT_S,
+            )
+        except httpx.HTTPError as error:
+            raise translate_transport_error(self.name, error) from error
+        ensure_ok(self.name, response)
+        try:
+            capabilities = response.json().get("capabilities") or []
+        except (ValueError, AttributeError) as error:
+            raise ProviderProtocolError(f"ollama returned malformed body: {error}", provider=self.name) from error
+        if "thinking" in capabilities:
             return ThinkingSupport(supported=True)
         return ThinkingSupport(supported=False, reason=f"{model} can't think")
 

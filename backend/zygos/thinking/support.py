@@ -5,12 +5,15 @@ Stability: Experimental.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from zygos.providers.base import Provider
 from zygos.services.router import RouteChoice
+
+PROBE_TIMEOUT_S = 5.0
 
 
 class ThinkingSupport(BaseModel):
@@ -24,7 +27,7 @@ class ThinkingSupportChecker:
     """Resolves whether a route's model can think. check() never raises; only
     successful probes are cached (a failure is retried on the next check)."""
 
-    def __init__(self, providers: Mapping[str, Any]) -> None:
+    def __init__(self, providers: Mapping[str, Provider]) -> None:
         self._providers = providers
         self._cache: dict[tuple[str, str], ThinkingSupport] = {}
 
@@ -44,7 +47,7 @@ class ThinkingSupportChecker:
                 reason=f"thinking controls aren't available for {route.provider} yet",
             )
         try:
-            result = await probe(route.model)
+            result = await asyncio.wait_for(probe(route.model), PROBE_TIMEOUT_S)
         except Exception:
             return ThinkingSupport(supported=False, reason="couldn't check the model")
         self._cache[key] = result

@@ -72,12 +72,16 @@ async def test_get_runtime_health_probe_healthy_with_fake_embedder():
 
 @pytest.mark.asyncio
 async def test_get_runtime_populates_thinking():
+    from dataclasses import replace
+
     from zygos.providers.fake import FakeProvider
+    from zygos.thinking.support import ThinkingSupportChecker
 
     runtime = build_runtime()
     try:
         route = runtime.model_service.select_model()
-        runtime.thinking_support._providers = {route.provider: FakeProvider(think_capable=True)}
+        runtime = replace(runtime, thinking_support=ThinkingSupportChecker(
+            {route.provider: FakeProvider(think_capable=True)}))
         app = _mount(runtime)
         async with _client(app) as client:
             resp = await client.get("/runtime")

@@ -72,3 +72,22 @@ async def test_fake_provider_thinking_text():
     assert (await p.generate(req)).thinking == "pondering"
     chunks = [c async for c in p.stream(req)]
     assert chunks[0].thinking == "pondering"
+
+
+async def test_hung_probe_is_bounded_and_not_cached(monkeypatch):
+    import asyncio
+    import time
+
+    from zygos.thinking import support
+
+    class Hung:
+        async def thinking_support(self, model):
+            await asyncio.sleep(10)
+
+    monkeypatch.setattr(support, "PROBE_TIMEOUT_S", 0.05)
+    checker = ThinkingSupportChecker({"ollama": Hung()})
+    start = time.monotonic()
+    result = await checker.check(OLLAMA)
+    assert time.monotonic() - start < 2
+    assert result == ThinkingSupport(supported=False, reason="couldn't check the model")
+    assert checker.cached(OLLAMA) is None

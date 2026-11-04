@@ -64,14 +64,17 @@ def test_scrub_error_keeps_non_path_slashes():
 
 
 async def test_manifest_thinking_from_cache():
+    from dataclasses import replace
+
     from zygos.providers.fake import FakeProvider
+    from zygos.thinking.support import ThinkingSupportChecker
 
     runtime = build_runtime()
     try:
-        runtime.providers["ollama"].__class__  # providers exist
         route = runtime.model_service.select_model()
         assert runtime_manifest(runtime).thinking is None
-        runtime.thinking_support._providers = {route.provider: FakeProvider(think_capable=True)}
+        runtime = replace(runtime, thinking_support=ThinkingSupportChecker(
+            {route.provider: FakeProvider(think_capable=True)}))
         result = await runtime.thinking_support.check(route)
         assert result.supported is True
         assert runtime_manifest(runtime).thinking == result
