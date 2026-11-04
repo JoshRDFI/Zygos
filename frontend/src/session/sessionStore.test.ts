@@ -131,3 +131,32 @@ test("getSessionClient() is null before start; stop() tears down", async () => {
   expect(fake.close).toHaveBeenCalled();
   expect(useSessionStore.getState().status).toBe("idle");
 });
+
+test("think/trace/voice_command frames reach the think store; stop() resets it", async () => {
+  const { useThinkStore } = await import("../stores/thinkStore");
+  useThinkStore.getState().reset();
+  useSessionStore.getState().start();
+  await Promise.resolve();
+  await Promise.resolve();
+  fake.emit("control:think.state", { enabled: true, supported: true, reason: null });
+  fake.emit("trace:event", { payload: { type: "model.thinking", turn_id: "t1", step: "direct", index: 0, text: "x", truncated: false, chars: 1, elapsed_ms: 1 } });
+  fake.emit("chat:voice_command", { command: "think_on", phrase: "think on" });
+  const s = useThinkStore.getState();
+  expect(s.enabled).toBe(true);
+  expect(s.turnOrder).toEqual(["t1"]);
+  expect(s.voiceNotice).toContain("think on");
+  useSessionStore.getState().stop();
+  expect(useThinkStore.getState().turnOrder).toEqual([]);
+  expect(useThinkStore.getState().enabled).toBe(false);
+});
+
+test("turn.end clears the voice notice", async () => {
+  const { useThinkStore } = await import("../stores/thinkStore");
+  useThinkStore.getState().reset();
+  useSessionStore.getState().start();
+  await Promise.resolve();
+  await Promise.resolve();
+  fake.emit("chat:voice_command", { command: "rethink", phrase: "think harder" });
+  fake.emit("chat:turn.end", { text: "x" });
+  expect(useThinkStore.getState().voiceNotice).toBeNull();
+});

@@ -13,6 +13,7 @@ export interface Manifest {
   reasoning_enabled: boolean;
   versions: Record<string, string>;
   voice: unknown | null;
+  thinking: { supported: boolean; reason: string | null } | null;
 }
 
 export interface RuntimeHealth {

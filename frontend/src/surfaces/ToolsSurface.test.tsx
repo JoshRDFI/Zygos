@@ -11,7 +11,7 @@ beforeEach(() => {
       { kind: "providers", name: "primary", module: "zygos.providers.ollama:Ollama" },
     ],
     primary_route: { provider: "ollama", model: "qwen3" }, fallback_routes: [],
-    reasoning_enabled: false, versions: {}, voice: null,
+    reasoning_enabled: false, versions: {}, voice: null, thinking: null,
   });
 });
 afterEach(() => vi.restoreAllMocks());

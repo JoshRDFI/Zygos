@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { createSession as restCreateSession } from "../client/rest";
 import { WsClient } from "../client/wsClient";
 import { CHAT_FRAME_TYPES, useChatStore } from "../stores/chatStore";
+import { useThinkStore } from "../stores/thinkStore";
 import { useVoiceStore } from "../voice/voiceStore";
 
 export type SessionStatus = "idle" | "connecting" | "connected" | "disconnected" | "error";
@@ -56,6 +57,10 @@ export const useSessionStore = create<SessionState>((set) => ({
         const client = deps.createClient(id);
         const onFrame = useChatStore.getState().onFrame;
         const offs = CHAT_FRAME_TYPES.map((t) => client.on(`chat:${t}`, onFrame));
+        const think = useThinkStore.getState();
+        offs.push(client.on("control:think.state", think.onThinkState));
+        offs.push(client.on("trace:event", think.onTrace));
+        offs.push(client.on("chat:voice_command", think.onVoiceCommand));
         offs.push(client.onOpen(() => set({ status: "connected" })));
         offs.push(client.onClose(() => set({ status: "disconnected" })));
         useVoiceStore.getState().attach(client);
@@ -79,6 +84,7 @@ export const useSessionStore = create<SessionState>((set) => ({
     rig?.offs.forEach((off) => off());
     rig = null;
     startPromise = null;
+    useThinkStore.getState().reset();
     set({ sessionId: null, status: "idle" });
   },
 }));

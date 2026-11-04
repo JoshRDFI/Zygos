@@ -13,7 +13,7 @@ test("streaming turn: start, tokens, end", () => {
 
   const msgs = useChatStore.getState().messages;
   expect(msgs.map((m) => m.role)).toEqual(["user", "assistant"]);
-  expect(msgs[1]).toEqual({ role: "assistant", text: "hello", streaming: false });
+  expect(msgs[1]).toMatchObject({ role: "assistant", text: "hello", streaming: false });
 });
 
 test("error frame surfaces an assistant message", () => {
@@ -29,4 +29,44 @@ test("a committed STT final becomes a user message", () => {
   s.onFrame({ channel: "chat", type: "final", payload: { text: "hello from voice" } });
   const last = useChatStore.getState().messages.at(-1)!;
   expect(last).toEqual({ role: "user", text: "hello from voice", streaming: false });
+});
+
+test("turn.start carries turn id, think and the pending question", () => {
+  const s = useChatStore.getState();
+  s.addUser("q");
+  s.onFrame({ channel: "chat", type: "turn.start", payload: { turn_id: "t1", think: true, rethink_of: null } });
+  const m = useChatStore.getState().messages[1];
+  expect(m.turnId).toBe("t1");
+  expect(m.think).toBe(true);
+  expect(m.rethinkOf).toBeNull();
+  expect(m.question).toBe("q");
+});
+
+test("turn.end records thinking_ms and unsupported reason", () => {
+  const s = useChatStore.getState();
+  s.addUser("q");
+  s.onFrame({ channel: "chat", type: "turn.start", payload: { turn_id: "t1" } });
+  s.onFrame({ channel: "chat", type: "turn.end", payload: { text: "a", think: true, thinking_ms: 4200, think_unsupported_reason: "nope" } });
+  const m = useChatStore.getState().messages[1];
+  expect(m.thinkingMs).toBe(4200);
+  expect(m.thinkUnsupportedReason).toBe("nope");
+});
+
+test("addReask sets the question without adding a user bubble", () => {
+  const s = useChatStore.getState();
+  s.addUser("old");
+  s.addReask("q");
+  expect(useChatStore.getState().messages).toHaveLength(1);
+  s.onFrame({ channel: "chat", type: "turn.start", payload: { turn_id: "t2", rethink_of: "t1" } });
+  const msgs = useChatStore.getState().messages;
+  expect(msgs.map((m) => m.role)).toEqual(["user", "assistant"]);
+  expect(msgs[1].question).toBe("q");
+  expect(msgs[1].rethinkOf).toBe("t1");
+});
+
+test("voice_command frames do not change messages", () => {
+  const s = useChatStore.getState();
+  s.addUser("q");
+  s.onFrame({ channel: "chat", type: "voice_command", payload: { command: "rethink", phrase: "think harder" } });
+  expect(useChatStore.getState().messages).toHaveLength(1);
 });

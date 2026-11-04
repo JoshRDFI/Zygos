@@ -8,7 +8,7 @@ const manifest = {
   plugins: [{ kind: "tool", name: "http_fetch", module: "zygos.tools.http:HttpFetch" }],
   primary_route: { provider: "ollama", model: "qwen3" },
   fallback_routes: [{ provider: "anthropic", model: "claude-sonnet-5" }],
-  reasoning_enabled: false, versions: {}, voice: null,
+  reasoning_enabled: false, versions: {}, voice: null, thinking: null,
 };
 
 beforeEach(() => { vi.spyOn(rest, "getManifest").mockResolvedValue(manifest); });

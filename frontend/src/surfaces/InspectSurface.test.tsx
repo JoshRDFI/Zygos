@@ -12,7 +12,7 @@ beforeEach(() => {
     fallback_routes: [],
     reasoning_enabled: false,
     versions: { zygos: "0.1.0", python: "3.12.0" },
-    voice: null,
+    voice: null, thinking: null,
   });
 });
 afterEach(() => vi.restoreAllMocks());
