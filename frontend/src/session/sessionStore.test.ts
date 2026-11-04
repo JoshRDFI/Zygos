@@ -6,7 +6,7 @@ import { useChatStore } from "../stores/chatStore";
 import { useVoiceStore } from "../voice/voiceStore";
 
 function makeFakeClient() {
-  const handlers = new Map<string, (f: import("../client/types").Frame) => void>();
+  const handlers = new Map<string, Set<(f: import("../client/types").Frame) => void>>();
   const openCbs: Array<() => void> = [];
   const closeCbs: Array<() => void> = [];
   return {
@@ -14,13 +14,13 @@ function makeFakeClient() {
     sendBinary: vi.fn(),
     connect: vi.fn(),
     close: vi.fn(),
-    on(key: string, h: (f: import("../client/types").Frame) => void) { handlers.set(key, h); return () => handlers.delete(key); },
+    on(key: string, h: (f: import("../client/types").Frame) => void) { const set = handlers.get(key) ?? new Set(); set.add(h); handlers.set(key, set); return () => { set.delete(h); }; },
     onBinary() { return () => {}; },
     onOpen(cb: () => void) { openCbs.push(cb); return () => {}; },
     onClose(cb: () => void) { closeCbs.push(cb); return () => {}; },
     emit(key: string, payload: Record<string, unknown>) {
       const [channel, type] = key.split(/:(.*)/s);
-      handlers.get(key)?.({ channel, type, payload });
+      handlers.get(key)?.forEach((h) => h({ channel, type, payload }));
     },
     fireOpen() { openCbs.forEach((c) => c()); },
     fireClose() { closeCbs.forEach((c) => c()); },
@@ -139,7 +139,7 @@ test("think/trace/voice_command frames reach the think store; stop() resets it",
   await Promise.resolve();
   await Promise.resolve();
   fake.emit("control:think.state", { enabled: true, supported: true, reason: null });
-  fake.emit("trace:event", { payload: { type: "model.thinking", turn_id: "t1", step: "direct", index: 0, text: "x", truncated: false, chars: 1, elapsed_ms: 1 } });
+  fake.emit("trace:event", { type: "model.thinking", turn_id: "t1", step: "direct", index: 0, text: "x", truncated: false, chars: 1, elapsed_ms: 1 });
   fake.emit("chat:voice_command", { command: "think_on", phrase: "think on" });
   const s = useThinkStore.getState();
   expect(s.enabled).toBe(true);

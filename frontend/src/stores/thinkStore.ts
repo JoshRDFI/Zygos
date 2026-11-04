@@ -48,8 +48,8 @@ export const useThinkStore = create<ThinkState>((set) => ({
   onVoiceCommand: (f) =>
     set({ voiceNotice: `Heard “${String(f.payload.phrase ?? "")}”` }),
   onTrace: (f) => {
-    const p = f.payload.payload as Record<string, unknown> | undefined;
-    if (!p || p.type !== "model.thinking") return;
+    const p = f.payload;
+    if (p.type !== "model.thinking") return;
     const turnId = String(p.turn_id ?? "");
     const ev: ThinkingEvent = {
       turnId,

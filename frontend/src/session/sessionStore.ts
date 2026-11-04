@@ -61,6 +61,7 @@ export const useSessionStore = create<SessionState>((set) => ({
         offs.push(client.on("control:think.state", think.onThinkState));
         offs.push(client.on("trace:event", think.onTrace));
         offs.push(client.on("chat:voice_command", think.onVoiceCommand));
+        offs.push(client.on("chat:turn.end", think.clearVoiceNotice));
         offs.push(client.onOpen(() => set({ status: "connected" })));
         offs.push(client.onClose(() => set({ status: "disconnected" })));
         useVoiceStore.getState().attach(client);

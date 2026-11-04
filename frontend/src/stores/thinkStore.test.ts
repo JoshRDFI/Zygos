@@ -5,7 +5,7 @@ beforeEach(() => useThinkStore.getState().reset());
 
 const ev = (turn_id: string, index: number, type = "model.thinking") => ({
   channel: "trace", type: "event",
-  payload: { payload: { type, turn_id, step: "direct", index, text: `t${index}`, truncated: false, chars: 2, elapsed_ms: 10 } },
+  payload: { type, turn_id, step: "direct", index, text: `t${index}`, truncated: false, chars: 2, elapsed_ms: 10 },
 });
 
 test("onThinkState sets enabled/supported/reason", () => {

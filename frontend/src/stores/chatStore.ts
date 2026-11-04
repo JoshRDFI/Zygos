@@ -1,9 +1,8 @@
 import { create } from "zustand";
 import type { Frame } from "../client/types";
-import { useThinkStore } from "./thinkStore";
 
 // The chat-channel frame types the session subscribes to and onFrame consumes.
-export const CHAT_FRAME_TYPES = ["turn.start", "token", "turn.end", "error", "partial", "final", "voice_command"] as const;
+export const CHAT_FRAME_TYPES = ["turn.start", "token", "turn.end", "error", "partial", "final"] as const;
 
 export type ChatMessage = {
   role: "user" | "assistant";
@@ -67,7 +66,6 @@ export const useChatStore = create<ChatState>((set) => ({
       }
       if (f.type === "turn.end") {
         const text = String(f.payload.text ?? "");
-        useThinkStore.getState().clearVoiceNotice();
         const thinkingMs = (f.payload.thinking_ms as number | null | undefined) ?? null;
         const reason = (f.payload.think_unsupported_reason as string | null | undefined) ?? null;
         return {
