@@ -72,6 +72,17 @@ class CapabilityRenegotiated(EventPayload):
     to_provider: str
 
 
+class ModelThinking(EventPayload):
+    type: Literal["model.thinking"] = "model.thinking"
+    turn_id: str
+    step: Literal["direct", "tool_loop", "prelude", "recurrent", "judge", "coda"]
+    index: int
+    text: str
+    truncated: bool
+    chars: int
+    elapsed_ms: int
+
+
 AnyPayload = Annotated[
     Union[
         RouteClaimed,
@@ -82,6 +93,7 @@ AnyPayload = Annotated[
         ModelSelected,
         CapabilityResolved,
         CapabilityRenegotiated,
+        ModelThinking,
     ],
     Field(discriminator="type"),
 ]

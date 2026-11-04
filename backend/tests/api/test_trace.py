@@ -99,3 +99,20 @@ async def test_dropping_subscriber_leaves_chat_frames_identical():
 
     assert [(f.type, f.payload.get("text")) for f in chat_with] == \
            [(f.type, f.payload.get("text")) for f in chat_without]
+
+
+@pytest.mark.asyncio
+async def test_trace_bridge_mirrors_model_thinking():
+    from zygos.runtime.events import ModelThinking
+
+    bus = InProcessEventBus()
+    reg = _registry(bus)
+    install_trace_bridge(bus, reg)
+    session = reg.create()
+    session.connected = True
+    await bus.emit(Event(run_id=session.root.run_id, span_id="span-1", source="thinking",
+                         payload=ModelThinking(turn_id="t1", step="direct", index=0, text="hmm",
+                                               truncated=False, chars=3, elapsed_ms=9)))
+    frame = session.outbound.get_nowait()
+    assert frame.type == "event"
+    assert frame.payload["type"] == "model.thinking" and frame.payload["text"] == "hmm"
