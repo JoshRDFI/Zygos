@@ -1,0 +1,139 @@
+{
+  "hardware": {
+    "gpus": [
+      {
+        "name": "RTX",
+        "vram_total_bytes": 17094934528,
+        "vram_free_bytes": 16777216000
+      }
+    ],
+    "ram_total_bytes": 65536000000,
+    "ram_available_bytes": 32768000000,
+    "cpu_model": null,
+    "cpu_cores": 16,
+    "disk_path": null,
+    "disk_free_bytes": null,
+    "scanned_at": "2026-11-04T12:00:00Z"
+  },
+  "ollama": {
+    "configured": true,
+    "reachable": true,
+    "error": null
+  },
+  "models": [
+    {
+      "provider": "ollama",
+      "name": "qwen3:8b",
+      "location": "local",
+      "family": "qwen3",
+      "parameter_size": "8.2B",
+      "quantization": "Q4_K_M",
+      "specialty": [],
+      "capabilities": {
+        "embedding": false,
+        "thinking": true,
+        "tools": true,
+        "vision": false
+      },
+      "download_size_bytes": 5368709120,
+      "loaded": false,
+      "vram_bytes": null,
+      "fit": {
+        "level": "gpu",
+        "needs": {
+          "model_bytes": 5368709120,
+          "context_bytes": 1207959552,
+          "context_tokens": 8192,
+          "context_assumed": false,
+          "overhead_bytes": 536870912,
+          "total_bytes": 7113539584,
+          "measured": false,
+          "gpu_bytes": null,
+          "cpu_bytes": null,
+          "split_by": null,
+          "assumptions": [],
+          "reason": null,
+          "spill": true
+        },
+        "vram_available_bytes": 16777216000,
+        "ram_available_bytes": 32768000000,
+        "reason": "",
+        "gpu_bytes": null,
+        "cpu_bytes": null,
+        "split_by": null
+      },
+      "fit_text": "needs ≈6.6 GB: 5.0 GB model + 1.1 GB context (8192 tokens) + 0.5 GB overhead; 15.6 GB free",
+      "primary": true,
+      "fallback": false,
+      "profile_error": null,
+      "fields": {
+        "capabilities.embedding": {
+          "value": false,
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "capabilities.thinking": {
+          "value": true,
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "capabilities.tools": {
+          "value": true,
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "capabilities.vision": {
+          "value": false,
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.context_length_max": {
+          "value": 40960,
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.download_size_bytes": {
+          "value": 5368709120,
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.family": {
+          "value": "qwen3",
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.kv_bytes_per_token": {
+          "value": 147456,
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.num_ctx": {
+          "value": 8192,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.parameter_count": {
+          "value": 8000000000,
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.parameter_size": {
+          "value": "8.2B",
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.quantization": {
+          "value": "Q4_K_M",
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        }
+      },
+      "launch_text": null,
+      "launch_source": null,
+      "launch_error": null,
+      "mmproj": null,
+      "mmproj_ambiguous": [],
+      "served_by": null
+    }
+  ]
+}

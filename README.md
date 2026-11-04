@@ -24,7 +24,7 @@ with a live chat-and-tools turn loop over WebSocket** (start it with `zygos serv
 **React web app** front of it carries live chat, read-only inspection panels, and **voice
 in and out** (local Whisper/Kokoro engines, opt-in). Both are early — a few surfaces
 (files, memory) are still placeholders, and the Models page is read-only (hardware, model
-profiles, fit for Ollama, llama.cpp and vLLM models; choosing and downloading models come next) — and the graphical UI keeps growing.
+profiles, and fit for Ollama and llama.cpp models — vLLM models are listed without a fit check; choosing and downloading models come next) — and the graphical UI keeps growing.
 This README describes where Zygos is headed; the table marks what runs now versus what's
 still being built.
 
@@ -109,7 +109,7 @@ This runs the v2 server and web UI from this branch, fully local with Ollama. v2
 early: expect rough edges, and the Files and Memory panels are still
 placeholders. The Models page is read-only for now: it shows your hardware, each model's
 profile (`GET /models`, `GET /hardware`; profiles live in `.zygos/models/profiles/`) and
-whether it fits, but cannot yet pick or download models. It also lists llama.cpp (GGUF files in a folder you choose) and vLLM models, with fit worked out from the launch settings you give each model. Set the backends with `zygos personalize backends` (or `GET`/`PUT /backends`). Zygos does not start `llama-server` yet; that is the next phase.
+whether it fits, but cannot yet pick or download models. It also lists llama.cpp models (GGUF files in a folder you choose), with fit worked out from the launch settings you give each model, and vLLM models, which are listed without a fit check (vLLM reserves its GPU share when it starts). Set the backends with `zygos personalize backends` (or `GET`/`PUT /backends`). Zygos does not start `llama-server` yet; that is the next phase.
 
 **Prerequisites:** Python 3.12, [Node.js](https://nodejs.org) 18+, and
 [Ollama](https://ollama.com) running locally with the default model pulled:

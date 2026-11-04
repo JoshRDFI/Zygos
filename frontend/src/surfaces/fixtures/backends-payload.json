@@ -1,0 +1,50 @@
+{
+  "settings": {
+    "ollama": {
+      "base_url": null
+    },
+    "llamacpp": {
+      "server_path": "/tmp/tmprdtsdot3/llama-server",
+      "models_dir": "/tmp/tmprdtsdot3/gguf",
+      "default_args": "-c 8192",
+      "model_args": {
+        "gemma/gemma-3-4b-it-Q4_K_M": "-c 4096 -ngl 1",
+        "Llama-3.2-3B-Q8_0": "-c 4096 --port=9000"
+      }
+    },
+    "vllm": [
+      {
+        "name": "vllm",
+        "base_url": "http://127.0.0.1:8000/v1"
+      }
+    ]
+  },
+  "ollama": {
+    "ok": true,
+    "detail": "Ollama 0.9.1 at http://localhost:11434"
+  },
+  "llamacpp": {
+    "server": {
+      "ok": true,
+      "detail": "version: 6500 (abc1234)"
+    },
+    "models": {
+      "ok": true,
+      "detail": "10 GGUF files in /tmp/tmprdtsdot3/gguf"
+    }
+  },
+  "vllm": {
+    "check": {
+      "ok": true,
+      "detail": "1 models served at http://127.0.0.1:8000/v1"
+    },
+    "served": [
+      "Qwen/Qwen3-8B"
+    ]
+  },
+  "address_sources": {
+    "ollama": "default",
+    "vllm": "backends"
+  },
+  "restart_required": false
+}

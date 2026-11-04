@@ -58,7 +58,7 @@ export interface Fit {
   split_by?: "settings" | null;
 }
 
-export type ProfileSource = "user" | "eval" | "measured" | "modelfile" | "ollama" | "name";
+export type ProfileSource = "user" | "eval" | "measured" | "modelfile" | "ollama" | "name" | "server";
 
 /** One profile fact and where it came from (RFC-0013 §2). `at` is null for hand-edited user values. */
 export interface Sourced {
@@ -104,9 +104,11 @@ export interface BackendsView {
     llamacpp: { server_path: string | null; models_dir: string | null; default_args: string; model_args: Record<string, string> };
     vllm: { name: string; base_url: string }[];
   };
-  ollama: Check;
+  /** null: no route uses Ollama and no address is recorded (not set up, not probed). */
+  ollama: Check | null;
   llamacpp: { server: Check; models: Check };
-  vllm: { check: Check; served: string[] };
+  /** null: no vLLM server is recorded or routed. */
+  vllm: { check: Check; served: string[] } | null;
   address_sources: Record<string, string>;
   restart_required: boolean;
 }

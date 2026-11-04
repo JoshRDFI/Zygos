@@ -1,0 +1,31 @@
+{
+  "settings": {
+    "ollama": {
+      "base_url": null
+    },
+    "llamacpp": {
+      "server_path": null,
+      "models_dir": null,
+      "default_args": "",
+      "model_args": {}
+    },
+    "vllm": []
+  },
+  "ollama": null,
+  "llamacpp": {
+    "server": {
+      "ok": false,
+      "detail": "llama-server path not set"
+    },
+    "models": {
+      "ok": false,
+      "detail": "models folder not set"
+    }
+  },
+  "vllm": null,
+  "address_sources": {
+    "ollama": "default",
+    "vllm": "default"
+  },
+  "restart_required": false
+}

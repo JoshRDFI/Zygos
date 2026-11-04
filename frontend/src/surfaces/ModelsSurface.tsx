@@ -28,8 +28,20 @@ function Hardware({ hw }: { hw: HardwareSnapshot | null }) {
   );
 }
 
+/** `identity.tensor_bytes` as "<n> layers, <x> GB" (layers + other; experts sit inside layers). */
+function tensorSummary(v: unknown): string | null {
+  if (typeof v !== "object" || v === null) return null;
+  const { layers, other } = v as { layers?: unknown; other?: unknown };
+  if (typeof layers !== "object" || layers === null || typeof other !== "number") return null;
+  const sizes = Object.values(layers as Record<string, unknown>);
+  if (!sizes.every((n) => typeof n === "number")) return null;
+  const total = (sizes as number[]).reduce((a, b) => a + b, 0) + other;
+  return `${sizes.length} layers, ${gb(total)}`;
+}
+
 function fieldLine(key: string, s: Sourced): string {
-  const value = typeof s.value === "string" ? s.value : JSON.stringify(s.value);
+  const summary = key === "identity.tensor_bytes" ? tensorSummary(s.value) : null;
+  const value = summary ?? (typeof s.value === "string" ? s.value : JSON.stringify(s.value));
   const source = s.source === "user" ? "your edit" : s.source;
   return [key, value, source, ...(s.at ? [s.at.slice(0, 10)] : [])].join(" · ");
 }
@@ -57,6 +69,25 @@ function CheckLine({ label, check }: { label: string; check: Check }) {
   );
 }
 
+function NotSetUp({ label }: { label: string }) {
+  return (
+    <li className="flex flex-wrap items-center gap-2">
+      <span className="text-text-muted">{label}: not set up</span>
+    </li>
+  );
+}
+
+function LlamaCppLines({ b }: { b: BackendsView }) {
+  const lc = b.settings.llamacpp;
+  if (!lc.server_path && !lc.models_dir) return <NotSetUp label="llama.cpp" />;
+  return (
+    <>
+      {lc.server_path ? <CheckLine label="llama.cpp server" check={b.llamacpp.server} /> : <NotSetUp label="llama.cpp server" />}
+      {lc.models_dir ? <CheckLine label="llama.cpp models" check={b.llamacpp.models} /> : <NotSetUp label="llama.cpp models" />}
+    </>
+  );
+}
+
 function Backends({ b, error }: { b: BackendsView | null; error: string | null }) {
   return (
     <section aria-label="Backends" className="space-y-1 font-mono text-sm border border-border rounded p-3">
@@ -68,10 +99,9 @@ function Backends({ b, error }: { b: BackendsView | null; error: string | null }
       ) : (
         <>
           <ul className="space-y-1">
-            <CheckLine label="Ollama" check={b.ollama} />
-            <CheckLine label="llama.cpp server" check={b.llamacpp.server} />
-            <CheckLine label="llama.cpp models" check={b.llamacpp.models} />
-            <CheckLine label="vLLM" check={b.vllm.check} />
+            {b.ollama ? <CheckLine label="Ollama" check={b.ollama} /> : <NotSetUp label="Ollama" />}
+            <LlamaCppLines b={b} />
+            {b.vllm ? <CheckLine label="vLLM" check={b.vllm.check} /> : <NotSetUp label="vLLM" />}
           </ul>
           {b.restart_required && <div role="status" className="text-accent">Restart Zygos to apply the new addresses.</div>}
         </>
@@ -131,10 +161,11 @@ function Row({ m }: { m: ModelEntry }) {
   );
 }
 
-function Group({ title, models }: { title: string; models: ModelEntry[] }) {
+function Group({ title, models, sub = false }: { title: string; models: ModelEntry[]; sub?: boolean }) {
+  const Heading = sub ? "h4" : "h3";
   return (
     <section className="space-y-2">
-      <h3 className="font-mono text-text-muted">{title}</h3>
+      <Heading className="font-mono text-text-muted">{title}</Heading>
       <ul className="space-y-3">
         {models.map((m) => <Row key={`${m.provider}/${m.name}`} m={m} />)}
       </ul>
@@ -186,7 +217,14 @@ export default function ModelsSurface() {
             </div>
           )}
           {[...ollamaFamilies].map(([family, ms]) => <Group key={`ollama/${family}`} title={family} models={ms} />)}
-          {[...llamaFamilies].map(([family, ms]) => <Group key={`llamacpp/${family}`} title={family} models={ms} />)}
+          {llama.length > 0 && (
+            <section className="space-y-3">
+              <h3 className="font-mono text-text-muted">llama.cpp</h3>
+              <div className="pl-3 space-y-3">
+                {[...llamaFamilies].map(([family, ms]) => <Group key={`llamacpp/${family}`} title={family} models={ms} sub />)}
+              </div>
+            </section>
+          )}
           {vllm.length > 0 && <Group title="vLLM" models={vllm} />}
           {cloud.length > 0 && <Group title="cloud" models={cloud} />}
         </>

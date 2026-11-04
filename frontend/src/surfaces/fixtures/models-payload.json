@@ -1,0 +1,774 @@
+{
+  "hardware": {
+    "gpus": [
+      {
+        "name": "RTX",
+        "vram_total_bytes": 17094934528,
+        "vram_free_bytes": 16777216000
+      }
+    ],
+    "ram_total_bytes": 65536000000,
+    "ram_available_bytes": 32768000000,
+    "cpu_model": null,
+    "cpu_cores": 16,
+    "disk_path": null,
+    "disk_free_bytes": null,
+    "scanned_at": "2026-11-04T12:00:00Z"
+  },
+  "ollama": {
+    "configured": true,
+    "reachable": true,
+    "error": null
+  },
+  "models": [
+    {
+      "provider": "ollama",
+      "name": "qwen3:8b",
+      "location": "local",
+      "family": "qwen3",
+      "parameter_size": "8.2B",
+      "quantization": "Q4_K_M",
+      "specialty": [],
+      "capabilities": {
+        "embedding": false,
+        "thinking": true,
+        "tools": true,
+        "vision": false
+      },
+      "download_size_bytes": 5368709120,
+      "loaded": false,
+      "vram_bytes": null,
+      "fit": {
+        "level": "gpu",
+        "needs": {
+          "model_bytes": 5368709120,
+          "context_bytes": 1207959552,
+          "context_tokens": 8192,
+          "context_assumed": false,
+          "overhead_bytes": 536870912,
+          "total_bytes": 7113539584,
+          "measured": false,
+          "gpu_bytes": null,
+          "cpu_bytes": null,
+          "split_by": null,
+          "assumptions": [],
+          "reason": null,
+          "spill": true
+        },
+        "vram_available_bytes": 16777216000,
+        "ram_available_bytes": 32768000000,
+        "reason": "",
+        "gpu_bytes": null,
+        "cpu_bytes": null,
+        "split_by": null
+      },
+      "fit_text": "needs ≈6.6 GB: 5.0 GB model + 1.1 GB context (8192 tokens) + 0.5 GB overhead; 15.6 GB free",
+      "primary": true,
+      "fallback": false,
+      "profile_error": null,
+      "fields": {
+        "capabilities.embedding": {
+          "value": false,
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "capabilities.thinking": {
+          "value": true,
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "capabilities.tools": {
+          "value": true,
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "capabilities.vision": {
+          "value": false,
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.context_length_max": {
+          "value": 40960,
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.download_size_bytes": {
+          "value": 5368709120,
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.family": {
+          "value": "qwen3",
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.kv_bytes_per_token": {
+          "value": 147456,
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.num_ctx": {
+          "value": 8192,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.parameter_count": {
+          "value": 8000000000,
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.parameter_size": {
+          "value": "8.2B",
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.quantization": {
+          "value": "Q4_K_M",
+          "source": "ollama",
+          "at": "2026-11-04T12:00:00Z"
+        }
+      },
+      "launch_text": null,
+      "launch_source": null,
+      "launch_error": null,
+      "mmproj": null,
+      "mmproj_ambiguous": [],
+      "served_by": null
+    },
+    {
+      "provider": "llamacpp",
+      "name": "gemma/gemma-3-4b-it-Q4_K_M",
+      "location": "local",
+      "family": "gemma3",
+      "parameter_size": null,
+      "quantization": "Q4_K_M",
+      "specialty": [],
+      "capabilities": {
+        "vision": true
+      },
+      "download_size_bytes": 943718880,
+      "loaded": false,
+      "vram_bytes": null,
+      "fit": {
+        "level": "partial",
+        "needs": {
+          "model_bytes": 943722496,
+          "context_bytes": 33554432,
+          "context_tokens": 4096,
+          "context_assumed": false,
+          "overhead_bytes": 536870912,
+          "total_bytes": 1514147840,
+          "measured": false,
+          "gpu_bytes": 868225024,
+          "cpu_bytes": 645922816,
+          "split_by": "settings",
+          "assumptions": [],
+          "reason": null,
+          "spill": false
+        },
+        "vram_available_bytes": 16777216000,
+        "ram_available_bytes": 32768000000,
+        "reason": "",
+        "gpu_bytes": 868225024,
+        "cpu_bytes": 645922816,
+        "split_by": "settings"
+      },
+      "fit_text": "needs ≈0.8 GB on GPU + 0.6 GB in RAM (split by your settings): 0.9 GB model + 0.0 GB context (4096 tokens) + 0.5 GB overhead; 15.6 GB free",
+      "primary": false,
+      "fallback": false,
+      "profile_error": null,
+      "fields": {
+        "capabilities.vision": {
+          "value": true,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.architecture": {
+          "value": "gemma3",
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.block_count": {
+          "value": 2,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.context_length_max": {
+          "value": 40960,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.download_size_bytes": {
+          "value": 943718880,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.family": {
+          "value": "gemma3",
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.key_length": {
+          "value": 128,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.kv_bytes_per_token": {
+          "value": 8192,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.kv_heads": {
+          "value": 8,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.mmproj_bytes": {
+          "value": 4096,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.quantization": {
+          "value": "Q4_K_M",
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.tensor_bytes": {
+          "value": {
+            "layers": {
+              "0": 314572800,
+              "1": 314572800
+            },
+            "experts": {},
+            "other": 314572800
+          },
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.value_length": {
+          "value": 128,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        }
+      },
+      "launch_text": "-c 4096 -ngl 1",
+      "launch_source": "model",
+      "launch_error": null,
+      "mmproj": "gemma/mmproj-gemma-3-4b-f16.gguf",
+      "mmproj_ambiguous": [],
+      "served_by": null
+    },
+    {
+      "provider": "llamacpp",
+      "name": "Llama-3.2-3B-Q8_0",
+      "location": "local",
+      "family": "llama",
+      "parameter_size": null,
+      "quantization": "Q4_K_M",
+      "specialty": [],
+      "capabilities": {},
+      "download_size_bytes": 314573280,
+      "loaded": false,
+      "vram_bytes": null,
+      "fit": {
+        "level": "unknown",
+        "needs": {
+          "model_bytes": null,
+          "context_bytes": null,
+          "context_tokens": 0,
+          "context_assumed": false,
+          "overhead_bytes": 536870912,
+          "total_bytes": null,
+          "measured": false,
+          "gpu_bytes": null,
+          "cpu_bytes": null,
+          "split_by": null,
+          "assumptions": [],
+          "reason": "launch settings: --port is set by Zygos — remove it",
+          "spill": true
+        },
+        "vram_available_bytes": 16777216000,
+        "ram_available_bytes": 32768000000,
+        "reason": "launch settings: --port is set by Zygos — remove it",
+        "gpu_bytes": null,
+        "cpu_bytes": null,
+        "split_by": null
+      },
+      "fit_text": "launch settings: --port is set by Zygos — remove it",
+      "primary": false,
+      "fallback": false,
+      "profile_error": null,
+      "fields": {
+        "identity.architecture": {
+          "value": "llama",
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.block_count": {
+          "value": 2,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.context_length_max": {
+          "value": 40960,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.download_size_bytes": {
+          "value": 314573280,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.family": {
+          "value": "llama",
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.key_length": {
+          "value": 128,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.kv_bytes_per_token": {
+          "value": 8192,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.kv_heads": {
+          "value": 8,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.quantization": {
+          "value": "Q4_K_M",
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.tensor_bytes": {
+          "value": {
+            "layers": {
+              "0": 104857600,
+              "1": 104857600
+            },
+            "experts": {},
+            "other": 104857600
+          },
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.value_length": {
+          "value": 128,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        }
+      },
+      "launch_text": "-c 4096 --port=9000",
+      "launch_source": "model",
+      "launch_error": "--port is set by Zygos — remove it",
+      "mmproj": null,
+      "mmproj_ambiguous": [],
+      "served_by": null
+    },
+    {
+      "provider": "llamacpp",
+      "name": "Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M",
+      "location": "local",
+      "family": "qwen3",
+      "parameter_size": null,
+      "quantization": "Q4_K_M",
+      "specialty": [],
+      "capabilities": {},
+      "download_size_bytes": 1258291776,
+      "loaded": false,
+      "vram_bytes": null,
+      "fit": {
+        "level": "gpu",
+        "needs": {
+          "model_bytes": 1258291200,
+          "context_bytes": 67108864,
+          "context_tokens": 8192,
+          "context_assumed": false,
+          "overhead_bytes": 536870912,
+          "total_bytes": 1862270976,
+          "measured": false,
+          "gpu_bytes": 1862270976,
+          "cpu_bytes": 0,
+          "split_by": null,
+          "assumptions": [
+            "all layers on GPU (llama-server default)"
+          ],
+          "reason": null,
+          "spill": false
+        },
+        "vram_available_bytes": 16777216000,
+        "ram_available_bytes": 32768000000,
+        "reason": "",
+        "gpu_bytes": 1862270976,
+        "cpu_bytes": 0,
+        "split_by": null
+      },
+      "fit_text": "needs ≈1.7 GB: 1.2 GB model + 0.1 GB context (8192 tokens) + 0.5 GB overhead; 15.6 GB free; assumed: all layers on GPU (llama-server default)",
+      "primary": false,
+      "fallback": false,
+      "profile_error": null,
+      "fields": {
+        "identity.architecture": {
+          "value": "qwen3",
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.block_count": {
+          "value": 2,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.context_length_max": {
+          "value": 40960,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.download_size_bytes": {
+          "value": 1258291776,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.family": {
+          "value": "qwen3",
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.key_length": {
+          "value": 128,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.kv_bytes_per_token": {
+          "value": 8192,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.kv_heads": {
+          "value": 8,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.quantization": {
+          "value": "Q4_K_M",
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.tensor_bytes": {
+          "value": {
+            "layers": {
+              "0": 419430400,
+              "1": 419430400
+            },
+            "experts": {},
+            "other": 419430400
+          },
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.value_length": {
+          "value": 128,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        }
+      },
+      "launch_text": "-c 8192",
+      "launch_source": "default",
+      "launch_error": null,
+      "mmproj": null,
+      "mmproj_ambiguous": [],
+      "served_by": null
+    },
+    {
+      "provider": "llamacpp",
+      "name": "mixed/A-Q4_0",
+      "location": "local",
+      "family": "qwen3",
+      "parameter_size": null,
+      "quantization": "Q4_K_M",
+      "specialty": [],
+      "capabilities": {},
+      "download_size_bytes": 2464,
+      "loaded": false,
+      "vram_bytes": null,
+      "fit": {
+        "level": "gpu",
+        "needs": {
+          "model_bytes": 2048,
+          "context_bytes": 67108864,
+          "context_tokens": 8192,
+          "context_assumed": false,
+          "overhead_bytes": 536870912,
+          "total_bytes": 603981824,
+          "measured": false,
+          "gpu_bytes": 603981824,
+          "cpu_bytes": 0,
+          "split_by": null,
+          "assumptions": [
+            "all layers on GPU (llama-server default)"
+          ],
+          "reason": null,
+          "spill": false
+        },
+        "vram_available_bytes": 16777216000,
+        "ram_available_bytes": 32768000000,
+        "reason": "",
+        "gpu_bytes": 603981824,
+        "cpu_bytes": 0,
+        "split_by": null
+      },
+      "fit_text": "needs ≈0.6 GB: 0.0 GB model + 0.1 GB context (8192 tokens) + 0.5 GB overhead; 15.6 GB free; assumed: all layers on GPU (llama-server default)",
+      "primary": false,
+      "fallback": false,
+      "profile_error": null,
+      "fields": {
+        "identity.architecture": {
+          "value": "qwen3",
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.block_count": {
+          "value": 2,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.context_length_max": {
+          "value": 40960,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.download_size_bytes": {
+          "value": 2464,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.family": {
+          "value": "qwen3",
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.key_length": {
+          "value": 128,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.kv_bytes_per_token": {
+          "value": 8192,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.kv_heads": {
+          "value": 8,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.quantization": {
+          "value": "Q4_K_M",
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.tensor_bytes": {
+          "value": {
+            "layers": {
+              "0": 1024,
+              "1": 1024
+            },
+            "experts": {},
+            "other": 0
+          },
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.value_length": {
+          "value": 128,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        }
+      },
+      "launch_text": "-c 8192",
+      "launch_source": "default",
+      "launch_error": null,
+      "mmproj": null,
+      "mmproj_ambiguous": [
+        "mixed/mmproj-a.gguf",
+        "mixed/mmproj-b.gguf"
+      ],
+      "served_by": null
+    },
+    {
+      "provider": "llamacpp",
+      "name": "mixed/B-Q4_0",
+      "location": "local",
+      "family": "qwen3",
+      "parameter_size": null,
+      "quantization": "Q4_K_M",
+      "specialty": [],
+      "capabilities": {},
+      "download_size_bytes": 2464,
+      "loaded": false,
+      "vram_bytes": null,
+      "fit": {
+        "level": "gpu",
+        "needs": {
+          "model_bytes": 2048,
+          "context_bytes": 67108864,
+          "context_tokens": 8192,
+          "context_assumed": false,
+          "overhead_bytes": 536870912,
+          "total_bytes": 603981824,
+          "measured": false,
+          "gpu_bytes": 603981824,
+          "cpu_bytes": 0,
+          "split_by": null,
+          "assumptions": [
+            "all layers on GPU (llama-server default)"
+          ],
+          "reason": null,
+          "spill": false
+        },
+        "vram_available_bytes": 16777216000,
+        "ram_available_bytes": 32768000000,
+        "reason": "",
+        "gpu_bytes": 603981824,
+        "cpu_bytes": 0,
+        "split_by": null
+      },
+      "fit_text": "needs ≈0.6 GB: 0.0 GB model + 0.1 GB context (8192 tokens) + 0.5 GB overhead; 15.6 GB free; assumed: all layers on GPU (llama-server default)",
+      "primary": false,
+      "fallback": false,
+      "profile_error": null,
+      "fields": {
+        "identity.architecture": {
+          "value": "qwen3",
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.block_count": {
+          "value": 2,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.context_length_max": {
+          "value": 40960,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.download_size_bytes": {
+          "value": 2464,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.family": {
+          "value": "qwen3",
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.key_length": {
+          "value": 128,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.kv_bytes_per_token": {
+          "value": 8192,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.kv_heads": {
+          "value": 8,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.quantization": {
+          "value": "Q4_K_M",
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.tensor_bytes": {
+          "value": {
+            "layers": {
+              "0": 1024,
+              "1": 1024
+            },
+            "experts": {},
+            "other": 0
+          },
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        },
+        "identity.value_length": {
+          "value": 128,
+          "source": "modelfile",
+          "at": "2026-11-04T12:00:00Z"
+        }
+      },
+      "launch_text": "-c 8192",
+      "launch_source": "default",
+      "launch_error": null,
+      "mmproj": null,
+      "mmproj_ambiguous": [
+        "mixed/mmproj-a.gguf",
+        "mixed/mmproj-b.gguf"
+      ],
+      "served_by": null
+    },
+    {
+      "provider": "llamacpp",
+      "name": "truncated",
+      "location": "local",
+      "family": null,
+      "parameter_size": null,
+      "quantization": null,
+      "specialty": [],
+      "capabilities": {},
+      "download_size_bytes": null,
+      "loaded": false,
+      "vram_bytes": null,
+      "fit": null,
+      "fit_text": null,
+      "primary": false,
+      "fallback": false,
+      "profile_error": "can't read GGUF header: file is truncated",
+      "fields": {},
+      "launch_text": "-c 8192",
+      "launch_source": "default",
+      "launch_error": null,
+      "mmproj": null,
+      "mmproj_ambiguous": [],
+      "served_by": null
+    },
+    {
+      "provider": "vllm",
+      "name": "Qwen/Qwen3-8B",
+      "location": "local",
+      "family": null,
+      "parameter_size": null,
+      "quantization": null,
+      "specialty": [],
+      "capabilities": {},
+      "download_size_bytes": null,
+      "loaded": false,
+      "vram_bytes": null,
+      "fit": null,
+      "fit_text": "fit not checked: vLLM reserves its GPU share at start",
+      "primary": false,
+      "fallback": true,
+      "profile_error": null,
+      "fields": {
+        "identity.context_length_max": {
+          "value": 32768,
+          "source": "server",
+          "at": "2026-11-04T12:00:00Z"
+        }
+      },
+      "launch_text": null,
+      "launch_source": null,
+      "launch_error": null,
+      "mmproj": null,
+      "mmproj_ambiguous": [],
+      "served_by": "http://127.0.0.1:8000/v1"
+    }
+  ]
+}

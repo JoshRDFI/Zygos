@@ -1,0 +1,34 @@
+{
+  "settings": {
+    "ollama": {
+      "base_url": null
+    },
+    "llamacpp": {
+      "server_path": "/opt/llama.cpp/llama-server",
+      "models_dir": null,
+      "default_args": "",
+      "model_args": {}
+    },
+    "vllm": []
+  },
+  "ollama": {
+    "ok": true,
+    "detail": "Ollama 0.9.1 at http://localhost:11434"
+  },
+  "llamacpp": {
+    "server": {
+      "ok": false,
+      "detail": "/opt/llama.cpp/llama-server not found"
+    },
+    "models": {
+      "ok": false,
+      "detail": "models folder not set"
+    }
+  },
+  "vllm": null,
+  "address_sources": {
+    "ollama": "default",
+    "vllm": "default"
+  },
+  "restart_required": false
+}

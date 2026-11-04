@@ -3,6 +3,15 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import ModelsSurface from "./ModelsSurface";
 import * as rest from "../client/rest";
 import type { BackendsView, ModelEntry, ModelsView } from "../client/types";
+// Real GET /models and GET /backends output, captured from the backend routes.
+import backendsNothingSetUp from "./fixtures/backends-nothing-set-up.json";
+import modelsNothingSetUp from "./fixtures/models-nothing-set-up.json";
+import backendsNoOllama from "./fixtures/backends-no-ollama.json";
+import backendsServerOnly from "./fixtures/backends-llamacpp-server-only.json";
+import backendsPayload from "./fixtures/backends-payload.json";
+import modelsPayload from "./fixtures/models-payload.json";
+import backendsVllmDown from "./fixtures/backends-payload-vllm-unreachable.json";
+import modelsVllmDown from "./fixtures/models-payload-vllm-unreachable.json";
 
 const GB = 1024 ** 3;
 const est = { model_bytes: 5 * GB, context_bytes: GB, context_tokens: 4096, context_assumed: true, overhead_bytes: 0, total_bytes: 6 * GB, measured: false };
@@ -209,7 +218,7 @@ test("llama.cpp rows show the served split text, own settings, and the vision pr
   ]));
   render(<ModelsSurface />);
   expect(await screen.findByText(splitText)).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "gemma3" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { level: 4, name: "gemma3" })).toBeInTheDocument();
   const own = screen.getByText("-c 4096 -ngl 1");
   expect(own.className).toMatch(/font-mono/);
   expect(own.closest("li")).toHaveTextContent("(own settings)");
@@ -263,5 +272,78 @@ test("groups come in order Ollama, llama.cpp, vLLM, cloud", async () => {
   render(<ModelsSurface />);
   await screen.findByText(/qwen3:8b/);
   const heads = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-  expect(heads).toEqual(["qwen3", "gemma3", "vLLM", "cloud"]);
+  expect(heads).toEqual(["qwen3", "llama.cpp", "vLLM", "cloud"]);
+});
+
+// --- real payloads (RFC-0014 phases 1-2 final fixes) ---
+
+function useReal(models: unknown, backends: unknown) {
+  vi.spyOn(rest, "getModels").mockResolvedValue(models as ModelsView);
+  vi.spyOn(rest, "getBackends").mockResolvedValue(backends as BackendsView);
+}
+
+test("nothing set up (the default install) renders: unset backends are neutral, not problems", async () => {
+  useReal(modelsNothingSetUp, backendsNothingSetUp);
+  render(<ModelsSurface />);
+  const block = await screen.findByRole("region", { name: "Backends" });
+  expect(within(block).getByText("vLLM: not set up")).toBeInTheDocument();
+  expect(within(block).getByText("llama.cpp: not set up")).toBeInTheDocument();
+  expect(within(block).getByText(/Ollama 0\.9\.1 at http:\/\/localhost:11434/)).toBeInTheDocument();
+  expect(within(block).queryByText("problem")).toBeNull();
+  expect(within(block).queryByText(/llama-server path not set/)).toBeNull();
+  expect(screen.getByText(/qwen3:8b/)).toBeInTheDocument();
+});
+
+test("no route uses Ollama and none is recorded: Ollama is not set up", async () => {
+  useReal(modelsNothingSetUp, backendsNoOllama);
+  render(<ModelsSurface />);
+  const block = await screen.findByRole("region", { name: "Backends" });
+  expect(within(block).getByText("Ollama: not set up")).toBeInTheDocument();
+  expect(within(block).queryByText("problem")).toBeNull();
+});
+
+test("a set llama-server path that fails is a problem; the unset folder is not", async () => {
+  useReal(modelsNothingSetUp, backendsServerOnly);
+  render(<ModelsSurface />);
+  const block = await screen.findByRole("region", { name: "Backends" });
+  expect(within(block).getByText(/\/opt\/llama\.cpp\/llama-server not found/).closest("li")).toHaveTextContent("problem");
+  const folder = within(block).getByText("llama.cpp models: not set up");
+  expect(folder.closest("li")).not.toHaveTextContent("problem");
+  expect(within(block).getAllByText("problem")).toHaveLength(1);
+});
+
+test("vLLM unreachable payload renders: the vLLM line is a problem and the entry says why", async () => {
+  useReal(modelsVllmDown, backendsVllmDown);
+  render(<ModelsSurface />);
+  const block = await screen.findByRole("region", { name: "Backends" });
+  const vllmLine = within(block).getByText(/can't read models from http:\/\/127\.0\.0\.1:8000\/v1/).closest("li");
+  expect(vllmLine).toHaveTextContent("vLLM");
+  expect(vllmLine).toHaveTextContent("problem");
+  const why = (modelsVllmDown as unknown as ModelsView).models.find(
+    (m) => m.provider === "vllm" && m.name === "http://127.0.0.1:8000/v1")!.fit_text!;
+  expect(why).toMatch(/^vLLM unreachable: /);
+  expect(screen.getAllByText(why).length).toBeGreaterThan(0);
+  expect(screen.getByText(/qwen3:8b/)).toBeInTheDocument();
+});
+
+test("llama.cpp models sit under one llama.cpp heading, never an Ollama family heading", async () => {
+  useReal(modelsPayload, backendsPayload);
+  render(<ModelsSurface />);
+  await screen.findByText(/ollama \/ qwen3:8b/);
+  const h3 = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
+  expect(h3).toEqual(["qwen3", "llama.cpp", "vLLM"]);
+  const section = screen.getByRole("heading", { level: 3, name: "llama.cpp" }).closest("section")!;
+  const h4 = within(section).getAllByRole("heading", { level: 4 }).map((h) => h.textContent);
+  expect(h4).toEqual(["gemma3", "llama", "qwen3", "other"]);
+  expect(within(section).getByText(/llamacpp \/ Qwen3-8B-GGUF\/Qwen3-8B-Q4_K_M/)).toBeInTheDocument();
+  expect(within(section).queryByText(/ollama \/ qwen3:8b/)).toBeNull();
+});
+
+test("profile details summarise tensor_bytes and show the server source", async () => {
+  useReal(modelsPayload, backendsPayload);
+  render(<ModelsSurface />);
+  await screen.findByText(/gemma-3-4b-it-Q4_K_M/);
+  expect(screen.getAllByText("identity.tensor_bytes · 2 layers, 0.9 GB · modelfile · 2026-11-04").length).toBeGreaterThan(0);
+  expect(screen.queryByText(/"layers"/)).toBeNull();
+  expect(screen.getByText("identity.context_length_max · 32768 · server · 2026-11-04")).toBeInTheDocument();
 });
