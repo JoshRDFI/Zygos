@@ -12,7 +12,7 @@ from typing import Callable
 
 from pydantic import ValidationError
 
-from zygos.errors import PersonalizationCompileError
+from zygos.errors import PersonalizationCompileError, ProviderError
 from zygos.personalization.compile import compile_personalization
 from zygos.personalization.render import render_identity
 from zygos.personalization.store import PreferencesStore
@@ -49,6 +49,12 @@ async def run_onboarding(
             draft = await compile_personalization(ctx, model, description)
         except PersonalizationCompileError as exc:
             say(str(exc))
+            return False
+        except ProviderError as exc:
+            say(
+                f"Couldn't reach the model ({exc}). "
+                "Try again later, or set fields directly with `zygos personalize set`."
+            )
             return False
         del description
 

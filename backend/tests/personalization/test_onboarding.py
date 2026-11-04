@@ -115,3 +115,21 @@ async def test_description_not_persisted():
     ok, _, store = await _run(["PURPLE-ELEPHANT lover"] + [""] * 6 + ["y"])
     assert ok is True
     assert "PURPLE-ELEPHANT" not in store.value.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_unreachable_model_reports_and_does_not_save():
+    from zygos.errors import ProviderUnavailable
+
+    class _Down(FakeProvider):
+        async def generate(self, request):
+            raise ProviderUnavailable("connection refused", provider="fake")
+
+    provider = _Down()
+    router = ProviderRouter([RouteChoice("fake", "m")], {"fake": provider})
+    h, store = _Harness(["I am Josh"]), _Store()
+    ok = await run_onboarding(
+        root_context(InProcessEventBus()), DefaultModelService(router), store, ask=h.ask, say=h.say,
+    )
+    assert ok is False and store.writes == 0
+    assert any("zygos personalize set" in s for s in h.said)
