@@ -40,3 +40,12 @@ test("select sets selectedTurnId", () => {
   useThinkStore.getState().select("a");
   expect(useThinkStore.getState().selectedTurnId).toBe("a");
 });
+
+test("checked flips on the first think.state and reset clears it", () => {
+  expect(useThinkStore.getState().checked).toBe(false);
+  useThinkStore.getState().onThinkState({ channel: "control", type: "think.state",
+    payload: { enabled: false, supported: false, reason: "x can't think" } } as never);
+  expect(useThinkStore.getState().checked).toBe(true);
+  useThinkStore.getState().reset();
+  expect(useThinkStore.getState().checked).toBe(false);
+});

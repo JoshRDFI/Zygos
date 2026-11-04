@@ -13,6 +13,8 @@ export type ThinkingEvent = {
 
 interface ThinkState {
   enabled: boolean;
+  /** False until the first control:think.state arrives (support unknown). */
+  checked: boolean;
   supported: boolean;
   reason: string | null;
   voiceNotice: string | null;
@@ -29,6 +31,7 @@ interface ThinkState {
 
 const initial = {
   enabled: false,
+  checked: false,
   supported: false,
   reason: null as string | null,
   voiceNotice: null as string | null,
@@ -42,6 +45,7 @@ export const useThinkStore = create<ThinkState>((set) => ({
   onThinkState: (f) =>
     set({
       enabled: Boolean(f.payload.enabled),
+      checked: true,
       supported: Boolean(f.payload.supported),
       reason: (f.payload.reason as string | null | undefined) ?? null,
     }),

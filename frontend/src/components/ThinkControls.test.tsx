@@ -22,7 +22,7 @@ beforeEach(async () => {
   useSessionStore.getState().start();
   await vi.waitFor(() => expect(useSessionStore.getState().sessionId).toBe("s"));
   useSessionStore.setState({ status: "connected" });
-  useThinkStore.setState({ supported: true, enabled: false });
+  useThinkStore.setState({ supported: true, enabled: false, checked: true });
 });
 
 test("renders Think toggle with aria-pressed reflecting enabled", () => {
@@ -55,4 +55,12 @@ test("shows voiceNotice as status", () => {
   useThinkStore.setState({ voiceNotice: "Heard “think on”" });
   render(<ThinkControls />);
   expect(screen.getByRole("status")).toHaveTextContent("Heard “think on”");
+});
+
+test("before the first think.state the toggle is disabled and says it is checking", () => {
+  useThinkStore.getState().reset();
+  render(<ThinkControls />);
+  const button = screen.getByRole("button", { name: "Think" });
+  expect(button).toBeDisabled();
+  expect(button).toHaveAttribute("title", "checking…");
 });

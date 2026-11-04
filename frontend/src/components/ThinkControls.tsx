@@ -8,6 +8,7 @@ const DISABLED = "border-border text-text-muted opacity-50 cursor-not-allowed";
 
 export default function ThinkControls() {
   const enabled = useThinkStore((s) => s.enabled);
+  const checked = useThinkStore((s) => s.checked);
   const supported = useThinkStore((s) => s.supported);
   const reason = useThinkStore((s) => s.reason);
   const voiceNotice = useThinkStore((s) => s.voiceNotice);
@@ -22,7 +23,7 @@ export default function ThinkControls() {
     <div className="flex items-center gap-1">
       <button
         type="button" aria-label="Think" aria-pressed={enabled} disabled={!usable}
-        title={!supported ? reason ?? undefined : undefined}
+        title={!checked ? "checking…" : !supported ? reason ?? undefined : undefined}
         onClick={toggle}
         className={`${BASE} ${!usable ? DISABLED : enabled ? ON : OFF}`}
       >
