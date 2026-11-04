@@ -229,3 +229,25 @@ async def test_blank_final_does_not_start_a_turn(text):
 
     assert session.active_task is None
     assert any(f.channel == CHAT and f.type == "final" for f in session.frames)
+
+
+class _SpokenFinalTranscription(_BlankFinalTranscription):
+    pass
+
+
+async def test_stt_final_starts_a_turn_marked_as_spoken(monkeypatch):
+    # RFC-0010 §3a: the audio path is the caller that knows the turn was spoken.
+    calls = []
+
+    async def fake_run_turn(session, deps, text, cancel, **kw):
+        calls.append((text, kw))
+
+    monkeypatch.setattr("zygos.api.audio.run_turn", fake_run_turn)
+    session = _FakeSessionForStart()
+    deps = _FakeDeps(_FakeVoiceService(_SpokenFinalTranscription("what time is it")))
+
+    await start_audio_turn(session, deps)
+    await session.audio.consumer
+    await session.active_task
+
+    assert calls == [("what time is it", {"spoken_input": True})]

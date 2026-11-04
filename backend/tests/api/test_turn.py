@@ -160,3 +160,161 @@ async def test_generation_exception_emits_chat_error():
     frames = _drain(session)
     assert frames[-1].channel == CHAT and frames[-1].type == "error"
     assert session.turn_status == "idle"
+
+
+# --- RFC-0010 §3a: per-turn interaction-modality context -------------------------
+
+from zygos.api.modality import TurnModality  # noqa: E402
+
+
+class _RecordingProvider(FakeProvider):
+    """FakeProvider that keeps every request it is sent."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.requests = []
+
+    async def generate(self, request):
+        self.requests.append(request)
+        return await super().generate(request)
+
+    async def stream(self, request):
+        self.requests.append(request)
+        async for chunk in super().stream(request):
+            yield chunk
+
+
+def _recording_model(**kw):
+    provider = _RecordingProvider(**kw)
+    router = ProviderRouter([RouteChoice("fake", "m")], {"fake": provider})
+    return DefaultModelService(router), provider
+
+
+def _system_texts(request):
+    return [m.content for m in request.messages if m.role == "system"]
+
+
+class _SpeakingVoice:
+    """Just enough VoiceService for run_turn's spoken-output gate."""
+
+    tts_available = True
+
+
+@pytest.fixture
+def no_speech(monkeypatch):
+    """Skip real TTS; record that run_turn tried to speak."""
+    spoken = []
+
+    async def fake_speak_reply(session, voice, ctx, text, turn_id):
+        spoken.append(text)
+
+    monkeypatch.setattr("zygos.api.turn.speak_reply", fake_speak_reply)
+    return spoken
+
+
+def test_build_messages_default_is_unchanged_by_modality_seam():
+    assert build_messages(("fact",), "hi") == build_messages(("fact",), "hi", TurnModality())
+
+
+def test_build_messages_orders_modality_before_memory():
+    msgs = build_messages(("fact A",), "hello", TurnModality(spoken_input=True))
+    assert [m.role for m in msgs] == ["system", "system", "user"]
+    assert "speech-to-text" in msgs[0].content
+    assert "fact A" in msgs[1].content
+
+
+@pytest.mark.asyncio
+async def test_typed_turn_sends_no_modality_message():
+    model, provider = _recording_model(text="ok")
+    await run_turn(_session(), _deps(model), "hi", CancelToken())
+    assert _system_texts(provider.requests[0]) == []
+
+
+@pytest.mark.asyncio
+async def test_spoken_turn_tells_model_input_is_a_transcript():
+    model, provider = _recording_model(text="ok")
+    await run_turn(_session(), _deps(model), "hi", CancelToken(), spoken_input=True)
+    (system,) = _system_texts(provider.requests[0])
+    assert "speech-to-text" in system
+    assert "text-to-speech" not in system  # speaker is off
+
+
+@pytest.mark.asyncio
+async def test_speaker_on_tells_model_reply_is_read_aloud(no_speech):
+    model, provider = _recording_model(text="ok")
+    session = _session()
+    session.speak = True
+    deps = TurnDeps(model_service=model, reasoning_factory=lambda: None,
+                    reasoning_enabled=False, memory_service=None,
+                    new_id=lambda: "turn-1", voice_service=_SpeakingVoice())
+    await run_turn(session, deps, "hi", CancelToken())
+    (system,) = _system_texts(provider.requests[0])
+    assert "text-to-speech" in system
+    assert no_speech == ["ok"]  # same gate drove the actual speech
+
+
+@pytest.mark.asyncio
+async def test_speaker_on_without_tts_engine_is_not_spoken_output():
+    model, provider = _recording_model(text="ok")
+    session = _session()
+    session.speak = True  # toggle on, but no voice service wired
+    await run_turn(session, _deps(model), "hi", CancelToken())
+    assert _system_texts(provider.requests[0]) == []
+
+
+@pytest.mark.asyncio
+async def test_tools_path_receives_modality_message(monkeypatch):
+    captured = {}
+
+    async def fake_loop(ctx, *, messages, **kw):
+        captured["messages"] = messages
+
+        class _R:
+            text, stop_reason, iterations = "done", "final", 1
+        return _R()
+
+    monkeypatch.setattr("zygos.api.turn.run_agentic_loop", fake_loop)
+    model, _ = _recording_model(text="ok")
+    deps = TurnDeps(model_service=model, reasoning_factory=lambda: None,
+                    reasoning_enabled=False, memory_service=None,
+                    new_id=lambda: "turn-1", tools=(object(),))
+    await run_turn(_session(), deps, "hi", CancelToken(), spoken_input=True)
+    systems = [m.content for m in captured["messages"] if m.role == "system"]
+    assert len(systems) == 1 and "speech-to-text" in systems[0]
+
+
+@pytest.mark.asyncio
+async def test_reasoning_path_receives_modality_message():
+    seen = {}
+
+    class _CapturingReasoning:
+        async def run(self, ctx, input):
+            seen["input"] = input
+            from zygos.reasoning.types import ReasoningResult
+            return ReasoningResult(text="r", loops_used=1, final_confidence=1.0,
+                                   halted_early=False, model="m")
+
+    model, _ = _recording_model(text="ok")
+    deps = TurnDeps(model_service=model, reasoning_factory=_CapturingReasoning,
+                    reasoning_enabled=True, memory_service=None, new_id=lambda: "turn-1")
+    await run_turn(_session(), deps, "hi", CancelToken(), spoken_input=True)
+    (system,) = seen["input"].system
+    assert "speech-to-text" in system
+
+
+@pytest.mark.asyncio
+async def test_reasoning_path_typed_turn_has_no_system():
+    seen = {}
+
+    class _CapturingReasoning:
+        async def run(self, ctx, input):
+            seen["input"] = input
+            from zygos.reasoning.types import ReasoningResult
+            return ReasoningResult(text="r", loops_used=1, final_confidence=1.0,
+                                   halted_early=False, model="m")
+
+    model, _ = _recording_model(text="ok")
+    deps = TurnDeps(model_service=model, reasoning_factory=_CapturingReasoning,
+                    reasoning_enabled=True, memory_service=None, new_id=lambda: "turn-1")
+    await run_turn(_session(), deps, "hi", CancelToken())
+    assert seen["input"].system == ()

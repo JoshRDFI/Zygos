@@ -28,7 +28,7 @@ class _StageProvider:
         self.judge_calls = 0
 
     async def generate(self, request):
-        content = request.messages[0].content
+        content = request.messages[-1].content  # the stage prompt; system messages may precede it
         self.requests.append(request)
         if "Decompose" in content:
             text = PRELUDE
@@ -183,3 +183,26 @@ async def test_stage_requests_pass_no_token_cap():
     svc, provider = _service(profile="shallow")
     await svc.run(root_context(InProcessEventBus()), ReasoningInput(prompt="why is it 42"))
     assert provider.requests and all(r.max_tokens is None for r in provider.requests)
+
+
+async def test_system_messages_reach_prelude_and_coda():
+    # RFC-0010 §3a seam coverage: identity/modality system text must not be lost
+    # when reasoning is on.
+    service, provider = _service(profile="shallow")
+    bus = InProcessEventBus()
+    await service.run(root_context(bus), ReasoningInput(prompt="q", system=("SYS-A",)))
+    stages = {}
+    for req in provider.requests:
+        user = req.messages[-1].content
+        stage = ("prelude" if "Decompose" in user else
+                 "coda" if "Synthesize the final answer" in user else "other")
+        stages.setdefault(stage, []).append(req)
+    for stage in ("prelude", "coda"):
+        (req,) = stages[stage]
+        assert req.messages[0].role == "system" and req.messages[0].content == "SYS-A"
+
+
+async def test_no_system_messages_by_default():
+    service, provider = _service(profile="shallow")
+    await service.run(root_context(InProcessEventBus()), ReasoningInput(prompt="q"))
+    assert all(m.role == "user" for req in provider.requests for m in req.messages)

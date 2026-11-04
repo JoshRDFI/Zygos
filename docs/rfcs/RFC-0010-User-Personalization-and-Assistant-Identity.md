@@ -1,6 +1,6 @@
 # RFC-0010: User Personalization and Assistant Identity
 
-- **Status:** Draft
+- **Status:** Accepted (2026-11-03)
 - **Author:** Zygos maintainers
 - **Created:** 2026-07-13
 - **Governs:** how a user personalizes the assistant — the name the assistant calls

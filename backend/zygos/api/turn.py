@@ -24,6 +24,7 @@ from zygos.agent.config import ToolLoopConfig
 from zygos.agent.loop import run_agentic_loop
 from zygos.agent.observer import ToolCallFinished, ToolCallStarted, ToolEvent
 from zygos.api.frames import CHAT, TOOLS, Frame
+from zygos.api.modality import TurnModality, render_modality
 from zygos.api.session import Session
 from zygos.api.speech import speak_reply
 from zygos.api.voice_gate import VoiceGate
@@ -65,8 +66,18 @@ def _json_safe(value):
     return str(value)
 
 
-def build_messages(context: tuple[str, ...], text: str) -> tuple[Message, ...]:
-    messages: list[Message] = []
+def system_texts(modality: TurnModality) -> tuple[str, ...]:
+    """Runtime-authored system messages for this turn, ahead of memory (RFC-0010 §3a).
+
+    One rendering site shared by the message-list paths and the reasoning path.
+    """
+    rendered = render_modality(modality)
+    return (rendered,) if rendered else ()
+
+
+def build_messages(context: tuple[str, ...], text: str,
+                   modality: TurnModality = TurnModality()) -> tuple[Message, ...]:
+    messages: list[Message] = [Message(role="system", content=t) for t in system_texts(modality)]
     if context:
         joined = "\n".join(context)
         messages.append(Message(role="system", content=f"Relevant memory:\n{joined}"))
@@ -78,8 +89,16 @@ def format_exchange(user_text: str, assistant_text: str) -> str:
     return f"User: {user_text}\nAssistant: {assistant_text}"
 
 
-async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelToken) -> None:
+def _speaks_reply(session: Session, deps: TurnDeps) -> bool:
+    """Whether this turn's reply will be synthesized (the gate before speak_reply)."""
+    return bool(session.speak and deps.voice_service is not None
+                and deps.voice_service.tts_available)
+
+
+async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelToken,
+                   *, spoken_input: bool = False) -> None:
     turn_id = deps.new_id()
+    modality = TurnModality(spoken_input=spoken_input, spoken_output=_speaks_reply(session, deps))
     ctx = session.root.child(turn_id, cancel=cancel)
     session.begin_turn()
     session.enqueue(Frame(channel=CHAT, type="turn.start", payload={"turn_id": turn_id}))
@@ -101,7 +120,7 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
                 context = ()
 
         if deps.tools:
-            messages = build_messages(context, text)
+            messages = build_messages(context, text, modality)
 
             def _frame(event: ToolEvent) -> None:
                 if isinstance(event, ToolCallStarted):
@@ -124,7 +143,7 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
             final = agent_result.text
             end_extra = {"stop_reason": agent_result.stop_reason, "iterations": agent_result.iterations}
         elif not deps.reasoning_enabled:
-            request = GenerationRequest(messages=build_messages(context, text))
+            request = GenerationRequest(messages=build_messages(context, text, modality))
             async for chunk in deps.model_service.stream(ctx, request):
                 if ctx.cancelled:
                     break
@@ -133,7 +152,8 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
                     session.enqueue(Frame(channel=CHAT, type="token", payload={"text": chunk.text}))
         else:
             reasoning = deps.reasoning_factory()
-            result = await reasoning.run(ctx, ReasoningInput(prompt=text, context=context))
+            result = await reasoning.run(ctx, ReasoningInput(
+                prompt=text, context=context, system=system_texts(modality)))
             final = result.text
             end_extra = {
                 "confidence": result.final_confidence,
@@ -153,8 +173,7 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
         payload = {"text": final, **end_extra}
         session.enqueue(Frame(channel=CHAT, type="turn.end", payload=payload))
 
-        if (session.speak and deps.voice_service is not None
-                and deps.voice_service.tts_available and final):
+        if _speaks_reply(session, deps) and final:
             await speak_reply(session, deps.voice_service, ctx, final, turn_id)
     except Exception:  # noqa: BLE001 - a failed turn must not kill the session
         logger.exception("turn failed")

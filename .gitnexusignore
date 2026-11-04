@@ -1,0 +1,6 @@
+# Build output and vendored minified assets: not source, and their minified
+# names pollute impact / detect-changes results.
+frontend/dist/
+frontend/public/vad/
+frontend/node_modules/
+node_modules/

@@ -55,9 +55,12 @@ class DefaultReasoningService:
             selected_model=self._selected_model,
         )
 
-    async def _call(self, ctx: ExecutionContext, prompt: str, *, model: str, temperature: float, max_tokens: int | None = None) -> str:
+    async def _call(self, ctx: ExecutionContext, prompt: str, *, model: str, temperature: float,
+                    max_tokens: int | None = None, system: tuple[str, ...] = ()) -> str:
+        messages = (*(Message(role="system", content=t) for t in system),
+                    Message(role="user", content=prompt))
         request = GenerationRequest(
-            model=model, messages=(Message(role="user", content=prompt),),
+            model=model, messages=messages,
             temperature=temperature, max_tokens=max_tokens,
         )
         result = await self._model.generate(ctx, request)
@@ -92,7 +95,7 @@ class DefaultReasoningService:
             else:
                 prelude_text = await self._call(
                     ctx.child("prelude"), prompts.build_prelude(input.prompt, input.context),
-                    model=route.model, temperature=profile.temperature,
+                    model=route.model, temperature=profile.temperature, system=input.system,
                 )
                 summary, self._decomposition = prompts.parse_prelude(prelude_text)
 
@@ -183,7 +186,7 @@ class DefaultReasoningService:
                 self._stage = "coda"
                 final = await self._call(
                     ctx.child("coda"), prompts.build_coda(input.prompt, best_summary),
-                    model=route.model, temperature=profile.temperature,
+                    model=route.model, temperature=profile.temperature, system=input.system,
                 )
             self._final = final
             self._stage = "cancelled" if self._cancelled else "done"

@@ -10,6 +10,9 @@ class ReasoningInput(BaseModel):
 
     prompt: str
     context: tuple[str, ...] = ()
+    # runtime-authored system messages (identity/modality, RFC-0010 §3a) for the
+    # prelude and coda requests; empty = today's prompts unchanged
+    system: tuple[str, ...] = ()
 
 
 class ConfidenceBreakdown(BaseModel):
