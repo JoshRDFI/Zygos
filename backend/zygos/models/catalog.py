@@ -18,6 +18,7 @@ from typing import Any, Literal
 import httpx
 from pydantic import BaseModel, ConfigDict
 
+from zygos.backends.addresses import resolve_address, routed
 from zygos.backends.checks import Check, VllmModel, read_vllm
 from zygos.backends.launch import LaunchError, parse_launch, read_launch
 from zygos.backends.settings import BackendsSettings, LlamaCppBackend, effective_args
@@ -514,9 +515,10 @@ class ModelCatalog:
     # -- vLLM (RFC-0014 §9) -----------------------------------------------------
 
     async def _read_vllm(self, settings: BackendsSettings) -> _Vllm | None:
-        if not settings.vllm or self._client is None:
+        """A vLLM recorded or used by a route, read at the address startup resolves."""
+        if self._client is None or not (settings.vllm or "vllm" in routed(self._config)):
             return None
-        url = settings.vllm[0].base_url
+        url = resolve_address(self._config, "vllm", settings)[0]
         check, served = await read_vllm(self._client, url)
         return _Vllm(url=url, check=check, served=served)
 

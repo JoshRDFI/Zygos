@@ -5,6 +5,8 @@ Stability: Experimental.
 
 from __future__ import annotations
 
+import os
+import shutil
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -56,3 +58,33 @@ def effective_args(
     if own is not None and own.strip():
         return own.strip(), "model"
     return settings.default_args, "default"
+
+
+def resolve_path(text: str | None, *, command: bool = False) -> str | None:
+    """``~`` expanded and made absolute. With ``command``, a bare name (no ``/``) is
+    looked up on PATH; a name not found is kept as typed so its check says so."""
+    if text is None or not text.strip():
+        return None
+    text = text.strip()
+    if command and "/" not in text:
+        found = shutil.which(text)
+        return os.path.abspath(found) if found else text
+    return os.path.abspath(os.path.expanduser(text))
+
+
+def with_resolved_paths(settings: BackendsSettings) -> BackendsSettings:
+    lc = settings.llamacpp
+    return settings.model_copy(update={"llamacpp": lc.model_copy(update={
+        "server_path": resolve_path(lc.server_path, command=True),
+        "models_dir": resolve_path(lc.models_dir),
+    })})
+
+
+def address_problem(settings: BackendsSettings) -> tuple[str, str] | None:
+    """``(field, message)`` for the first address that isn't http(s), else None."""
+    urls = [("ollama.base_url", settings.ollama.base_url)]
+    urls += [("vllm.base_url", v.base_url) for v in settings.vllm]
+    for field, url in urls:
+        if url is not None and not url.startswith(("http://", "https://")):
+            return field, f"{field} must be an http:// or https:// address"
+    return None

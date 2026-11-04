@@ -349,3 +349,23 @@ def test_build_runtime_catalog_reads_the_backends_record(tmp_path: Path):
     broken = {m.name: m for m in view.models}["Broken"]
     assert broken.provider == "llamacpp"
     assert broken.profile_error.startswith("can't read GGUF header: ")
+
+
+def test_build_runtime_resolves_ollama_and_vllm_addresses_even_unrouted(tmp_path: Path):
+    import asyncio
+
+    file = tmp_path / "config.yaml"
+    file.write_text(
+        f"personalization:\n  db_path: '{tmp_path / 'p.db'}'\n"
+        "providers:\n  primary: {provider: fake, model: fake-1}\n"
+        "  credentials:\n    vllm: {base_url: 'http://cfgv:2/v1'}\n",
+        encoding="utf-8",
+    )
+    runtime = build_runtime(file)
+    try:
+        assert runtime.addresses_at_start["ollama"] == "http://localhost:11434"
+        assert runtime.address_sources["ollama"] == "default"
+        assert runtime.addresses_at_start["vllm"] == "http://cfgv:2/v1"
+        assert runtime.address_sources["vllm"] == "config"
+    finally:
+        asyncio.run(runtime.aclose())

@@ -9,7 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from zygos.backends.view import build_view, ollama_address, restart_required
+from zygos.backends.addresses import resolve_address
+from zygos.backends.view import build_view, restart_required, uses_ollama, uses_vllm
 from zygos.config.loader import primary_route_credentialed
 from zygos.errors import PluginError
 from zygos.hardware.describe import describe_hardware
@@ -82,23 +83,20 @@ def _hardware_check(runtime: RuntimeAssembly, gpu_query: GpuQuery) -> DoctorChec
 async def _backend_checks(runtime: RuntimeAssembly) -> list[DoctorCheck]:
     """Optional backends (RFC-0014): shown only when set up; problems warn, never fail."""
     settings = runtime.backends.get()
+    config = runtime.config
     lc = settings.llamacpp
-    ollama_routed = any(
-        r.provider == "ollama"
-        for r in [runtime.config.providers.primary, *runtime.config.providers.fallbacks]
-    )
     out: list[DoctorCheck] = []
-    show_ollama = bool(settings.ollama.base_url) or ollama_routed
+    show_ollama = uses_ollama(settings, config)
     show_llama = bool(lc.server_path or lc.models_dir)
-    if not (show_ollama or show_llama or settings.vllm):
+    if not (show_ollama or show_llama or uses_vllm(settings, config)):
         return out
     view = await build_view(
-        settings, runtime.http_client, runtime.address_sources, runtime.addresses_at_start,
-        probe_ollama=False,  # doctor is passive: ollama_address shows the address only
+        settings, runtime.http_client, config=config,
+        address_sources=runtime.address_sources, addresses_at_start=runtime.addresses_at_start,
+        probe_ollama=False,  # doctor is passive: the Ollama address is shown, not probed
     )
     if show_ollama:
-        url = ollama_address(settings, runtime.addresses_at_start)
-        source = runtime.address_sources.get("ollama", "default")
+        url, source = resolve_address(config, "ollama", settings)
         out.append(DoctorCheck("ollama_address", True, f"{url} (from {source})"))
     if show_llama:
         out.append(DoctorCheck("llamacpp_server", True, view.llamacpp.server.detail,
@@ -109,7 +107,7 @@ async def _backend_checks(runtime: RuntimeAssembly) -> list[DoctorCheck]:
         served = f" — serving: {', '.join(view.vllm.served)}" if view.vllm.served else ""
         out.append(DoctorCheck("vllm", True, view.vllm.check.detail + served,
                                warn=not view.vllm.check.ok))
-    if restart_required(settings, runtime.addresses_at_start):
+    if restart_required(settings, config, runtime.addresses_at_start):
         out.append(DoctorCheck(
             "backends_restart", True,
             "a saved backend address differs from the one in use: restart Zygos to apply it",

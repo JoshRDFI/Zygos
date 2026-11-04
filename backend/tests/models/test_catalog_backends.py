@@ -330,8 +330,8 @@ async def test_ordering_ollama_llamacpp_vllm_cloud(tmp_path):
 @pytest.mark.asyncio
 async def test_no_backends_set_up_gives_the_same_view_as_before(tmp_path):
     config = _config(fallbacks=[{"provider": "anthropic", "model": "claude-x"},
-                                {"provider": "vllm", "model": "llama-70b"}])
-    extra = {"anthropic": FakeCloud(), "vllm": FakeVllm()}
+                                {"provider": "llamacpp", "model": "llama-70b"}])
+    extra = {"anthropic": FakeCloud()}
 
     async def view(sub, **kw):
         catalog, _ = _catalog(tmp_path / sub, ollama=FakeOllama(tags=[_tag("qwen3:8b", "d1")]),
@@ -343,8 +343,28 @@ async def test_no_backends_set_up_gives_the_same_view_as_before(tmp_path):
     after = await view("b", settings=BackendsSettings(), client=client)
     await client.aclose()
     assert before == after
-    assert _by_name_dump(after)["llama-70b"]["fit_text"] == "fit not checked for vllm"
+    assert _by_name_dump(after)["llama-70b"]["fit_text"] == "fit not checked for llamacpp"
 
 
 def _by_name_dump(dump):
     return {m["name"]: m for m in dump["models"]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("credentials, url", [
+    ({"vllm": {"base_url": "http://cfgv:2/v1"}}, "http://cfgv:2/v1"),
+    ({}, "http://localhost:8000/v1"),
+])
+async def test_config_only_vllm_route_lists_the_served_model(tmp_path, credentials, url):
+    """AC10: a vLLM route in the config is enough; its address resolves like startup's."""
+    calls: list[str] = []
+    client = _client(_served({"id": "Qwen/Qwen3-8B"}), calls)
+    config = _config(fallbacks=[{"provider": "vllm", "model": "Qwen/Qwen3-8B"}],
+                     credentials=credentials)
+    catalog, _ = _catalog(tmp_path, settings=BackendsSettings(), config=config, client=client,
+                          extra={"vllm": FakeVllm()})
+    models = _by_name(await catalog.view(_ctx()))
+    await client.aclose()
+    assert calls == [f"{url}/models"]
+    qwen = models["Qwen/Qwen3-8B"]
+    assert qwen.served_by == url and qwen.fit_text == VLLM_TEXT and qwen.fallback is True

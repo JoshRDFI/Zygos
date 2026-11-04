@@ -9,6 +9,7 @@ Stability: Experimental.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from typing import Callable
 
 import httpx
@@ -21,9 +22,17 @@ from zygos.backends.checks import (
     check_vllm,
     count_gguf,
 )
+from zygos.backends.addresses import resolve_address, restart_required
 from zygos.backends.launch import LaunchError, parse_launch
-from zygos.backends.settings import BackendsSettings, LlamaCppBackend, OllamaBackend, VllmEndpoint
+from zygos.backends.settings import (
+    BackendsSettings,
+    LlamaCppBackend,
+    OllamaBackend,
+    VllmEndpoint,
+    resolve_path,
+)
 from zygos.backends.store import BackendsStore
+from zygos.config.schema import ZygosConfig
 
 _INSTALL = (
     "llama.cpp isn't set up. Install it from https://github.com/ggml-org/llama.cpp "
@@ -51,7 +60,7 @@ async def _ask_llama_server(
     current: str | None, ask: Callable[[str], str], say: Callable[[str], None], run: Runner
 ) -> str | None:
     shown = current or "not set"
-    answer = ask(f"llama-server path (Enter keeps {shown}): ").strip()
+    answer = resolve_path(ask(f"llama-server path (Enter keeps {shown}): "), command=True)
     if not answer:
         if current:
             say(f"llama-server: {(await check_llama_server(current, run=run)).detail}")
@@ -62,13 +71,39 @@ async def _ask_llama_server(
         if check.ok:
             return answer
         if attempt == 0:
-            answer = ask(f"llama-server path (Enter keeps {shown}): ").strip()
+            answer = resolve_path(ask(f"llama-server path (Enter keeps {shown}): "), command=True)
             if not answer:
                 return current
     if current:
         say("Keeping the current llama-server path.")
         return current
     say("Keeping the llama-server path unset.")
+    return None
+
+
+async def _ask_models_dir(
+    current: str | None, ask: Callable[[str], str], say: Callable[[str], None]
+) -> str | None:
+    """Like the server path: a failed check is asked once more, then setup goes on."""
+    prompt = f"GGUF models folder (Enter keeps {current or 'not set'}): "
+    answer = resolve_path(ask(prompt))
+    if not answer:
+        if current:
+            say(f"Models: {(await asyncio.to_thread(count_gguf, current)).detail}")
+        return current
+    for attempt in range(2):
+        check = await asyncio.to_thread(count_gguf, answer)
+        say(f"Models: {check.detail}")
+        if check.ok:
+            return answer
+        if attempt == 0:
+            answer = resolve_path(ask(prompt))
+            if not answer:
+                return current
+    if current:
+        say("Keeping the current models folder.")
+        return current
+    say("Keeping the models folder unset.")
     return None
 
 
@@ -89,13 +124,15 @@ async def run_backend_setup(
     store: BackendsStore,
     client: httpx.AsyncClient,
     *,
-    current_ollama_url: str,
+    config: ZygosConfig,
+    addresses_at_start: Mapping[str, str],
     ask: Callable[[str], str],
     say: Callable[[str], None],
     run_version: Runner = _run_version,
 ) -> bool:
     try:
         old = store.get()
+        current_ollama_url = resolve_address(config, "ollama", old)[0]
 
         # 1. Ollama
         say(f"Ollama: {(await check_ollama(client, current_ollama_url)).detail}")
@@ -108,11 +145,7 @@ async def run_backend_setup(
         llamacpp = old.llamacpp
         if _yes(ask("Do you have llama.cpp installed? [y/N]: ")):
             server = await _ask_llama_server(old.llamacpp.server_path, ask, say, run_version)
-            shown = old.llamacpp.models_dir or "not set"
-            folder = ask(f"GGUF models folder (Enter keeps {shown}): ").strip()
-            models_dir = folder or old.llamacpp.models_dir
-            if models_dir:
-                say(f"Models: {(await asyncio.to_thread(count_gguf, models_dir)).detail}")
+            models_dir = await _ask_models_dir(old.llamacpp.models_dir, ask, say)
             args = _ask_launch(old.llamacpp.default_args, ask, say)
             llamacpp = LlamaCppBackend(
                 server_path=server,
@@ -148,13 +181,7 @@ async def run_backend_setup(
         if not _yes(ask("Save these settings? [y/N]: ")):
             return False
         store.set(new)
-        old_vllm = old.vllm[0].base_url if old.vllm else None
-        new_vllm = new.vllm[0].base_url if new.vllm else None
-        new_ollama = new.ollama.base_url
-        ollama_changed = new_ollama != old.ollama.base_url and (
-            new_ollama is None or new_ollama.rstrip("/") != current_ollama_url.rstrip("/")
-        )
-        if ollama_changed or new_vllm != old_vllm:
+        if restart_required(new, config, addresses_at_start):
             say("Restart Zygos for address changes to apply.")
         return True
     except EOFError:

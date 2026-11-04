@@ -159,3 +159,28 @@ def test_doctor_backends_restart_warns(tmp_path):
     by = {c.name: c for c in asyncio.run(go()).checks}
     assert by["backends_restart"].warn and by["backends_restart"].ok
     assert by["ollama_address"].detail.startswith("http://new:1")
+
+
+def test_doctor_shows_config_only_ollama_address(tmp_path):
+    import asyncio
+
+    from zygos.cli.doctor import run_doctor
+    from zygos.runtime.bootstrap import build_runtime
+
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        f"personalization:\n  db_path: '{tmp_path / 'p.db'}'\n"
+        "providers:\n  primary: {provider: ollama, model: q}\n"
+        "  credentials:\n    ollama: {base_url: 'http://cfg:1'}\n"
+    )
+
+    async def go():
+        runtime = build_runtime(config)
+        try:
+            return await run_doctor(runtime, gpu_query=lambda: None)
+        finally:
+            await runtime.aclose()
+
+    by = {c.name: c for c in asyncio.run(go()).checks}
+    assert by["ollama_address"].detail == "http://cfg:1 (from config)"
+    assert "backends_restart" not in by

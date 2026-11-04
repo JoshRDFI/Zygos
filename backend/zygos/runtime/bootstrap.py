@@ -19,8 +19,8 @@ import httpx
 
 from zygos.agent.config import ToolLoopConfig
 from zygos.backends.settings import BackendsSettings
+from zygos.backends.addresses import BACKEND_ADDRESSES, AddressSource, resolve_address
 from zygos.backends.store import BackendsStore, SqliteBackendsStore
-from zygos.backends.view import AddressSource
 from zygos.config.loader import load_config
 from zygos.config.schema import ZygosConfig
 from zygos.errors import ConfigError
@@ -36,7 +36,7 @@ from zygos.models.catalog import ModelCatalog
 from zygos.models.store import ProfileStore
 from zygos.personalization import PreferencesStore, SqlitePreferencesStore
 from zygos.plugins.resolver import PluginRegistry
-from zygos.providers.base import DEFAULT_BASE_URLS, Provider, ProviderSettings
+from zygos.providers.base import Provider, ProviderSettings
 from zygos.providers.embedding import Embedder
 from zygos.providers.embedding_local import DEFAULT_LOCAL_MODEL
 from zygos.reasoning.service import DefaultReasoningService, ReasoningService
@@ -100,30 +100,11 @@ class RuntimeAssembly:
         await self.http_client.aclose()
 
 
-def _record_address(backends: BackendsSettings | None, name: str) -> str | None:
-    if backends is None:
-        return None
-    if name == "ollama":
-        return backends.ollama.base_url or None
-    if name == "vllm":
-        return backends.vllm[0].base_url if backends.vllm else None
-    return None
-
-
 def _resolve_address(
     config: ZygosConfig, name: str, backends: BackendsSettings | None = None
 ) -> tuple[str, AddressSource]:
     """Backends record, then config credential, then the built-in default (RFC-0014 section 2)."""
-    recorded = _record_address(backends, name)
-    if recorded:
-        return recorded, "backends"
-    credential = config.providers.credentials.get(name)
-    if credential is not None and credential.base_url:
-        return credential.base_url, "config"
-    default = DEFAULT_BASE_URLS.get(name)
-    if default is not None:
-        return default, "default"
-    return "http://localhost", "default"
+    return resolve_address(config, name, backends)
 
 
 def _provider_settings(
@@ -243,11 +224,10 @@ def build_runtime(
         address_sources[route.provider] = _resolve_address(
             config, route.provider, backends_settings
         )[1]
-    for name in ("ollama", "vllm"):  # recorded backends count even when no route uses them
-        recorded = _record_address(backends_settings, name)
-        if recorded and name not in addresses_at_start:
-            addresses_at_start[name] = recorded
-            address_sources[name] = "backends"
+    for name in BACKEND_ADDRESSES:  # known even when no route uses them
+        addresses_at_start[name], address_sources[name] = _resolve_address(
+            config, name, backends_settings
+        )
 
     router = ProviderRouter(
         routes,

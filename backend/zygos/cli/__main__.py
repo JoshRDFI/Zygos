@@ -20,14 +20,11 @@ from zygos.backends.setup import run_backend_setup, summarize
 from zygos.cli.doctor import DoctorReport, run_doctor
 from zygos.hardware.describe import describe_hardware
 from zygos.errors import ConfigError
-from zygos.providers.base import DEFAULT_BASE_URLS
 from zygos.personalization import PERSONALIZATION_FIELDS, Personalization
 from zygos.personalization.onboarding import run_onboarding
 from zygos.runtime.bootstrap import build_runtime
 from zygos.runtime.manifest import Manifest, primary_route, runtime_manifest
 from zygos.thinking.support import check_selected
-
-_OLLAMA_DEFAULT = DEFAULT_BASE_URLS["ollama"]
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -79,7 +76,7 @@ def _interruptible_input(prompt: str) -> str:
 async def _backends_setup(runtime) -> None:
     await run_backend_setup(
         runtime.backends, runtime.http_client,
-        current_ollama_url=runtime.addresses_at_start.get("ollama", _OLLAMA_DEFAULT),
+        config=runtime.config, addresses_at_start=runtime.addresses_at_start,
         ask=_interruptible_input, say=print,
     )
 
