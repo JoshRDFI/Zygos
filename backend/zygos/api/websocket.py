@@ -70,7 +70,8 @@ async def _dispatch(session: Session, deps: TurnDeps, frame: Frame) -> None:
             await session.active_task  # barge-in: unwind prior turn
         token = CancelToken()
         session.active_cancel = token
-        session.active_task = asyncio.create_task(run_turn(session, deps, text, token))
+        session.active_task = asyncio.create_task(
+            run_turn(session, deps, text, token, spoken_input=False))
     elif frame.channel == CONTROL and frame.type == "cancel":
         if session.active_cancel is not None:
             session.active_cancel.trip()

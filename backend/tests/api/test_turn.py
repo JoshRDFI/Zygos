@@ -57,7 +57,7 @@ def test_build_messages_includes_memory_system_message():
 @pytest.mark.asyncio
 async def test_reasoning_off_streams_tokens_then_turn_end():
     session = _session()
-    await run_turn(session, _deps(_model(script=["alpha beta gamma"])), "hi", CancelToken())
+    await run_turn(session, _deps(_model(script=["alpha beta gamma"])), "hi", CancelToken(), spoken_input=False)
     frames = _drain(session)
     kinds = [(f.channel, f.type) for f in frames]
     assert kinds[0] == (CHAT, "turn.start")
@@ -73,7 +73,7 @@ async def test_reasoning_off_streams_tokens_then_turn_end():
 async def test_reasoning_on_delivers_final_at_turn_end_no_tokens():
     session = _session()
     deps = _deps(_model(text="reasoned answer"), reasoning=True)
-    await run_turn(session, deps, "hard question", CancelToken())
+    await run_turn(session, deps, "hard question", CancelToken(), spoken_input=False)
     frames = _drain(session)
     assert not [f for f in frames if f.type == "token"]
     end = frames[-1]
@@ -101,7 +101,7 @@ async def test_memory_retrieve_and_store_when_present():
 
     mem = FakeMemory()
     session = _session()
-    await run_turn(session, _deps(_model(script=["ok"]), memory=mem), "hello", CancelToken())
+    await run_turn(session, _deps(_model(script=["ok"]), memory=mem), "hello", CancelToken(), spoken_input=False)
     assert mem.retrieved == "hello"
     assert mem.stored is not None and "hello" in mem.stored and "ok" in mem.stored
 
@@ -109,7 +109,7 @@ async def test_memory_retrieve_and_store_when_present():
 @pytest.mark.asyncio
 async def test_memory_none_skips_both_branches():
     session = _session()
-    await run_turn(session, _deps(_model(script=["ok"]), memory=None), "hello", CancelToken())
+    await run_turn(session, _deps(_model(script=["ok"]), memory=None), "hello", CancelToken(), spoken_input=False)
     frames = _drain(session)
     assert [(f.channel, f.type) for f in frames] == [(CHAT, "turn.start"), (CHAT, "token"), (CHAT, "turn.end")]
 
@@ -124,7 +124,7 @@ async def test_memory_retrieve_failure_degrades_not_aborts():
             self.stored = text
 
     session = _session()
-    await run_turn(session, _deps(_model(script=["ok"]), memory=BrokenMemory()), "hi", CancelToken())
+    await run_turn(session, _deps(_model(script=["ok"]), memory=BrokenMemory()), "hi", CancelToken(), spoken_input=False)
     frames = _drain(session)
     assert frames[-1].type == "turn.end"  # completed, not error
     assert not [f for f in frames if f.type == "error"]
@@ -146,7 +146,7 @@ async def test_cancelled_before_generate_emits_cancelled_end_and_skips_store():
     session = _session()
     token = CancelToken()
     token.trip()  # already cancelled
-    await run_turn(session, _deps(_model(script=["ok"]), memory=mem), "hi", token)
+    await run_turn(session, _deps(_model(script=["ok"]), memory=mem), "hi", token, spoken_input=False)
     frames = _drain(session)
     assert frames[-1].type == "turn.end"
     assert frames[-1].payload.get("cancelled") is True
@@ -156,7 +156,7 @@ async def test_cancelled_before_generate_emits_cancelled_end_and_skips_store():
 @pytest.mark.asyncio
 async def test_generation_exception_emits_chat_error():
     session = _session()
-    await run_turn(session, _deps(_model(script=[RuntimeError("boom")])), "hi", CancelToken())
+    await run_turn(session, _deps(_model(script=[RuntimeError("boom")])), "hi", CancelToken(), spoken_input=False)
     frames = _drain(session)
     assert frames[-1].channel == CHAT and frames[-1].type == "error"
     assert session.turn_status == "idle"
@@ -226,7 +226,7 @@ def test_build_messages_orders_modality_before_memory():
 @pytest.mark.asyncio
 async def test_typed_turn_sends_no_modality_message():
     model, provider = _recording_model(text="ok")
-    await run_turn(_session(), _deps(model), "hi", CancelToken())
+    await run_turn(_session(), _deps(model), "hi", CancelToken(), spoken_input=False)
     assert _system_texts(provider.requests[0]) == []
 
 
@@ -247,7 +247,7 @@ async def test_speaker_on_tells_model_reply_is_read_aloud(no_speech):
     deps = TurnDeps(model_service=model, reasoning_factory=lambda: None,
                     reasoning_enabled=False, memory_service=None,
                     new_id=lambda: "turn-1", voice_service=_SpeakingVoice())
-    await run_turn(session, deps, "hi", CancelToken())
+    await run_turn(session, deps, "hi", CancelToken(), spoken_input=False)
     (system,) = _system_texts(provider.requests[0])
     assert "text-to-speech" in system
     assert no_speech == ["ok"]  # same gate drove the actual speech
@@ -258,7 +258,7 @@ async def test_speaker_on_without_tts_engine_is_not_spoken_output():
     model, provider = _recording_model(text="ok")
     session = _session()
     session.speak = True  # toggle on, but no voice service wired
-    await run_turn(session, _deps(model), "hi", CancelToken())
+    await run_turn(session, _deps(model), "hi", CancelToken(), spoken_input=False)
     assert _system_texts(provider.requests[0]) == []
 
 
@@ -316,5 +316,13 @@ async def test_reasoning_path_typed_turn_has_no_system():
     model, _ = _recording_model(text="ok")
     deps = TurnDeps(model_service=model, reasoning_factory=_CapturingReasoning,
                     reasoning_enabled=True, memory_service=None, new_id=lambda: "turn-1")
-    await run_turn(_session(), deps, "hi", CancelToken())
+    await run_turn(_session(), deps, "hi", CancelToken(), spoken_input=False)
     assert seen["input"].system == ()
+
+
+@pytest.mark.asyncio
+async def test_run_turn_requires_an_explicit_modality():
+    # RFC-0010 Risks: a new turn-starting path must not silently default to typed.
+    model, _ = _recording_model(text="ok")
+    with pytest.raises(TypeError):
+        await run_turn(_session(), _deps(model), "hi", CancelToken())

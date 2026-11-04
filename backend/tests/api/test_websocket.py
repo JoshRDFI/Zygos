@@ -424,3 +424,18 @@ def test_session_reaped_from_registry_on_disconnect():
             break
         time.sleep(0.01)
     assert app.state.registry.get(sid) is None
+
+
+async def test_typed_user_message_starts_a_turn_marked_as_typed(monkeypatch):
+    # RFC-0010 §3a / AC8: the typed caller states the modality explicitly.
+    calls = []
+
+    async def fake_run_turn(session, deps, text, cancel, **kw):
+        calls.append((text, kw))
+
+    monkeypatch.setattr("zygos.api.websocket.run_turn", fake_run_turn)
+    session = Session("s1", root_context(InProcessEventBus(), session_id="s1"), created_at=0.0)
+    frame = Frame(channel=CHAT, type="user_message", payload={"text": "typed words"})
+    await _dispatch(session, None, frame)
+    await session.active_task
+    assert calls == [("typed words", {"spoken_input": False})]

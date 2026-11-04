@@ -96,7 +96,7 @@ def _speaks_reply(session: Session, deps: TurnDeps) -> bool:
 
 
 async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelToken,
-                   *, spoken_input: bool = False) -> None:
+                   *, spoken_input: bool) -> None:
     turn_id = deps.new_id()
     modality = TurnModality(spoken_input=spoken_input, spoken_output=_speaks_reply(session, deps))
     ctx = session.root.child(turn_id, cancel=cancel)
