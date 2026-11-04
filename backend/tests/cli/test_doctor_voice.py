@@ -2,7 +2,7 @@ import dataclasses
 from types import SimpleNamespace
 
 from zygos.cli.__main__ import render_doctor
-from zygos.cli.doctor import DoctorCheck, DoctorReport, parse_gpu, run_doctor
+from zygos.cli.doctor import DoctorCheck, DoctorReport, run_doctor
 from zygos.runtime.bootstrap import build_runtime
 from zygos.voice.contract import SttHealth, TtsHealth
 
@@ -68,36 +68,30 @@ async def test_voice_device_fallback_is_warn_not_fail(tmp_path):
         await rt.aclose()
 
 
-async def test_gpu_line_present_when_nvidia_smi_answers(tmp_path):
+async def test_hardware_check_reports_gpu_when_nvidia_smi_answers(tmp_path):
     rt = _runtime_with_voice(tmp_path, TtsHealth(engine="kokoro", device="cpu", alive=False))
     try:
         report = await run_doctor(rt, gpu_query=lambda: "NVIDIA GeForce RTX 5080, 16303, 9371\n")
-        c = _check(report, "gpu")
-        assert c.ok and c.detail == "NVIDIA GeForce RTX 5080: 16303 MiB total, 9371 MiB free"
+        c = _check(report, "hardware")
+        assert c.ok and not c.warn
+        assert c.detail.startswith("GPU NVIDIA GeForce RTX 5080: 15.9 GB VRAM, 9.2 GB free · RAM ")
+        assert " threads) · disk " in c.detail
+        assert not any(x.name == "gpu" for x in report.checks)
     finally:
         await rt.aclose()
 
 
-async def test_gpu_line_omitted_without_nvidia_smi(tmp_path):
+async def test_hardware_check_warns_without_nvidia_smi(tmp_path):
     rt = _runtime_with_voice(tmp_path, TtsHealth(engine="kokoro", device="cpu", alive=False))
     try:
         report = await run_doctor(rt, gpu_query=lambda: None)
-        assert not any(c.name == "gpu" for c in report.checks)
+        c = _check(report, "hardware")
+        assert c.ok and c.warn
+        assert c.detail.startswith("GPU unknown · RAM ")
+        assert c.detail.endswith("— GPU not detected: model fit can't be checked")
+        assert report.ok
     finally:
         await rt.aclose()
-
-
-def test_parse_gpu_garbage_is_none():
-    # Review Focus #4: non-zero exit is None upstream; malformed output is None here.
-    assert parse_gpu(None) is None
-    assert parse_gpu("") is None
-    assert parse_gpu("NVIDIA-SMI has failed because it couldn't communicate with the driver") is None
-    assert parse_gpu("RTX, lots, some") is None
-
-
-def test_parse_gpu_first_gpu_only():
-    raw = "GPU A, 100, 50\nGPU B, 200, 150\n"
-    assert parse_gpu(raw) == "GPU A: 100 MiB total, 50 MiB free"
 
 
 async def test_no_voice_checks_when_voice_disabled(tmp_path):
@@ -106,7 +100,8 @@ async def test_no_voice_checks_when_voice_disabled(tmp_path):
     rt = build_runtime(cfg)
     try:
         report = await run_doctor(rt, gpu_query=lambda: "X, 1, 1")
-        assert not any(c.name.startswith("voice_") or c.name == "gpu" for c in report.checks)
+        assert not any(c.name.startswith("voice_") for c in report.checks)
+        assert _check(report, "hardware").ok
     finally:
         await rt.aclose()
 

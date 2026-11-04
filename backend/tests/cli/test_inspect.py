@@ -46,3 +46,19 @@ def test_inspect_survives_unroutable_model(monkeypatch, capsys):
     code = main(["inspect"])
     assert code == 0
     assert "capabilities:" in capsys.readouterr().out
+
+
+def test_render_manifest_hardware_line_not_scanned():
+    runtime = build_runtime()
+    try:
+        text = render_manifest(runtime_manifest(runtime))
+    finally:
+        asyncio.run(runtime.aclose())
+    assert "hardware: not scanned" in text
+
+
+def test_inspect_command_scans_and_prints_hardware(capsys):
+    assert main(["inspect"]) == 0
+    out = capsys.readouterr().out
+    line = next(l for l in out.splitlines() if l.strip().startswith("hardware:"))
+    assert "not scanned" not in line and "RAM" in line and "threads" in line

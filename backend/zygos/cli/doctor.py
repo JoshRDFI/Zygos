@@ -6,19 +6,18 @@ primary route. Stability: Experimental.
 
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass
 from typing import Callable
 
 from zygos.config.loader import primary_route_credentialed
 from zygos.errors import PluginError
+from zygos.hardware.describe import describe_hardware
+from zygos.hardware.probe import HardwareProbe, run_nvidia_smi
 from zygos.providers.types import GenerationRequest, Message
 from zygos.runtime.bootstrap import RuntimeAssembly
 from zygos.voice.contract import SttHealth, TtsHealth
 
 GpuQuery = Callable[[], "str | None"]
-_NVIDIA_SMI = ["nvidia-smi", "--query-gpu=name,memory.total,memory.free",
-               "--format=csv,noheader,nounits"]
 
 
 @dataclass(frozen=True)
@@ -36,24 +35,6 @@ class DoctorReport:
     @property
     def ok(self) -> bool:
         return all(check.ok for check in self.checks)
-
-
-def query_gpu() -> str | None:
-    try:
-        done = subprocess.run(_NVIDIA_SMI, capture_output=True, text=True, timeout=5)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return done.stdout if done.returncode == 0 else None
-
-
-def parse_gpu(raw: str | None) -> str | None:
-    if not raw or not raw.strip():
-        return None
-    parts = [p.strip() for p in raw.strip().splitlines()[0].split(",")]
-    if len(parts) != 3 or not parts[1].isdigit() or not parts[2].isdigit():
-        return None
-    name, total, free = parts
-    return f"{name}: {total} MiB total, {free} MiB free"
 
 
 def _device_check(direction: str, health: SttHealth | TtsHealth) -> DoctorCheck:
@@ -81,19 +62,24 @@ def _device_check(direction: str, health: SttHealth | TtsHealth) -> DoctorCheck:
     )
 
 
-def _voice_device_checks(runtime: RuntimeAssembly, gpu_query: GpuQuery) -> list[DoctorCheck]:
+def _voice_device_checks(runtime: RuntimeAssembly) -> list[DoctorCheck]:
     if runtime.voice_service is None:
         return []
     snap = runtime.voice_service.snapshot()
-    checks = [_device_check(d, h) for d, h in (("tts", snap.tts), ("stt", snap.stt)) if h is not None]
-    gpu = parse_gpu(gpu_query())
-    if gpu is not None:
-        checks.append(DoctorCheck("gpu", True, gpu))
-    return checks
+    return [_device_check(d, h) for d, h in (("tts", snap.tts), ("stt", snap.stt)) if h is not None]
+
+
+def _hardware_check(runtime: RuntimeAssembly, gpu_query: GpuQuery) -> DoctorCheck:
+    # A fresh probe fed by the injected gpu_query (default: the real nvidia-smi)
+    # with the runtime's configured models dir; runtime.hardware's cached scan
+    # is left alone. No GPU is a warning, never a failure.
+    snap = HardwareProbe(run_nvidia_smi=gpu_query,
+                         models_dir=runtime.config.models.ollama_models_dir).scan()
+    return DoctorCheck("hardware", True, describe_hardware(snap), warn=not snap.gpus)
 
 
 async def run_doctor(
-    runtime: RuntimeAssembly, *, probe: bool = False, gpu_query: GpuQuery = query_gpu
+    runtime: RuntimeAssembly, *, probe: bool = False, gpu_query: GpuQuery = run_nvidia_smi
 ) -> DoctorReport:
     config = runtime.config
     checks: list[DoctorCheck] = []
@@ -148,7 +134,8 @@ async def run_doctor(
             f"set (assistant: {prefs.assistant_name or '-'}, user: {prefs.user_name or '-'})",
         ))
 
-    checks.extend(_voice_device_checks(runtime, gpu_query))
+    checks.append(_hardware_check(runtime, gpu_query))
+    checks.extend(_voice_device_checks(runtime))
 
     if probe:
         context = runtime.new_context()

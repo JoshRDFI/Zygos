@@ -17,6 +17,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from zygos.cli.doctor import DoctorReport, run_doctor
+from zygos.hardware.describe import describe_hardware
 from zygos.errors import ConfigError
 from zygos.personalization import PERSONALIZATION_FIELDS, Personalization
 from zygos.personalization.onboarding import run_onboarding
@@ -115,6 +116,8 @@ def render_manifest(manifest: Manifest) -> str:
             for b in bindings
         )
         lines.append(f"    {capability.value}: {rendered}")
+    lines.append("  hardware: " + (describe_hardware(manifest.hardware)
+                                   if manifest.hardware is not None else "not scanned"))
     lines.append("  plugins:")
     for plugin in manifest.plugins:
         lines.append(f"    {plugin.kind}/{plugin.name} -> {plugin.module}")
@@ -135,6 +138,7 @@ async def _amain(args: argparse.Namespace) -> int:
     try:
         if args.command == "inspect":
             await check_selected(runtime.thinking_support, lambda: primary_route(runtime.config))
+            runtime.hardware.scan()
             print(render_manifest(runtime_manifest(runtime)))
             return 0
         if args.command == "doctor":
