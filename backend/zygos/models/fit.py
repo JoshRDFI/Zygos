@@ -79,14 +79,17 @@ def estimate(profile: ModelProfile) -> FitEstimate:
 
 
 def fit(profile: ModelProfile, hardware: HardwareSnapshot | None,
-        vram: VramContext = VramContext()) -> Fit:
+        vram: VramContext = VramContext(), *, loaded: bool = False) -> Fit:
+    """``loaded``: the model is in Ollama's ``/api/ps`` right now, so the VRAM it
+    holds (``performance.vram_bytes``) is credited back. A profile keeps its
+    measured values after the model unloads; those earn no credit."""
     needs = estimate(profile)
     vram_free = None if hardware is None else hardware.vram_free_bytes
     ram = None if hardware is None else hardware.ram_available_bytes
     available: int | None = None
     if vram_free is not None:
         available = vram_free + vram.reclaimable_bytes - vram.reserve_bytes
-        if needs.measured:  # a loaded model already holds this VRAM
+        if loaded:  # a loaded model already holds this VRAM
             available += _int(profile, "performance.vram_bytes") or 0
         available = max(0, available)
 

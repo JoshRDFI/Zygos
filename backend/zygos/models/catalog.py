@@ -90,18 +90,6 @@ def _str(profile: ModelProfile, key: str) -> str | None:
     return v if isinstance(v, str) else None
 
 
-def _without_vram_credit(profile: ModelProfile) -> ModelProfile:
-    """A copy for ``fit`` of a model that is not loaded right now.
-
-    ``fit`` credits a measured model with its own ``performance.vram_bytes``
-    (it already holds that VRAM). A model measured earlier but since unloaded
-    holds nothing, so that credit would overstate free VRAM.
-    """
-    values = {k: v for k, v in profile.values.items() if k != "performance.vram_bytes"}
-    user = {k: v for k, v in profile.user.items() if k != "performance.vram_bytes"}
-    return profile.model_copy(update={"values": values, "user": user})
-
-
 class ModelCatalog:
     def __init__(
         self,
@@ -119,6 +107,9 @@ class ModelCatalog:
         self._config = config
         self._voice_snapshot = voice_snapshot
         self._clock = clock
+        # Routes whose profile save was tried and refused (e.g. a filename
+        # collision): not retried, so the warning is logged once.
+        self._save_tried: set[tuple[str, str]] = set()
 
     # -- routes ---------------------------------------------------------------
 
@@ -174,18 +165,26 @@ class ModelCatalog:
     async def _sync_profile(self, ollama: Any, model: OllamaModel) -> ModelProfile:
         store = self._profiles
         profile = store.get("ollama", model.name)
+        if profile is not None and profile.digest != model.digest:
+            other = store.find_by_digest("ollama", model.digest)
+            if len(profile.names) > 1 or other is not None:
+                # The name moved to a different model: it leaves this profile
+                # (which stays with its other names, or as an orphan keeping
+                # its user notes) and joins or starts the profile for its digest.
+                store.remove_name(profile, model.name)
+                profile = None
+            else:
+                show = await self._show(ollama, model.name)
+                if show is not None:
+                    return refresh_from_ollama(profile, model, show, at=self._clock())
+                # Keep the stored values (and digest) so the next view retries show.
+                return profile
         if profile is None:
             shared = store.find_by_digest("ollama", model.digest)
             if shared is not None:
                 return store.add_name(shared, model.name)
-        if profile is None:
             show = await self._show(ollama, model.name)
             return profile_from_ollama(model, show, at=self._clock())
-        if profile.digest != model.digest:
-            show = await self._show(ollama, model.name)
-            if show is not None:
-                return refresh_from_ollama(profile, model, show, at=self._clock())
-            # Keep the stored values (and digest) so the next view retries show.
         return profile
 
     def _reserve_bytes(self) -> int:
@@ -224,7 +223,7 @@ class ModelCatalog:
                 profile = stored  # what is on disk, user section included
             others = sum(r.size_vram for r in running if r not in mine)
             vram = VramContext(reclaimable_bytes=others, reserve_bytes=reserve)
-            fitted = fit(profile if loaded is not None else _without_vram_credit(profile), hardware, vram)
+            fitted = fit(profile, hardware, vram, loaded=loaded is not None)
             await ctx.emit(ModelFit(provider="ollama", model=model.name, level=fitted.level,
                                     needs_bytes=fitted.needs.total_bytes,
                                     free_bytes=fitted.vram_available_bytes,
@@ -249,8 +248,10 @@ class ModelCatalog:
             profile = self._profiles.get(route.provider, route.model)
             if profile is None:
                 profile = ModelProfile(provider=route.provider, model=route.model, names=[route.model])
-                self._profiles.save(profile)
-                profile = self._profiles.get(route.provider, route.model) or profile
+                if key not in self._save_tried and self._profiles.error_for(*key) is None:
+                    self._save_tried.add(key)
+                    self._profiles.save(profile)  # once; a refused save is not retried
+                    profile = self._profiles.get(route.provider, route.model) or profile
             local = self._is_local(route.provider)
             entries.append(self._entry(
                 profile, provider=route.provider, name=route.model,

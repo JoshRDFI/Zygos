@@ -134,9 +134,17 @@ def test_fit_floors_available_at_zero():
 
 def test_fit_loaded_model_adds_back_its_own_vram():
     p = _profile(loaded=6_200_000_000, vram=6_000_000_000)
-    assert fit(p, _hw(free_bytes=1_000_000_000, ram_gb=1)).level == "gpu"
+    assert fit(p, _hw(free_bytes=1_000_000_000, ram_gb=1), loaded=True).level == "gpu"
     p2 = _profile(loaded=6_200_000_000)  # no vram measurement -> nothing added back
-    assert fit(p2, _hw(free_bytes=1_000_000_000, ram_gb=1)).level == "no"
+    assert fit(p2, _hw(free_bytes=1_000_000_000, ram_gb=1), loaded=True).level == "no"
+
+
+def test_fit_unloaded_measured_model_gets_no_vram_credit():
+    p = _profile(loaded=6_200_000_000, vram=6_000_000_000)  # measured earlier, unloaded since
+    f = fit(p, _hw(free_bytes=1_000_000_000, ram_gb=1))
+    assert f.needs.measured is True
+    assert f.vram_available_bytes == 1_000_000_000
+    assert f.level == "no"
 
 
 def test_describe_estimate_and_measured():

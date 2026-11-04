@@ -35,9 +35,33 @@ class ProfileStore:
         return self._root / provider / f"{safe_filename(model)}.json"
 
     def _index_profile(self, path: Path, profile: ModelProfile) -> None:
+        """Index by ``names``. ``model`` names the file only: after a name is
+        split off (``remove_name``) the file keeps its ``model`` but no longer
+        answers to it. A profile with no names falls back to ``model``, without
+        displacing a profile that holds that name."""
         self._profiles[path] = profile
-        for n in {profile.model, *profile.names}:
+        for n in profile.names:
             self._index[(profile.provider, n)] = path
+        if not profile.names:
+            self._index.setdefault((profile.provider, profile.model), path)
+
+    def _known_path(self, profile: ModelProfile) -> Path | None:
+        for n in profile.names:
+            path = self._index.get((profile.provider, n))
+            if path is not None:
+                return path
+        return None
+
+    def _split_path(self, taken: Path) -> Path:
+        """A free sibling of ``taken`` for a name split off the profile in it.
+        ``~`` never appears in a ``safe_filename``, so this cannot collide with a
+        real model's file."""
+        n = 2
+        while True:
+            path = taken.with_name(f"{taken.stem}~{n}.json")
+            if not path.exists() and path not in self._profiles and path not in self._errors:
+                return path
+            n += 1
 
     def _parse(self, path: Path) -> ModelProfile | None:
         """Parse ``path``; on failure record a ProfileError and return None."""
@@ -72,7 +96,7 @@ class ProfileStore:
         return None
 
     def save(self, profile: ModelProfile) -> None:
-        path = self._path_for(profile.provider, profile.model)
+        path = self._known_path(profile) or self._path_for(profile.provider, profile.model)
         if path in self._errors:
             log.warning("refusing to overwrite unparseable profile %s: %s", path, self._errors[path].reason)
             return
@@ -81,12 +105,20 @@ class ProfileStore:
             if on_disk is None:
                 log.warning("refusing to overwrite unparseable profile %s: %s", path, self._errors[path].reason)
                 return
-            if on_disk.model != profile.model and not set(on_disk.names) & set(profile.names):
-                log.warning(
-                    "refusing to save %r: %s belongs to a different model (%r)", profile.model, path, on_disk.model
-                )
-                return
-            profile = profile.model_copy(update={"user": on_disk.user})
+            if not set(on_disk.names) & set(profile.names):
+                if on_disk.model != profile.model:
+                    log.warning(
+                        "refusing to save %r: %s belongs to a different model (%r)",
+                        profile.model, path, on_disk.model,
+                    )
+                    return
+                # This name was split off the profile in that file: give it its own.
+                path = self._split_path(path)
+            else:
+                profile = profile.model_copy(update={"user": on_disk.user})
+        self._write(path, profile)
+
+    def _write(self, path: Path, profile: ModelProfile) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(f".{path.name}.tmp")
         try:
@@ -103,3 +135,22 @@ class ProfileStore:
             profile = profile.model_copy(update={"names": [*profile.names, name]})
         self.save(profile)
         return self.get(profile.provider, name) or profile
+
+    def remove_name(self, profile: ModelProfile, name: str) -> ModelProfile:
+        """Detach ``name`` (its Ollama digest moved on). The profile keeps its
+        file, even when ``name`` was its ``model``; ``name`` stops resolving to it.
+        Returns the profile as saved (unchanged when the file is unparseable)."""
+        key = (profile.provider, name)
+        path = self._index.get(key)
+        if path is None or path in self._errors:
+            return profile
+        on_disk = self._parse(path)
+        if on_disk is None:
+            log.warning("refusing to overwrite unparseable profile %s: %s", path, self._errors[path].reason)
+            return profile
+        current = self._profiles.get(path, profile)
+        updated = current.model_copy(update={"names": [n for n in current.names if n != name],
+                                             "user": on_disk.user})
+        del self._index[key]
+        self._write(path, updated)
+        return updated

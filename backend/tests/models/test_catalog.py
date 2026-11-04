@@ -337,3 +337,124 @@ async def test_view_matches_untagged_route_to_latest(tmp_path):
     catalog, _ = _catalog(tmp_path, ollama, config=config)
     view = await catalog.view(_ctx())
     assert _by_name(view)["qwen3:latest"].primary is True
+
+
+def _files(tmp_path):
+    return sorted(p.name for p in (tmp_path / "profiles" / "ollama").glob("*.json"))
+
+
+def _disk(tmp_path):
+    out = {}
+    for p in (tmp_path / "profiles" / "ollama").glob("*.json"):
+        data = json.loads(p.read_text())
+        out[p.name] = (sorted(data["names"]), data["digest"])
+    return out
+
+
+@pytest.mark.asyncio
+async def test_view_splits_aliases_when_digests_diverge(tmp_path):
+    ollama = FakeOllama(tags=[_tag("qwen3:8b", "d1"), _tag("qwen3:latest", "d1")])
+    catalog, store = _catalog(tmp_path, ollama)
+    await catalog.view(_ctx())
+    ollama.tags = (_tag("qwen3:8b", "d1"), _tag("qwen3:latest", "d2", size=9 * GiB))
+    ollama.show_calls.clear()
+    await catalog.view(_ctx())
+    assert ollama.show_calls == ["qwen3:latest"]
+    assert _disk(tmp_path) == {"qwen3_8b.json": (["qwen3:8b"], "d1"),
+                               "qwen3_latest.json": (["qwen3:latest"], "d2")}
+    ollama.show_calls.clear()
+    view = await catalog.view(_ctx())
+    assert ollama.show_calls == []
+    models = _by_name(view)
+    assert models["qwen3:8b"].download_size_bytes == 5 * GiB
+    assert models["qwen3:latest"].download_size_bytes == 9 * GiB
+    assert store.get("ollama", "qwen3:8b") is not store.get("ollama", "qwen3:latest")
+
+
+@pytest.mark.asyncio
+async def test_view_splits_when_the_file_owner_name_diverges(tmp_path):
+    ollama = FakeOllama(tags=[_tag("qwen3:8b", "d1"), _tag("qwen3:latest", "d1")])
+    catalog, store = _catalog(tmp_path, ollama)
+    await catalog.view(_ctx())
+    ollama.tags = (_tag("qwen3:8b", "d2", size=9 * GiB), _tag("qwen3:latest", "d1"))
+    await catalog.view(_ctx())
+    ollama.show_calls.clear()
+    view = await catalog.view(_ctx())
+    assert ollama.show_calls == []
+    disk = _disk(tmp_path)
+    assert disk["qwen3_8b.json"] == (["qwen3:latest"], "d1")   # the old file keeps its model
+    assert sorted(disk.values()) == [(["qwen3:8b"], "d2"), (["qwen3:latest"], "d1")]
+    models = _by_name(view)
+    assert models["qwen3:8b"].download_size_bytes == 9 * GiB
+    assert models["qwen3:latest"].download_size_bytes == 5 * GiB
+    reloaded = ProfileStore(tmp_path / "profiles")
+    reloaded.load_all()
+    assert reloaded.get("ollama", "qwen3:8b").digest == "d2"
+    assert reloaded.get("ollama", "qwen3:latest").digest == "d1"
+
+
+@pytest.mark.asyncio
+async def test_view_changed_digest_joins_existing_profile_instead_of_duplicating(tmp_path):
+    ollama = FakeOllama(tags=[_tag("qwen3:8b", "d1"), _tag("qwen3:latest", "d2")])
+    catalog, store = _catalog(tmp_path, ollama)
+    await catalog.view(_ctx())
+    ollama.tags = (_tag("qwen3:8b", "d2"), _tag("qwen3:latest", "d2"))
+    ollama.show_calls.clear()
+    await catalog.view(_ctx())
+    assert ollama.show_calls == []
+    holders = [names for names, digest in _disk(tmp_path).values() if digest == "d2"]
+    assert holders == [["qwen3:8b", "qwen3:latest"]]
+    assert store.get("ollama", "qwen3:8b") is store.get("ollama", "qwen3:latest")
+    ollama.show_calls.clear()
+    await catalog.view(_ctx())
+    assert ollama.show_calls == []
+
+
+@pytest.mark.asyncio
+async def test_view_does_not_resave_a_refused_cloud_profile(tmp_path, caplog):
+    import logging
+
+    bad = tmp_path / "profiles" / "anthropic" / "claude-x.json"
+    bad.parent.mkdir(parents=True)
+    bad.write_bytes(b"{ nope")
+    config = _config(fallbacks=[{"provider": "anthropic", "model": "claude-x"}])
+    catalog, _ = _catalog(tmp_path, FakeOllama(), config=config, extra={"anthropic": FakeCloud()})
+    with caplog.at_level(logging.WARNING, logger="zygos.models"):
+        view = await catalog.view(_ctx())
+        await catalog.view(_ctx())
+    assert not [r for r in caplog.records if r.name == "zygos.models"]
+    assert _by_name(view)["claude-x"].profile_error
+    assert bad.read_bytes() == b"{ nope"
+
+
+@pytest.mark.asyncio
+async def test_view_keeps_user_vram_override_out_of_unloaded_credit(tmp_path):
+    """fit(loaded=False) gives no credit; a user value is not stripped from the profile."""
+    ollama = FakeOllama(tags=[_tag("qwen3:8b", "d1")])
+    catalog, store = _catalog(tmp_path, ollama, probe=_probe(2_000))
+    await catalog.view(_ctx())
+    path = tmp_path / "profiles" / "ollama" / "qwen3_8b.json"
+    data = json.loads(path.read_text())
+    data["user"] = {"performance.vram_bytes": 123}
+    path.write_text(json.dumps(data))
+    store.load_all()
+    view = await catalog.view(_ctx())
+    qwen = _by_name(view)["qwen3:8b"]
+    assert qwen.fields["performance.vram_bytes"].source == "user"
+    assert qwen.fit.vram_available_bytes == 2_000 * 1024**2
+
+
+@pytest.mark.asyncio
+async def test_view_warns_once_for_a_colliding_cloud_profile(tmp_path, caplog):
+    import logging
+
+    other = tmp_path / "profiles" / "anthropic" / "claude_x.json"
+    other.parent.mkdir(parents=True)
+    other.write_text(json.dumps({"provider": "anthropic", "model": "claude/x", "names": ["claude/x"]}))
+    config = _config(fallbacks=[{"provider": "anthropic", "model": "claude:x"}])
+    catalog, _ = _catalog(tmp_path, FakeOllama(), config=config, extra={"anthropic": FakeCloud()})
+    with caplog.at_level(logging.WARNING, logger="zygos.models"):
+        for _ in range(3):
+            view = await catalog.view(_ctx())
+    assert len([r for r in caplog.records if r.name == "zygos.models"]) == 1
+    assert "claude:x" in _by_name(view)

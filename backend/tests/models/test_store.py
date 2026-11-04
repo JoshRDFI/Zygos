@@ -101,3 +101,32 @@ def test_failed_replace_leaves_no_temp_file(tmp_path, monkeypatch):
     with pytest.raises(OSError):
         ProfileStore(tmp_path).save(_p())
     assert list((tmp_path / "ollama").iterdir()) == []
+
+
+def test_remove_name_detaches_alias_and_reindexes(tmp_path):
+    store = ProfileStore(tmp_path)
+    store.save(_p("qwen3:8b", digest="d1"))
+    shared = store.add_name(store.get("ollama", "qwen3:8b"), "qwen3:latest")
+    left = store.remove_name(shared, "qwen3:latest")
+    assert left.names == ["qwen3:8b"]
+    assert store.get("ollama", "qwen3:latest") is None
+    assert store.get("ollama", "qwen3:8b").names == ["qwen3:8b"]
+    reloaded = ProfileStore(tmp_path)
+    reloaded.load_all()
+    assert reloaded.get("ollama", "qwen3:latest") is None
+
+
+def test_remove_name_of_file_owner_keeps_the_file(tmp_path):
+    store = ProfileStore(tmp_path)
+    store.save(_p("qwen3:8b", digest="d1"))
+    shared = store.add_name(store.get("ollama", "qwen3:8b"), "qwen3:latest")
+    left = store.remove_name(shared, "qwen3:8b")
+    assert left.model == "qwen3:8b"          # file identity unchanged
+    assert left.names == ["qwen3:latest"]
+    assert sorted(p.name for p in (tmp_path / "ollama").glob("*.json")) == ["qwen3_8b.json"]
+    assert store.get("ollama", "qwen3:latest").names == ["qwen3:latest"]
+    assert store.get("ollama", "qwen3:8b") is None
+    reloaded = ProfileStore(tmp_path)
+    reloaded.load_all()
+    assert reloaded.get("ollama", "qwen3:8b") is None
+    assert reloaded.get("ollama", "qwen3:latest") is not None
