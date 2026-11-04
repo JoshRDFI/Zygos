@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useThinkStore } from "../stores/thinkStore";
+import ThinkControls from "../components/ThinkControls";
 import { useChatStore } from "../stores/chatStore";
 import { useSessionStore, getSessionClient } from "../session/sessionStore";
 import VoiceControls from "../components/VoiceControls";
@@ -8,7 +11,13 @@ export default function ChatSurface() {
   const addUser = useChatStore((s) => s.addUser);
   const status = useSessionStore((s) => s.status);
   const start = useSessionStore((s) => s.start);
+  const addReask = useChatStore((s) => s.addReask);
+  const supported = useThinkStore((s) => s.supported);
+  const reason = useThinkStore((s) => s.reason);
+  const selectTurn = useThinkStore((s) => s.select);
+  const navigate = useNavigate();
   const [draft, setDraft] = useState("");
+  const anyStreaming = messages.some((m) => m.streaming);
 
   const offline = status === "disconnected" || status === "error";
 
@@ -23,6 +32,21 @@ export default function ChatSurface() {
     setDraft("");
   };
 
+  const rethink = (question: string, turnId: string) => {
+    const client = getSessionClient();
+    if (!client) return;
+    addReask(question);
+    client.send({
+      channel: "chat", type: "user_message",
+      payload: { text: question, think: true, rethink_of: turnId },
+    });
+  };
+
+  const openThinking = (turnId: string) => {
+    selectTurn(turnId);
+    navigate("/inspect");
+  };
+
   return (
     <div className="h-full flex flex-col">
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -30,6 +54,32 @@ export default function ChatSurface() {
           <div key={i} className={m.role === "user" ? "text-text" : "text-text-muted"}>
             <span className="font-mono text-xs mr-2 uppercase">{m.role}</span>
             <span>{m.text}{m.streaming ? " ▍" : ""}</span>
+            {m.role === "assistant" && m.rethinkOf != null && (
+              <span className="ml-2 text-xs text-text-muted">with thinking</span>
+            )}
+            {m.role === "assistant" && m.streaming && m.think === true && (
+              <span className="ml-2 text-xs text-text-muted">Thinking…</span>
+            )}
+            {m.role === "assistant" && !m.streaming && m.thinkingMs != null && m.turnId && (
+              <button
+                type="button"
+                onClick={() => openThinking(m.turnId as string)}
+                className="ml-2 text-xs underline text-accent"
+              >
+                {`thought for ${(m.thinkingMs / 1000).toFixed(1)} s`}
+              </button>
+            )}
+            {m.role === "assistant" && !m.streaming && m.think !== true && m.turnId && m.question && (
+              <button
+                type="button"
+                disabled={anyStreaming || !supported}
+                title={!supported ? reason ?? undefined : undefined}
+                onClick={() => rethink(m.question as string, m.turnId as string)}
+                className="ml-2 px-2 py-1 rounded border border-border text-xs text-text-muted disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Think it through
+              </button>
+            )}
           </div>
         ))}
       </div>
@@ -49,6 +99,7 @@ export default function ChatSurface() {
       )}
       <form onSubmit={submit} className="border-t border-border p-3 flex items-center gap-2">
         <VoiceControls />
+        <ThinkControls />
         <input
           className="flex-1 bg-surface-2 border border-border rounded px-3 py-2 text-text"
           placeholder="Message Zygos…  (drag a file in for one-off context)"
