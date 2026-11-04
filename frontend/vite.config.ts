@@ -8,6 +8,7 @@ const BACKEND = process.env.ZYGOS_BACKEND ?? "http://127.0.0.1:8000";
 const proxy = {
   "/sessions": { target: BACKEND, changeOrigin: true },
   "/runtime": { target: BACKEND, changeOrigin: true },
+  "/preferences": { target: BACKEND, changeOrigin: true },
   "/ws": { target: BACKEND, changeOrigin: true, ws: true },
 };
 

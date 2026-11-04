@@ -27,6 +27,7 @@ from zygos.memory.retrieve import (
 from zygos.memory.service import DefaultMemoryService, MemoryService
 from zygos.memory.store import MemoryStore
 from zygos.memory.vector_search import VectorSearch
+from zygos.personalization import PreferencesStore, SqlitePreferencesStore
 from zygos.plugins.resolver import PluginRegistry
 from zygos.providers.base import DEFAULT_BASE_URLS, Provider, ProviderSettings
 from zygos.providers.embedding import Embedder
@@ -59,6 +60,7 @@ class RuntimeAssembly:
     reasoning_factory: Callable[[], ReasoningService]
     memory_service: MemoryService | None
     voice_service: "VoiceService | None"
+    preferences: PreferencesStore
     http_client: httpx.AsyncClient
     event_bus: EventBus
     capability_registry: CapabilityRegistry
@@ -289,6 +291,7 @@ def build_runtime(
         reasoning_factory=reasoning_factory,
         memory_service=memory_service,
         voice_service=voice_service,
+        preferences=SqlitePreferencesStore(Path(config.personalization.db_path)),
         http_client=client,
         event_bus=bus,
         capability_registry=registry,

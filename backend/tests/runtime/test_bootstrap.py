@@ -245,3 +245,20 @@ def test_native_thinking_configurable(tmp_path: Path):
     file = tmp_path / "config.yaml"
     file.write_text("providers:\n  think: true\n", encoding="utf-8")
     assert _provider_settings(load_config(file), "ollama").think is True
+
+
+def test_runtime_exposes_preferences_store(tmp_path: Path):
+    db = tmp_path / "prefs.db"
+    file = tmp_path / "config.yaml"
+    file.write_text(
+        "providers:\n  primary:\n    provider: fake\n    model: demo\n"
+        "tools:\n  enabled: []\n"
+        f"personalization:\n  db_path: {db}\n",
+        encoding="utf-8",
+    )
+    assembly = build_runtime(file)
+    try:
+        assert assembly.preferences.get().is_empty
+        assert not db.exists()
+    finally:
+        asyncio.run(assembly.aclose())

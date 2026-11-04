@@ -19,6 +19,7 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from zygos.api.permission import WebSocketPromptResolver
+from zygos.api.routes_preferences import router as preferences_router
 from zygos.api.routes_runtime import router as runtime_router
 from zygos.api.routes_sessions import router as sessions_router
 from zygos.api.session import SessionRegistry
@@ -104,11 +105,13 @@ def create_app(
         voice_gate=voice_gate,
         duck_gain=runtime.config.voice.tts.duck_gain,
         duck_timeout_s=runtime.config.voice.duck_timeout_s,
+        preferences=runtime.preferences,
     )
     install_trace_bridge(runtime.event_bus, registry)
     app.state.session_count = session_count if session_count is not None else registry.count
 
     app.include_router(runtime_router)
+    app.include_router(preferences_router)
     app.include_router(sessions_router)
     app.include_router(ws_router)
     return app
