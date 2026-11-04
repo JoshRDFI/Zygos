@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { getModels } from "../client/rest";
-import type { HardwareSnapshot, ModelEntry, ModelsView } from "../client/types";
+import type { HardwareSnapshot, ModelEntry, ModelsView, Sourced } from "../client/types";
 
 const GB = 1024 ** 3;
 const gb = (n: number) => `${(n / GB).toFixed(1)} GB`;
@@ -28,6 +28,25 @@ function Hardware({ hw }: { hw: HardwareSnapshot | null }) {
   );
 }
 
+function fieldLine(key: string, s: Sourced): string {
+  const value = typeof s.value === "string" ? s.value : JSON.stringify(s.value);
+  const source = s.source === "user" ? "your edit" : s.source;
+  return [key, value, source, ...(s.at ? [s.at.slice(0, 10)] : [])].join(" · ");
+}
+
+function Profile({ fields }: { fields: ModelEntry["fields"] }) {
+  const keys = Object.keys(fields).sort();
+  if (keys.length === 0) return null;
+  return (
+    <details className="text-text-muted">
+      <summary className="cursor-pointer">profile</summary>
+      <ul className="pl-4">
+        {keys.map((k) => <li key={k}>{fieldLine(k, fields[k])}</li>)}
+      </ul>
+    </details>
+  );
+}
+
 function Row({ m }: { m: ModelEntry }) {
   const caps = Object.entries(m.capabilities).filter(([, v]) => v).map(([k]) => k);
   const chip = "border border-border rounded px-1 text-xs text-text-muted";
@@ -49,7 +68,8 @@ function Row({ m }: { m: ModelEntry }) {
         {m.fit && <span className="border border-border rounded px-1 text-text">{m.fit.level}</span>}
         {m.fit_text && <span>{m.fit_text}</span>}
       </div>
-      {m.profile_error && <div className="text-text-muted">profile file can't be read: {m.profile_error}</div>}
+      {m.profile_error && <div className="text-text-muted">{m.profile_error}</div>}
+      <Profile fields={m.fields} />
     </li>
   );
 }

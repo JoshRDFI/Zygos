@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import ModelsSurface from "./ModelsSurface";
 import * as rest from "../client/rest";
@@ -29,11 +29,17 @@ function view(over: Partial<ModelsView> = {}): ModelsView {
       entry({ name: "qwen3:8b", family: "qwen3", download_size_bytes: 5.2 * GB, quantization: "Q4_K_M",
         specialty: ["reasoning"], capabilities: { tools: true, vision: false }, loaded: true, vram_bytes: 6 * GB,
         primary: true, fit: { level: "gpu", needs: est, vram_available_bytes: 12 * GB, ram_available_bytes: null, reason: "r" },
-        fit_text: "fits on the GPU" }),
+        fit_text: "fits on the GPU",
+        fields: {
+          "identity.family": { value: "qwen3", source: "ollama", at: "2026-11-04T12:00:00Z" },
+          "identity.num_ctx": { value: 8192, source: "modelfile", at: "2026-11-03T09:30:00Z" },
+          "user.notes": { value: "my daily driver", source: "user", at: null },
+        } }),
       entry({ name: "qwen3:14b", family: "qwen3", fallback: true,
         fit: { level: "partial", needs: est, vram_available_bytes: 12 * GB, ram_available_bytes: null, reason: "r" },
         fit_text: "needs partial offload" }),
-      entry({ name: "broken:1b", profile_error: "Expecting value" }),
+      entry({ name: "broken:1b", profile_error: "profile file can't be read: Expecting value" }),
+      entry({ name: "ro:1b", profile_error: "profile can't be saved: [Errno 13] Permission denied" }),
       entry({ provider: "vllm", name: "meta-llama", fit_text: "fit not checked for vllm" }),
       entry({ provider: "anthropic", name: "claude-sonnet-5", location: "cloud", fit_text: "fit doesn't apply (cloud)" }),
     ],
@@ -87,9 +93,24 @@ test("cloud route says fit does not apply", async () => {
   expect(screen.getByRole("heading", { name: "cloud" })).toBeInTheDocument();
 });
 
-test("shows a profile_error", async () => {
+test("shows a profile_error as the backend words it", async () => {
   render(<ModelsSurface />);
   await waitFor(() => expect(screen.getByText("profile file can't be read: Expecting value")).toBeInTheDocument());
+  expect(screen.getByText("profile can't be saved: [Errno 13] Permission denied")).toBeInTheDocument();
+});
+
+test("lists each profile field with its source and date, collapsed by default", async () => {
+  render(<ModelsSurface />);
+  await waitFor(() => expect(screen.getByText("fits on the GPU")).toBeInTheDocument());
+  const summary = screen.getByText("profile");
+  const details = summary.closest("details")!;
+  expect(details).not.toHaveAttribute("open");
+  expect(screen.getAllByText("profile")).toHaveLength(1); // only rows with fields get one
+  fireEvent.click(summary);
+  expect(details).toHaveAttribute("open");
+  expect(within(details).getByText("identity.family · qwen3 · ollama · 2026-11-04")).toBeInTheDocument();
+  expect(within(details).getByText("identity.num_ctx · 8192 · modelfile · 2026-11-03")).toBeInTheDocument();
+  expect(within(details).getByText("user.notes · my daily driver · your edit")).toBeInTheDocument();
 });
 
 test("says Ollama is unreachable with the error instead of spinning", async () => {

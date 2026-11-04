@@ -50,6 +50,15 @@ export interface Fit {
   reason: string;
 }
 
+export type ProfileSource = "user" | "eval" | "measured" | "modelfile" | "ollama" | "name";
+
+/** One profile fact and where it came from (RFC-0013 §2). `at` is null for hand-edited user values. */
+export interface Sourced {
+  value: unknown;
+  source: ProfileSource;
+  at: string | null;
+}
+
 export interface ModelEntry {
   provider: string;
   name: string;
@@ -67,7 +76,7 @@ export interface ModelEntry {
   primary: boolean;
   fallback: boolean;
   profile_error: string | null;
-  fields: Record<string, unknown>;
+  fields: Record<string, Sourced>;
 }
 
 export interface ModelsView {
