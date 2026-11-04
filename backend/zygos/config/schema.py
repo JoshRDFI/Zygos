@@ -228,6 +228,14 @@ class PersonalizationConfig(BaseModel):
     db_path: str = ".zygos/preferences.db"
 
 
+class ModelsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profiles_dir: str = ".zygos/models/profiles"
+    # Overrides the hardware probe's search for the Ollama models directory.
+    ollama_models_dir: str | None = None
+
+
 class ZygosConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -239,6 +247,7 @@ class ZygosConfig(BaseModel):
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     personalization: PersonalizationConfig = Field(default_factory=PersonalizationConfig)
+    models: ModelsConfig = Field(default_factory=ModelsConfig)
     # plugin kind -> plugin name -> "module.path:ClassName" (RFC-0001 §3)
     plugins: dict[str, dict[str, str]] = Field(default_factory=_default_plugins)
     # Capabilities a deployment requires; `zygos doctor` fails if any is unbound

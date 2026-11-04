@@ -230,3 +230,11 @@ def test_tts_config_device_and_worker_python():
     assert TtsConfig(device="cuda", worker_python="/x/python").device == "cuda"
     with pytest.raises(pydantic.ValidationError):
         TtsConfig(device="gpu")
+
+
+def test_models_config_defaults():
+    from zygos.config.schema import ZygosConfig
+
+    m = ZygosConfig().models
+    assert m.profiles_dir == ".zygos/models/profiles"
+    assert m.ollama_models_dir is None

@@ -44,3 +44,8 @@ voice:
     engine: fake              # kokoro needs the `voice` extra
     voice: af_heart
     device: cpu               # cuda after `zygos voice setup-gpu`
+
+# Model picker (RFC-0013). Defaults shown; usually no need to set these.
+# models:
+#   profiles_dir: .zygos/models/profiles   # one hand-editable JSON per model
+#   ollama_models_dir: null                # override the hardware probe's search
