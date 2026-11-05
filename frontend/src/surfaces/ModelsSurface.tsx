@@ -226,13 +226,15 @@ function DefaultLine({ d, busy, onReset }: { d: DefaultView; busy: boolean; onRe
   );
 }
 
-function ConfirmDialog({ text, onYes, onNo }: { text: string; onYes: () => void; onNo: () => void }) {
+function ConfirmDialog({ text, onYes, onNo, busy }: { text: string; onYes: () => void; onNo: () => void; busy: boolean }) {
+  // Inline, not modal: the rest of the page stays usable.
   return (
-    <div role="dialog" aria-modal="true" aria-label="Confirm default model"
+    <div role="dialog" aria-label="Confirm default model"
       className="border border-accent rounded p-3 space-y-2 text-sm bg-surface-2">
       <p>{text}</p>
       <div className="flex gap-2">
-        <button type="button" onClick={onYes} className="px-2 py-1 rounded bg-accent text-accent-fg">Use anyway</button>
+        <button type="button" onClick={onYes} disabled={busy}
+          className="px-2 py-1 rounded bg-accent text-accent-fg disabled:opacity-50">Use anyway</button>
         <button type="button" onClick={onNo} className="px-2 py-1 rounded border border-border">Cancel</button>
       </div>
     </div>
@@ -300,7 +302,7 @@ export default function ModelsSurface() {
       ) : (
         <>
           {v.default && <DefaultLine d={v.default} busy={busy} onReset={() => void apply(resetDefaultModel)} />}
-          {confirm && <ConfirmDialog text={confirm.text} onYes={onUseAnyway} onNo={() => setConfirm(null)} />}
+          {confirm && <ConfirmDialog text={confirm.text} onYes={onUseAnyway} onNo={() => setConfirm(null)} busy={busy} />}
           {defaultError && <div role="alert" className="border border-border rounded p-3 text-sm">{defaultError}</div>}
           <Hardware hw={v.hardware} />
           <Backends b={b} error={bError} />

@@ -145,3 +145,23 @@ test("Ollama rows that are not installed get no Set as default button", async ()
   await screen.findByText("Default: ollama/gemma4:e4b (saved)");
   expect(within(row("gone:1b")).queryByRole("button", { name: "Set as default" })).toBeNull();
 });
+
+test("Use anyway is disabled while the confirmed PUT is in flight; the inline confirm is not modal", async () => {
+  vi.spyOn(rest, "getModels").mockResolvedValue(ignoredView);
+  let finish: (v: typeof savedView) => void = () => {};
+  const put = vi.spyOn(rest, "setDefaultModel")
+    .mockRejectedValueOnce(new rest.DefaultModelError(409, put409.detail, put409.needs_confirm))
+    .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  render(<ModelsSurface />);
+  await screen.findByText("Default: ollama/qwen3:8b (from config)");
+  fireEvent.click(within(row("huge:405b")).getByRole("button", { name: "Set as default" }));
+  const dlg = await screen.findByRole("dialog");
+  expect(dlg).not.toHaveAttribute("aria-modal");
+  const useAnyway = within(dlg).getByRole("button", { name: "Use anyway" });
+  fireEvent.click(useAnyway);
+  await waitFor(() => expect(useAnyway).toBeDisabled());
+  fireEvent.click(useAnyway);
+  expect(put).toHaveBeenCalledTimes(2);
+  finish(savedView);
+  await screen.findByText("Default: ollama/gemma4:e4b (saved)");
+});
