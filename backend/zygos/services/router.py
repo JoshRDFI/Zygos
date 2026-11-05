@@ -16,7 +16,7 @@ from zygos.errors import ProviderError, ProviderUnavailable
 from zygos.providers.base import Provider
 from zygos.providers.types import GenerationChunk, GenerationRequest, GenerationResult
 from zygos.runtime.context import ExecutionContext
-from zygos.runtime.events import CircuitClosed, CircuitOpened, RouteClaimed
+from zygos.runtime.events import CircuitClosed, CircuitOpened, RouteClaimed, RouteSkipped
 
 
 @dataclass(frozen=True)
@@ -151,6 +151,7 @@ class ProviderRouter:
         max_requests_per_minute: int | None = None,
         now: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        provider_factory: Callable[[str], Provider | None] | None = None,
     ) -> None:
         missing = [r.provider for r in routes if r.provider not in providers]
         if missing:
@@ -163,6 +164,47 @@ class ProviderRouter:
         self._sleep = sleep
         self._breakers = {r: _CircuitBreaker(failure_threshold, cooldown_s, now) for r in self._routes}
         self._limiters = {name: _RateLimiter(max_requests_per_minute, now) for name in self._providers}
+        # Ad-hoc `first` routes (RFC-0013 §5): created synchronously on first use,
+        # kept for the router's lifetime, listed in snapshot() after the configured ones.
+        self._failure_threshold = failure_threshold
+        self._cooldown_s = cooldown_s
+        self._max_requests_per_minute = max_requests_per_minute
+        self._now = now
+        self._provider_factory = provider_factory
+        self._factory_results: dict[str, Provider | None] = {}
+        self._adhoc_routes: list[RouteChoice] = []
+
+    def _provider_for(self, name: str) -> Provider | None:
+        """Configured provider, else the factory's (called at most once per name,
+        None cached too). Synchronous — no await between check and insert."""
+        if name in self._providers:
+            return self._providers[name]
+        if name not in self._factory_results:
+            made = self._provider_factory(name) if self._provider_factory is not None else None
+            self._factory_results[name] = made
+            if made is not None:
+                self._limiters[name] = _RateLimiter(self._max_requests_per_minute, self._now)
+        return self._factory_results[name]
+
+    async def _order(self, ctx: ExecutionContext, first: RouteChoice | None) -> list[RouteChoice]:
+        """[first] + configured routes without it. A `first` with no provider is
+        reported as skipped and dropped. first=None -> configured order unchanged."""
+        if first is None:
+            return list(self._routes)
+        rest = [r for r in self._routes if r != first]
+        if self._provider_for(first.provider) is None:
+            await ctx.emit(
+                RouteSkipped(provider=first.provider, model=first.model, reason="no_provider"),
+                source="router",
+            )
+            return rest
+        if first not in self._breakers:
+            self._breakers[first] = _CircuitBreaker(self._failure_threshold, self._cooldown_s, self._now)
+            self._adhoc_routes.append(first)
+        return [first, *rest]
+
+    def _refusal(self, route: RouteChoice) -> str:
+        return "rate_limited" if not self._limiters[route.provider].allows() else "circuit_open"
 
     def _eligible(self) -> list[RouteChoice]:
         return [
@@ -189,10 +231,18 @@ class ProviderRouter:
         limiter.record()
         return RouteClaim(route=route, probe=probe)
 
-    async def generate(self, ctx: ExecutionContext, request: GenerationRequest) -> GenerationResult:
+    async def generate(
+        self,
+        ctx: ExecutionContext,
+        request: GenerationRequest,
+        *,
+        first: RouteChoice | None = None,
+        on_route: Callable[[RouteChoice], None] | None = None,
+    ) -> GenerationResult:
         last_error: ProviderError | None = None
-        for route in self._routes:
-            provider = self._providers[route.provider]
+        for route in await self._order(ctx, first):
+            provider = self._provider_for(route.provider)
+            assert provider is not None
             routed = request.model_copy(update={"model": route.model})
             breaker = self._breakers[route]
             for attempt in range(1, self._max_attempts + 1):
@@ -200,6 +250,12 @@ class ProviderRouter:
                     raise ProviderUnavailable("cancelled", provider="router")
                 claim = self._try_claim(route)
                 if claim is None:
+                    if route == first and attempt == 1:
+                        await ctx.emit(
+                            RouteSkipped(provider=route.provider, model=route.model,
+                                         reason=self._refusal(route)),
+                            source="router",
+                        )
                     break  # route not admitting (rate-limited or open); next route
                 settled = False
                 try:
@@ -229,22 +285,38 @@ class ProviderRouter:
                             CircuitClosed(provider=route.provider, model=route.model),
                             source="router",
                         )
+                    if on_route is not None:
+                        on_route(route)
                     return result
                 finally:
                     if claim.probe and not settled:
                         breaker.clear_probe()
         raise last_error or ProviderUnavailable("No eligible provider routes", provider="router")
 
-    async def stream(self, ctx: ExecutionContext, request: GenerationRequest) -> AsyncIterator[GenerationChunk]:
+    async def stream(
+        self,
+        ctx: ExecutionContext,
+        request: GenerationRequest,
+        *,
+        first: RouteChoice | None = None,
+        on_route: Callable[[RouteChoice], None] | None = None,
+    ) -> AsyncIterator[GenerationChunk]:
         last_error: ProviderError | None = None
-        for route in self._routes:
-            provider = self._providers[route.provider]
+        for route in await self._order(ctx, first):
+            provider = self._provider_for(route.provider)
+            assert provider is not None
             routed = request.model_copy(update={"model": route.model})
             breaker = self._breakers[route]
             if ctx.cancelled:
                 raise ProviderUnavailable("cancelled", provider="router")
             claim = self._try_claim(route)
             if claim is None:
+                if route == first:
+                    await ctx.emit(
+                        RouteSkipped(provider=route.provider, model=route.model,
+                                     reason=self._refusal(route)),
+                        source="router",
+                    )
                 continue
             started = False
             settled = False
@@ -254,9 +326,14 @@ class ProviderRouter:
                     source="router",
                 )
                 async for chunk in provider.stream(routed):
-                    started = True
+                    if not started:
+                        started = True
+                        if on_route is not None:
+                            on_route(route)
                     yield chunk
                 settled = True
+                if not started and on_route is not None:
+                    on_route(route)  # zero-chunk stream completed: it still answered
                 if breaker.record_success(probe=claim.probe):
                     await ctx.emit(
                         CircuitClosed(provider=route.provider, model=route.model),
@@ -291,6 +368,6 @@ class ProviderRouter:
                     requests_in_window=self._limiters[route.provider].used(),
                     last_error_code=self._breakers[route].last_error_code,
                 )
-                for route in self._routes
+                for route in (*self._routes, *self._adhoc_routes)
             )
         )

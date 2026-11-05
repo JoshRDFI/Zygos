@@ -28,6 +28,15 @@ class RouteClaimed(EventPayload):
     probe: bool
 
 
+class RouteSkipped(EventPayload):
+    """A chosen `first` route could not be tried this call (RFC-0013 §5)."""
+
+    type: Literal["route.skipped"] = "route.skipped"
+    provider: str
+    model: str
+    reason: Literal["no_provider", "circuit_open", "rate_limited"]
+
+
 class CircuitOpened(EventPayload):
     type: Literal["circuit.opened"] = "circuit.opened"
     provider: str
@@ -109,6 +118,7 @@ class ModelFit(EventPayload):
 AnyPayload = Annotated[
     Union[
         RouteClaimed,
+        RouteSkipped,
         CircuitOpened,
         CircuitClosed,
         RequestStarted,

@@ -478,3 +478,215 @@ async def test_no_rate_limit_by_default():
     for _ in range(100):
         await router.generate(ctx, _request())
     assert provider.calls == 100
+
+
+# --- RFC-0013 §5: route `first`, lazy providers, who answered -----------------
+
+
+class _EmptyStreamProvider:
+    name = "empty"
+
+    async def generate(self, request):  # pragma: no cover - unused
+        raise AssertionError("not used")
+
+    async def stream(self, request):
+        return
+        yield  # make this an async generator
+
+
+def _bus_with_recorder():
+    events, sub = _recorder()
+    bus = InProcessEventBus()
+    bus.subscribe(sub)
+    return events, bus
+
+
+def _two_routes():
+    return [RouteChoice("p1", "m1"), RouteChoice("p2", "m2")]
+
+
+async def test_first_configured_fallback_answers_first():
+    providers = {"p1": FakeProvider(text="primary"), "p2": FakeProvider(text="chosen")}
+    router = _router(_two_routes(), providers)
+    answered: list[RouteChoice] = []
+    result = await router.generate(
+        _ctx(), _request(), first=RouteChoice("p2", "m2"), on_route=answered.append
+    )
+    assert result.text == "chosen"
+    assert answered == [RouteChoice("p2", "m2")]
+
+
+async def test_first_configured_route_reuses_its_breaker():
+    providers = {"p1": FakeProvider(text="primary"), "p2": FakeProvider(text="chosen")}
+    router = _router(_two_routes(), providers)
+    await router.generate(_ctx(), _request(), first=RouteChoice("p2", "m2"))
+    snap = router.snapshot()
+    assert [(r.provider, r.model) for r in snap.routes] == [("p1", "m1"), ("p2", "m2")]
+    assert snap.routes[1].requests_in_window == 1
+
+
+async def test_first_from_factory_answers_and_factory_called_once():
+    calls: list[str] = []
+    chosen = FakeProvider(text="lazy")
+
+    def factory(name: str):
+        calls.append(name)
+        return chosen if name == "lazy" else None
+
+    router = _router([RouteChoice("p1", "m1")], {"p1": FakeProvider(text="primary")}, provider_factory=factory)
+    answered: list[RouteChoice] = []
+    first = RouteChoice("lazy", "lm")
+    result = await router.generate(_ctx(), _request(), first=first, on_route=answered.append)
+    assert result.text == "lazy"
+    assert result.model == "lm"
+    assert answered == [first]
+    await router.generate(_ctx(), _request(), first=first)
+    assert calls == ["lazy"]
+
+
+async def test_snapshot_includes_adhoc_route_after_use():
+    router = _router(
+        [RouteChoice("p1", "m1")], {"p1": FakeProvider()},
+        provider_factory=lambda name: FakeProvider(text="lazy"),
+    )
+    assert [(r.provider, r.model) for r in router.snapshot().routes] == [("p1", "m1")]
+    await router.generate(_ctx(), _request(), first=RouteChoice("lazy", "lm"))
+    snap = router.snapshot()
+    assert [(r.provider, r.model) for r in snap.routes] == [("p1", "m1"), ("lazy", "lm")]
+    assert snap.routes[1].requests_in_window == 1
+    assert snap.routes[1].circuit == "closed"
+
+
+async def test_adhoc_limiter_uses_router_rate_limit():
+    clock = {"t": 0.0}
+    router = _router(
+        [RouteChoice("p1", "m1")], {"p1": FakeProvider(text="primary")},
+        provider_factory=lambda name: FakeProvider(text="lazy"),
+        max_requests_per_minute=1, now=lambda: clock["t"],
+    )
+    events, bus = _bus_with_recorder()
+    first = RouteChoice("lazy", "lm")
+    assert (await router.generate(root_context(bus), _request(), first=first)).text == "lazy"
+    assert (await router.generate(root_context(bus), _request(), first=first)).text == "primary"
+    skipped = [e for e in events if e.type == "route.skipped"]
+    assert len(skipped) == 1
+    assert (skipped[0].payload.provider, skipped[0].payload.model) == ("lazy", "lm")
+    assert skipped[0].payload.reason == "rate_limited"
+
+
+async def test_factory_none_emits_skipped_and_primary_answers():
+    calls: list[str] = []
+
+    def factory(name: str):
+        calls.append(name)
+        return None
+
+    router = _router([RouteChoice("p1", "m1")], {"p1": FakeProvider(text="primary")}, provider_factory=factory)
+    events, bus = _bus_with_recorder()
+    answered: list[RouteChoice] = []
+    first = RouteChoice("ghost", "gm")
+    result = await router.generate(root_context(bus), _request(), first=first, on_route=answered.append)
+    assert result.text == "primary"
+    assert answered == [RouteChoice("p1", "m1")]
+    skipped = [e for e in events if e.type == "route.skipped"]
+    assert len(skipped) == 1
+    assert skipped[0].payload.provider == "ghost" and skipped[0].payload.reason == "no_provider"
+    # None result is cached too; ad-hoc route never enters the snapshot.
+    await router.generate(root_context(bus), _request(), first=first)
+    assert calls == ["ghost"]
+    assert [(r.provider, r.model) for r in router.snapshot().routes] == [("p1", "m1")]
+
+
+async def test_no_factory_unknown_first_skipped():
+    router = _router([RouteChoice("p1", "m1")], {"p1": FakeProvider(text="primary")})
+    events, bus = _bus_with_recorder()
+    result = await router.generate(root_context(bus), _request(), first=RouteChoice("ghost", "gm"))
+    assert result.text == "primary"
+    assert [e.payload.reason for e in events if e.type == "route.skipped"] == ["no_provider"]
+
+
+async def test_first_hard_fails_primary_answers_generate():
+    down = ProviderUnavailable("down", provider="p2")
+    providers = {"p1": FakeProvider(text="primary"), "p2": FakeProvider(script=[down, down, down])}
+    router = _router(_two_routes(), providers)
+    answered: list[RouteChoice] = []
+    result = await router.generate(
+        _ctx(), _request(), first=RouteChoice("p2", "m2"), on_route=answered.append
+    )
+    assert result.text == "primary"
+    assert answered == [RouteChoice("p1", "m1")]
+
+
+async def test_first_hard_fails_primary_answers_stream():
+    down = ProviderUnavailable("down", provider="lazy")
+    router = _router(
+        [RouteChoice("p1", "m1")], {"p1": FakeProvider(text="primary ok")},
+        provider_factory=lambda name: FakeProvider(script=[down]),
+    )
+    answered: list[RouteChoice] = []
+    chunks = [
+        c async for c in router.stream(
+            _ctx(), _request(), first=RouteChoice("lazy", "lm"), on_route=answered.append
+        )
+    ]
+    assert [c.text for c in chunks[:-1]] == ["primary", "ok"]
+    assert answered == [RouteChoice("p1", "m1")]
+
+
+async def test_stream_first_answers_and_on_route_fires_before_first_chunk():
+    providers = {"p1": FakeProvider(text="primary"), "p2": FakeProvider(text="chosen words")}
+    router = _router(_two_routes(), providers)
+    answered: list[RouteChoice] = []
+    seen_at_first_chunk: list[list[RouteChoice]] = []
+    async for _chunk in router.stream(
+        _ctx(), _request(), first=RouteChoice("p2", "m2"), on_route=answered.append
+    ):
+        if not seen_at_first_chunk:
+            seen_at_first_chunk.append(list(answered))
+    assert seen_at_first_chunk == [[RouteChoice("p2", "m2")]]
+    assert answered == [RouteChoice("p2", "m2")]
+
+
+async def test_stream_zero_chunks_fires_on_route_at_completion():
+    router = _router([RouteChoice("e", "m")], {"e": _EmptyStreamProvider()})
+    answered: list[RouteChoice] = []
+    chunks = [c async for c in router.stream(_ctx(), _request(), on_route=answered.append)]
+    assert chunks == []
+    assert answered == [RouteChoice("e", "m")]
+
+
+async def test_first_circuit_open_skipped_then_retried_next_turn_after_cooldown():
+    clock = {"t": 0.0}
+    down = ProviderUnavailable("down", provider="p2")
+    providers = {"p1": FakeProvider(text="primary"), "p2": FakeProvider(script=[down, "chosen"])}
+    router = _router(
+        _two_routes(), providers, max_attempts=1, failure_threshold=1, cooldown_s=10.0,
+        now=lambda: clock["t"],
+    )
+    events, bus = _bus_with_recorder()
+    first = RouteChoice("p2", "m2")
+    assert (await router.generate(root_context(bus), _request(), first=first)).text == "primary"
+    assert (await router.generate(root_context(bus), _request(), first=first)).text == "primary"
+    assert [e.payload.reason for e in events if e.type == "route.skipped"] == ["circuit_open"]
+    clock["t"] = 11.0
+    answered: list[RouteChoice] = []
+    result = await router.generate(root_context(bus), _request(), first=first, on_route=answered.append)
+    assert result.text == "chosen"
+    assert answered == [first]
+
+
+async def test_first_none_event_sequence_unchanged():
+    """Regression: with no `first`, the exact event sequence is as before."""
+    events, bus = _bus_with_recorder()
+    down = ProviderUnavailable("down", provider="p1")
+    providers = {"p1": FakeProvider(script=[down, down, down]), "p2": FakeProvider(text="rescued")}
+    router = _router(_two_routes(), providers, failure_threshold=3)
+    result = await router.generate(root_context(bus), _request())
+    assert result.text == "rescued"
+    assert [(e.type, getattr(e.payload, "provider", None)) for e in events] == [
+        ("route.claimed", "p1"),
+        ("route.claimed", "p1"),
+        ("route.claimed", "p1"),
+        ("circuit.opened", "p1"),
+        ("route.claimed", "p2"),
+    ]

@@ -120,3 +120,12 @@ def test_model_fit_round_trips():
     with pytest.raises(ValidationError):
         ModelFit(provider="ollama", model="m", level="maybe", needs_bytes=None,
                  free_bytes=None, measured=False)
+
+
+def test_route_skipped_round_trips():
+    from zygos.runtime.events import RouteSkipped
+
+    payload = RouteSkipped(provider="ollama", model="qwen3:8b", reason="no_provider")
+    ev = Event(run_id="r", span_id="s", source="router", payload=payload)
+    assert ev.type == "route.skipped"
+    assert Event.model_validate(ev.model_dump()) == ev
