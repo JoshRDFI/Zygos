@@ -73,7 +73,8 @@ class ResidencyLike(Protocol):
 
     ``ensure_resident`` loads the route's model if needed (reporting it through
     ``on_loading``) and raises ``ProviderError`` when the load fails; ``turn``
-    marks the model in use for the call so it is not unloaded under it."""
+    marks the model in use for the call so it is not unloaded under it; ``hold``
+    does the same, synchronously, for a model the router chose itself."""
 
     async def ensure_resident(
         self,
@@ -84,6 +85,10 @@ class ResidencyLike(Protocol):
     ) -> None: ...
 
     def turn(self, route: RouteChoice) -> AbstractAsyncContextManager[None]: ...
+
+    def hold(self, route: RouteChoice) -> Callable[[], None]:
+        """Mark the route's model in use now; returns its (idempotent) release."""
+        ...
 
 
 class ModelService(Protocol):
@@ -154,22 +159,60 @@ class DefaultModelService:
     def _needs_residency(self, first: RouteChoice | None) -> bool:
         return first is not None and self._residency is not None and first.provider in LOCAL_PROVIDERS
 
-    async def _make_resident(
+    async def _resident_first(
         self, ctx: ExecutionContext, first: RouteChoice,
         on_loading: Callable[[RouteChoice], None] | None,
-    ) -> bool:
-        """Load ``first``; a failed load falls back through the router's order."""
+    ) -> RouteChoice | None:
+        """``first`` once it is loaded; None (the router's configured order) when
+        the router would not admit it now or the load failed.
+
+        A route the router refuses (open circuit, rate limited) is not loaded, so
+        a cooldown causes no load or unload. A failed load counts on the route's
+        breaker, so repeated failures open the circuit like generation failures."""
         assert self._residency is not None
+        refusal = self._router.refusal(first)
+        if refusal is not None:
+            await ctx.emit(RouteSkipped(provider=first.provider, model=first.model, reason=refusal),
+                           source="models")
+            return None
         try:
             await self._residency.ensure_resident(ctx, first, on_loading=on_loading)
         except ProviderError as exc:
             _log.warning("%s/%s can't be loaded (%s); falling back", first.provider, first.model, exc)
-            await ctx.emit(
-                RouteSkipped(provider=first.provider, model=first.model, reason="load_failed"),
-                source="models",
-            )
-            return False
-        return True
+            await self._router.record_failure(ctx, first, exc)
+        except Exception:  # noqa: BLE001 - a residency bug falls back, never fails the turn
+            _log.exception("residency for %s/%s failed; falling back", first.provider, first.model)
+        else:
+            return first
+        await ctx.emit(
+            RouteSkipped(provider=first.provider, model=first.model, reason="load_failed"),
+            source="models",
+        )
+        return None
+
+    def _holding(
+        self, first: RouteChoice | None, on_route: Callable[[RouteChoice], None] | None,
+        holds: list[Callable[[], None]],
+    ) -> Callable[[RouteChoice], None] | None:
+        """Wrap ``on_route`` so a local model the router answers with -- other
+        than ``first``, which ``turn()`` already holds -- is marked in use for the
+        rest of the call; a preload then can't unload it mid-stream."""
+        residency = self._residency
+        if residency is None:
+            return on_route
+
+        def answered(route: RouteChoice) -> None:
+            if route.provider in LOCAL_PROVIDERS and route != first:
+                holds.append(residency.hold(route))
+            if on_route is not None:
+                on_route(route)
+
+        return answered
+
+    @staticmethod
+    def _release(holds: list[Callable[[], None]]) -> None:
+        while holds:
+            holds.pop()()
 
     def select_model(self, classification: TaskClassification | None = None, *,
                      route: TurnRoute | None = None) -> RouteChoice:
@@ -194,13 +237,22 @@ class DefaultModelService:
         on_loading: Callable[[RouteChoice], None] | None = None,
     ) -> GenerationResult:
         first = self._first(route)
+        holds: list[Callable[[], None]] = []
         if self._needs_residency(first):
             assert first is not None and self._residency is not None
-            if await self._make_resident(ctx, first, on_loading):
+            first = await self._resident_first(ctx, first, on_loading)
+            if first is not None:
                 async with self._residency.turn(first):
-                    return await self._router.generate(ctx, request, first=first, on_route=on_route)
-            first = None
-        return await self._router.generate(ctx, request, first=first, on_route=on_route)
+                    try:
+                        return await self._router.generate(
+                            ctx, request, first=first, on_route=self._holding(first, on_route, holds))
+                    finally:
+                        self._release(holds)
+        try:
+            return await self._router.generate(
+                ctx, request, first=first, on_route=self._holding(None, on_route, holds))
+        finally:
+            self._release(holds)
 
     def stream(
         self,
@@ -212,26 +264,39 @@ class DefaultModelService:
         on_loading: Callable[[RouteChoice], None] | None = None,
     ) -> AsyncIterator[GenerationChunk]:
         first = self._first(route)
-        if self._needs_residency(first):
-            assert first is not None
-            return self._resident_stream(ctx, request, first, on_route, on_loading)
-        return self._router.stream(ctx, request, first=first, on_route=on_route)
+        if self._residency is None:
+            return self._router.stream(ctx, request, first=first, on_route=on_route)
+        return self._resident_stream(ctx, request, first, on_route, on_loading)
 
     async def _resident_stream(
         self,
         ctx: ExecutionContext,
         request: GenerationRequest,
-        first: RouteChoice,
+        first: RouteChoice | None,
         on_route: Callable[[RouteChoice], None] | None,
         on_loading: Callable[[RouteChoice], None] | None,
     ) -> AsyncIterator[GenerationChunk]:
         assert self._residency is not None
-        if not await self._make_resident(ctx, first, on_loading):
-            async with aclosing(self._router.stream(ctx, request, on_route=on_route)) as chunks:
-                async for chunk in chunks:
-                    yield chunk
-            return
-        async with self._residency.turn(first):
-            async with aclosing(self._router.stream(ctx, request, first=first, on_route=on_route)) as chunks:
-                async for chunk in chunks:
-                    yield chunk
+        holds: list[Callable[[], None]] = []
+        if self._needs_residency(first):
+            assert first is not None
+            first = await self._resident_first(ctx, first, on_loading)
+        try:
+            if first is None or not self._needs_residency(first):
+                chunks = self._router.stream(ctx, request, first=first,
+                                             on_route=self._holding(None, on_route, holds))
+                async with aclosing(chunks):
+                    async for chunk in chunks:
+                        yield chunk
+                return
+            async with self._residency.turn(first):
+                try:
+                    chunks = self._router.stream(ctx, request, first=first,
+                                                 on_route=self._holding(first, on_route, holds))
+                    async with aclosing(chunks):
+                        async for chunk in chunks:
+                            yield chunk
+                finally:
+                    self._release(holds)
+        finally:
+            self._release(holds)

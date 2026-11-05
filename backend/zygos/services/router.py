@@ -15,7 +15,7 @@ from typing import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 
 from zygos.errors import ProviderError, ProviderUnavailable
 from zygos.providers.base import Provider
-from zygos.providers.types import GenerationChunk, GenerationRequest, GenerationResult
+from zygos.providers.types import GenerationChunk, GenerationRequest, GenerationResult, ollama_name
 from zygos.runtime.context import ExecutionContext
 from zygos.runtime.events import CircuitClosed, CircuitOpened, RouteClaimed, RouteSkipped
 
@@ -27,6 +27,15 @@ logger = logging.getLogger("zygos.router")
 class RouteChoice:
     provider: str
     model: str
+
+
+def _same_model(a: RouteChoice, b: RouteChoice) -> bool:
+    """Same route, with Ollama names normalised (``qwen3`` is ``qwen3:latest``)."""
+    if a.provider != b.provider:
+        return False
+    if a.provider == "ollama":
+        return ollama_name(a.model) == ollama_name(b.model)
+    return a.model == b.model
 
 
 @dataclass(frozen=True)
@@ -200,9 +209,23 @@ class ProviderRouter:
         """The provider the router would call for ``name`` (residency, RFC-0013 §8)."""
         return self._provider_for(name)
 
+    def _canonical(self, route: RouteChoice) -> RouteChoice:
+        """The configured route naming the same model (Ollama names normalised),
+        else ``route`` -- so a saved ``qwen3:latest`` and a configured ``qwen3``
+        share one breaker and one place in the order."""
+        return next((r for r in self._routes if _same_model(r, route)), route)
+
+    def _breaker_for(self, route: RouteChoice) -> _CircuitBreaker:
+        """The route's breaker, creating an ad-hoc one synchronously on first use."""
+        if route not in self._breakers:
+            self._breakers[route] = _CircuitBreaker(self._failure_threshold, self._cooldown_s, self._now)
+            self._adhoc_routes.append(route)
+        return self._breakers[route]
+
     async def _order(self, ctx: ExecutionContext, first: RouteChoice | None) -> list[RouteChoice]:
         """[first] + configured routes without it. A `first` with no provider is
-        reported as skipped and dropped. first=None -> configured order unchanged."""
+        reported as skipped and dropped. first=None -> configured order unchanged.
+        ``first`` must already be canonical."""
         if first is None:
             return list(self._routes)
         rest = [r for r in self._routes if r != first]
@@ -212,10 +235,40 @@ class ProviderRouter:
                 source="router",
             )
             return rest
-        if first not in self._breakers:
-            self._breakers[first] = _CircuitBreaker(self._failure_threshold, self._cooldown_s, self._now)
-            self._adhoc_routes.append(first)
+        self._breaker_for(first)
         return [first, *rest]
+
+    def refusal(self, route: RouteChoice) -> str | None:
+        """Why the router would not admit ``route`` now, or None if it would.
+
+        Non-claiming (RFC-0013 §8): consumes no half-open probe and no rate-limit
+        token. A route with no breaker yet counts as closed."""
+        route = self._canonical(route)
+        if self._provider_for(route.provider) is None:
+            return "no_provider"
+        if not self._limiters[route.provider].allows():
+            return "rate_limited"
+        breaker = self._breakers.get(route)
+        if breaker is not None and not breaker.allows():
+            return "circuit_open"
+        return None
+
+    def admits(self, route: RouteChoice) -> bool:
+        """Whether a call on ``route`` would be admitted now (see ``refusal``)."""
+        return self.refusal(route) is None
+
+    async def record_failure(self, ctx: ExecutionContext, route: RouteChoice, error: ProviderError) -> None:
+        """Count a failure that happened outside a generation (a model load) on
+        the route's breaker, so the normal cooldown applies (RFC-0013 §8). In
+        half-open it re-opens the circuit with a fresh cooldown, like a failed probe."""
+        route = self._canonical(route)
+        breaker = self._breaker_for(route)
+        as_probe = breaker.state == "half_open" and not breaker._probing
+        if breaker.record_failure(error.code, probe=as_probe):
+            await ctx.emit(
+                CircuitOpened(provider=route.provider, model=route.model, last_error_code=error.code),
+                source="router",
+            )
 
     def _refusal(self, route: RouteChoice) -> str:
         return "rate_limited" if not self._limiters[route.provider].allows() else "circuit_open"
@@ -254,6 +307,7 @@ class ProviderRouter:
         on_route: Callable[[RouteChoice], None] | None = None,
     ) -> GenerationResult:
         last_error: ProviderError | None = None
+        first = self._canonical(first) if first is not None else None
         for route in await self._order(ctx, first):
             provider = self._provider_for(route.provider)
             if provider is None:  # unreachable: _order drops a first with no provider
@@ -317,6 +371,7 @@ class ProviderRouter:
         on_route: Callable[[RouteChoice], None] | None = None,
     ) -> AsyncIterator[GenerationChunk]:
         last_error: ProviderError | None = None
+        first = self._canonical(first) if first is not None else None
         for route in await self._order(ctx, first):
             provider = self._provider_for(route.provider)
             if provider is None:  # unreachable: _order drops a first with no provider

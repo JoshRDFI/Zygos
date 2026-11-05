@@ -433,3 +433,49 @@ async def test_unneeded_victims_are_pruned(tmp_path):
     await asyncio.wait_for(task, 1)
     assert rig.ollama.calls == [("unload", "x:latest"), ("load", "y:latest")]
     assert rig.loaded_events()[0].evicted == ("x:latest",)
+
+
+# -- final fix wave: hold() for router-chosen answers; cancel_preload() -----------
+
+
+async def test_hold_marks_a_model_in_use_until_released(tmp_path):
+    """Minor (b): a model the router answered with (not the turn's pinned route)
+    is never unloaded under its stream."""
+    rig = Rig(tmp_path, {"a:latest": 10 * GiB, "b:latest": 10 * GiB}, loaded=("a:latest",))
+    release = rig.manager.hold(_r("a"))  # untagged: same model
+    b_task = asyncio.create_task(rig.manager.ensure_resident(rig.ctx(), _r("b:latest")))
+    await _settle()
+    assert not b_task.done()
+    assert rig.ollama.calls == []
+    release()
+    release()  # idempotent
+    await asyncio.wait_for(b_task, 1)
+    assert rig.ollama.calls == [("unload", "a:latest"), ("load", "b:latest")]
+    await _settle()  # b's unclaimed reservation is dropped when its task ends
+    assert rig.manager._in_flight == {}
+
+
+def test_hold_on_a_non_ollama_route_is_a_no_op(tmp_path):
+    rig = Rig(tmp_path, {"a:latest": 4 * GiB})
+    release = rig.manager.hold(_r("m", provider="vllm"))
+    assert rig.manager._in_flight == {}
+    release()
+
+
+async def test_cancel_preload_stops_the_pending_load(tmp_path):
+    rig = Rig(tmp_path, {"a:latest": 4 * GiB})
+    rig.ollama.gates["a:latest"] = asyncio.Event()  # the load hangs
+    rig.manager.preload(_r("a:latest"))
+    await rig.ollama.load_started.wait()
+    rig.manager.cancel_preload()
+    await asyncio.wait_for(rig.manager.preload_done(), 1)
+    assert rig.ollama.running == []
+    assert rig.loaded_events() == []
+    assert not rig.manager._lock.locked()
+    rig.manager.cancel_preload()  # nothing pending: no-op
+
+
+async def test_cancel_preload_with_none_pending_is_a_no_op(tmp_path):
+    rig = Rig(tmp_path, {"a:latest": 4 * GiB})
+    rig.manager.cancel_preload()
+    await rig.manager.preload_done()

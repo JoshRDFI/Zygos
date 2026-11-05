@@ -745,3 +745,110 @@ async def test_factory_raising_is_cached_as_none_and_skipped():
     assert (await router.generate(root_context(bus), _request(), first=first)).text == "primary"
     assert calls == ["ghost"]
     assert [e.payload.reason for e in events if e.type == "route.skipped"] == ["no_provider", "no_provider"]
+
+
+# -- RFC-0013 final fix wave: admission without claiming; load failures on the breaker --
+
+
+class _NamedProvider:
+    def __init__(self, name: str, text: str) -> None:
+        self.name = name
+        self.text = text
+        self.asked: list[str] = []
+
+    async def generate(self, request):
+        self.asked.append(request.model)
+        return GenerationResult(text=self.text, model=request.model, provider=self.name)
+
+    async def stream(self, request):
+        self.asked.append(request.model)
+        yield GenerationChunk(text=self.text, done=True)
+
+
+async def test_admits_does_not_claim_a_half_open_probe_or_a_token():
+    clock = {"t": 0.0}
+    route = RouteChoice("p1", "m1")
+    down = ProviderUnavailable("down", provider="p1")
+    router = _router([route], {"p1": FakeProvider(script=[down, "ok"])}, max_attempts=1,
+                     failure_threshold=1, cooldown_s=10.0, max_requests_per_minute=2,
+                     now=lambda: clock["t"])
+    assert router.admits(route)
+    with pytest.raises(ProviderUnavailable):
+        await router.generate(_ctx(), _request())
+    assert not router.admits(route)  # open
+    assert router.refusal(route) == "circuit_open"
+    clock["t"] = 11.0  # half-open
+    for _ in range(5):
+        assert router.admits(route)  # never consumes the probe nor a token
+    assert (await router.generate(_ctx(), _request())).text == "ok"  # probe still available
+
+
+async def test_admits_rate_limit_and_unresolvable_provider():
+    route = RouteChoice("p1", "m1")
+    router = _router([route], {"p1": FakeProvider(text="a")}, max_requests_per_minute=1)
+    await router.generate(_ctx(), _request())
+    assert not router.admits(route)
+    assert router.refusal(route) == "rate_limited"
+    assert not router.admits(RouteChoice("ghost", "g"))
+    assert router.refusal(RouteChoice("ghost", "g")) == "no_provider"
+    # an ad-hoc route not used yet admits (no breaker yet = closed)
+    lazy = _router([route], {"p1": FakeProvider(text="a")}, provider_factory=lambda n: FakeProvider(text="l"))
+    assert lazy.admits(RouteChoice("lazy", "lm"))
+
+
+async def test_record_failure_opens_the_adhoc_breaker_and_emits_circuit_opened():
+    route = RouteChoice("p1", "m1")
+    saved = RouteChoice("lazy", "big")
+    router = _router([route], {"p1": FakeProvider(text="primary")}, failure_threshold=2,
+                     provider_factory=lambda n: FakeProvider(text="lazy"))
+    events, bus = _bus_with_recorder()
+    error = ProviderUnavailable("load timed out", provider="lazy")
+    await router.record_failure(root_context(bus), saved, error)
+    assert router.admits(saved)
+    await router.record_failure(root_context(bus), saved, error)
+    assert not router.admits(saved)
+    assert [e.type for e in events] == ["circuit.opened"]
+    snap = {(r.provider, r.model): r for r in router.snapshot().routes}
+    assert snap[("lazy", "big")].circuit == "open"
+    # the open circuit is honoured by generate: config primary answers
+    assert (await router.generate(_ctx(), _request(), first=saved)).text == "primary"
+
+
+async def test_record_failure_in_half_open_reopens_with_a_fresh_cooldown():
+    clock = {"t": 0.0}
+    route = RouteChoice("p1", "m1")
+    router = _router([route], {"p1": FakeProvider(text="a")}, failure_threshold=1,
+                     cooldown_s=10.0, now=lambda: clock["t"])
+    error = ProviderUnavailable("load failed", provider="p1")
+    await router.record_failure(_ctx(), route, error)
+    clock["t"] = 11.0
+    assert router.admits(route)
+    await router.record_failure(_ctx(), route, error)
+    assert not router.admits(route)
+    clock["t"] = 20.0
+    assert not router.admits(route)  # cooldown restarted at t=11
+    clock["t"] = 21.5
+    assert router.admits(route)
+
+
+async def test_untagged_and_latest_ollama_names_are_one_route():
+    configured = RouteChoice("ollama", "qwen3")
+    ollama = _NamedProvider("ollama", "q")
+    other = _NamedProvider("p2", "other")
+    router = _router([configured, RouteChoice("p2", "m2")], {"ollama": ollama, "p2": other})
+    answered: list[RouteChoice] = []
+    result = await router.generate(_ctx(), _request(), first=RouteChoice("ollama", "qwen3:latest"),
+                                   on_route=answered.append)
+    assert result.text == "q"
+    assert answered == [configured]
+    assert [(r.provider, r.model) for r in router.snapshot().routes] == [("ollama", "qwen3"), ("p2", "m2")]
+    # one breaker: a non-Ollama name keeps exact comparison
+    assert router.admits(RouteChoice("ollama", "qwen3:latest"))
+
+
+async def test_saved_latest_failing_is_not_retried_as_the_configured_twin():
+    down = ProviderUnavailable("down", provider="ollama")
+    providers = {"ollama": FakeProvider(script=[down, "x"]), "p2": FakeProvider(text="fallback")}
+    router = _router([RouteChoice("ollama", "qwen3"), RouteChoice("p2", "m2")], providers, max_attempts=1)
+    chunks = [c.text async for c in router.stream(_ctx(), _request(), first=RouteChoice("ollama", "qwen3:latest"))]
+    assert "".join(chunks) == "fallback"

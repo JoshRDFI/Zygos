@@ -202,6 +202,9 @@ class _LoadingResidency:
     async def turn(self, route):
         yield
 
+    def hold(self, route):
+        return lambda: None
+
 
 @pytest.mark.asyncio
 async def test_loading_frame_before_first_token():

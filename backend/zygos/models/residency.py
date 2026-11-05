@@ -158,6 +158,25 @@ class ResidencyManager:
         finally:
             self._release(model)
 
+    def hold(self, route: RouteChoice) -> Callable[[], None]:
+        """Mark the route's model in use now, synchronously; returns the release
+        (idempotent). For a model the router answered with that the call did not
+        pin -- a fallback, or a config-order turn -- so a load can't unload it
+        mid-stream (RFC-0013 §8)."""
+        model = self._key(route)
+        if model is None:
+            return lambda: None
+        self._acquire(model)
+        released = False
+
+        def release() -> None:
+            nonlocal released
+            if not released:
+                released = True
+                self._release(model)
+
+        return release
+
     # -- loading --------------------------------------------------------------
 
     def _profile(self, model: str, name: str) -> ModelProfile | None:
@@ -303,10 +322,16 @@ class ResidencyManager:
         Cancelling only cancels Zygos's HTTP call: Ollama may still finish that
         load server-side. The next load's fit check sees it in ``/api/ps`` and
         unloads it if it is in the way."""
+        self.cancel_preload()
+        self._preload = asyncio.create_task(self._run_preload(route))
+
+    def cancel_preload(self) -> None:
+        """Cancel a pending background preload (the default was reset, or changed
+        to a model residency doesn't manage). Like ``preload``'s own cancel, it
+        cancels Zygos's HTTP call only."""
         previous = self._preload
         if previous is not None and not previous.done():
             previous.cancel()
-        self._preload = asyncio.create_task(self._run_preload(route))
 
     async def _run_preload(self, route: RouteChoice) -> None:
         ctx = self._context() if self._context is not None else None

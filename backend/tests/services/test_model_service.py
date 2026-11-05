@@ -57,6 +57,15 @@ class _SpyRouter:
         self.calls.append({"op": "stream", "first": first, "on_route": on_route})
         yield GenerationChunk(text="ok", done=True)
 
+    def refusal(self, route):
+        return None
+
+    def admits(self, route):
+        return True
+
+    async def record_failure(self, ctx, route, error):
+        self.calls.append({"op": "record_failure", "route": route})
+
 
 class _Residency:
     def __init__(self, fail: bool = False) -> None:
@@ -75,6 +84,10 @@ class _Residency:
             yield
         finally:
             self.log.append(("exit", route))
+
+    def hold(self, route):
+        self.log.append(("hold", route))
+        return lambda: self.log.append(("release", route))
 
 
 # -- no saved default: exactly the old behaviour --------------------------------
@@ -250,7 +263,9 @@ async def test_a_failed_load_falls_back_through_the_router():
     events = []
     await svc.generate(_ctx(events), REQUEST)
     [_ async for _ in svc.stream(_ctx(events), REQUEST)]
-    assert [c["first"] for c in router.calls] == [None, None]
+    assert [c["first"] for c in router.calls if c["op"] != "record_failure"] == [None, None]
+    huge = RouteChoice("ollama", "huge")
+    assert [c["route"] for c in router.calls if c["op"] == "record_failure"] == [huge, huge]
     assert [e[0] for e in residency.log] == ["ensure", "ensure"]  # never held
     skipped = [e.payload for e in events if isinstance(e.payload, RouteSkipped)]
     assert skipped == [RouteSkipped(provider="ollama", model="huge", reason="load_failed")] * 2
@@ -314,3 +329,137 @@ def test_select_model_config_order_ignores_saved_default():
     assert svc.select_model() == RouteChoice("ollama", "q")
     pinned = RouteChoice("x", "y")
     assert svc.select_model(route=pinned) == pinned
+
+
+
+# -- final fix wave I1: residency follows the router's admission state -----------
+
+
+class _Answering:
+    def __init__(self, name: str, script=None) -> None:
+        self.name = name
+        self.asked: list[str] = []
+        self._script = list(script or [])
+
+    def _next(self, model):
+        self.asked.append(model)
+        if self._script:
+            item = self._script.pop(0)
+            if isinstance(item, BaseException):
+                raise item
+        return model
+
+    async def generate(self, request):
+        text = self._next(request.model)
+        return GenerationResult(text=text, model=request.model, provider=self.name, usage=Usage())
+
+    async def stream(self, request):
+        text = self._next(request.model)
+        yield GenerationChunk(text=text, done=True)
+
+
+async def _call(svc, op, ctx, **kw):
+    if op == "generate":
+        return (await svc.generate(ctx, REQUEST, **kw)).text
+    return "".join([c.text async for c in svc.stream(ctx, REQUEST, **kw)])
+
+
+@pytest.mark.parametrize("op", ["generate", "stream"])
+async def test_open_circuit_on_saved_default_means_no_load_and_config_primary_answers(op):
+    down = ProviderUnavailable("down", provider="ollama")
+    ollama = _Answering("ollama", script=[down])
+    primary = _Answering("fake")
+    router = ProviderRouter([PRIMARY], {"fake": primary, "ollama": ollama}, max_attempts=1,
+                            failure_threshold=1, cooldown_s=60.0)
+    residency = _Residency()
+    store = _Store(DefaultModel(provider="ollama", model="big"))
+    svc = DefaultModelService(router, default_status=_status_of(store), residency=residency)
+    assert await _call(svc, op, _ctx()) == "primary"  # hard failure opens the circuit
+    residency.log.clear()
+    events = []
+    assert await _call(svc, op, _ctx(events)) == "primary"
+    assert [e for e in residency.log if e[0] in ("ensure", "enter")] == []  # no load, no unload
+    skipped = [e.payload for e in events if isinstance(e.payload, RouteSkipped)]
+    assert skipped == [RouteSkipped(provider="ollama", model="big", reason="circuit_open")]
+    assert ollama.asked == ["big"]  # never asked again in the cooldown
+
+
+@pytest.mark.parametrize("op", ["generate", "stream"])
+async def test_repeated_load_failures_open_the_circuit_so_later_turns_neither_load_nor_wait(op):
+    primary = _Answering("fake")
+    router = ProviderRouter([PRIMARY], {"fake": primary, "ollama": _Answering("ollama")}, max_attempts=1,
+                            failure_threshold=2, cooldown_s=60.0)
+    residency = _Residency(fail=True)
+    store = _Store(DefaultModel(provider="ollama", model="huge"))
+    svc = DefaultModelService(router, default_status=_status_of(store), residency=residency)
+    for _ in range(2):
+        assert await _call(svc, op, _ctx()) == "primary"
+    assert [e[0] for e in residency.log].count("ensure") == 2
+    snap = {(r.provider, r.model): r.circuit for r in router.snapshot().routes}
+    assert snap[("ollama", "huge")] == "open"
+    residency.log.clear()
+    assert await _call(svc, op, _ctx()) == "primary"
+    assert [e for e in residency.log if e[0] == "ensure"] == []
+
+
+class _BrokenResidency(_Residency):
+    async def ensure_resident(self, ctx, route, *, on_loading=None) -> None:
+        self.log.append(("ensure", route, on_loading))
+        raise RuntimeError("fit() blew up")
+
+
+@pytest.mark.parametrize("op", ["generate", "stream"])
+async def test_a_non_provider_error_from_residency_falls_back_not_fails(op, caplog):
+    router = _SpyRouter()
+    store = _Store(DefaultModel(provider="ollama", model="m"))
+    svc = DefaultModelService(router, default_status=_status_of(store), residency=_BrokenResidency())
+    events = []
+    with caplog.at_level("ERROR", logger="zygos.models"):
+        assert await _call(svc, op, _ctx(events)) == "ok"
+    assert [c["first"] for c in router.calls if c["op"] in ("generate", "stream")] == [None]
+    assert "fit() blew up" in caplog.text
+    skipped = [e.payload for e in events if isinstance(e.payload, RouteSkipped)]
+    assert skipped == [RouteSkipped(provider="ollama", model="m", reason="load_failed")]
+    # a bug is not a model failure: nothing is recorded on the breaker
+    assert [c for c in router.calls if c["op"] == "record_failure"] == []
+
+
+# -- final fix wave minor (b): the answering local model is held for the call ------
+
+
+@pytest.mark.parametrize("op", ["generate", "stream"])
+async def test_router_fallback_to_another_ollama_model_is_held_for_the_rest_of_the_call(op):
+    other = RouteChoice("ollama", "fallback")
+    down = ProviderUnavailable("down", provider="ollama")
+    ollama = _Answering("ollama", script=[down])
+    router = ProviderRouter([other], {"ollama": ollama}, max_attempts=1)
+    residency = _Residency()
+    store = _Store(DefaultModel(provider="ollama", model="saved"))
+    svc = DefaultModelService(router, default_status=_status_of(store), residency=residency)
+    assert await _call(svc, op, _ctx()) == "fallback"
+    saved = RouteChoice("ollama", "saved")
+    assert [e[:2] for e in residency.log] == [
+        ("ensure", saved), ("enter", saved), ("hold", other), ("release", other), ("exit", saved)]
+
+
+@pytest.mark.parametrize("op", ["generate", "stream"])
+async def test_config_order_turn_on_an_ollama_route_is_held(op):
+    configured = RouteChoice("ollama", "qwen3")
+    router = ProviderRouter([configured], {"ollama": _Answering("ollama")})
+    residency = _Residency()
+    svc = DefaultModelService(router, default_status=_status_of(_Store()), residency=residency)
+    from zygos.services.model import CONFIG_ORDER
+    assert await _call(svc, op, _ctx(), route=CONFIG_ORDER) == "qwen3"
+    assert residency.log == [("hold", configured), ("release", configured)]
+
+
+async def test_config_order_stream_holds_until_the_stream_closes():
+    configured = RouteChoice("ollama", "qwen3")
+    router = ProviderRouter([configured], {"ollama": _Answering("ollama")})
+    residency = _Residency()
+    svc = DefaultModelService(router, default_status=_status_of(_Store()), residency=residency)
+    stream = svc.stream(_ctx(), REQUEST)
+    await stream.__anext__()
+    assert residency.log == [("hold", configured)]
+    await stream.aclose()
+    assert residency.log == [("hold", configured), ("release", configured)]
