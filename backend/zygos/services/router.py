@@ -8,6 +8,7 @@ Stability: Experimental.
 """
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from typing import AsyncIterator, Awaitable, Callable, Mapping, Sequence
@@ -17,6 +18,9 @@ from zygos.providers.base import Provider
 from zygos.providers.types import GenerationChunk, GenerationRequest, GenerationResult
 from zygos.runtime.context import ExecutionContext
 from zygos.runtime.events import CircuitClosed, CircuitOpened, RouteClaimed, RouteSkipped
+
+
+logger = logging.getLogger("zygos.router")
 
 
 @dataclass(frozen=True)
@@ -180,7 +184,13 @@ class ProviderRouter:
         if name in self._providers:
             return self._providers[name]
         if name not in self._factory_results:
-            made = self._provider_factory(name) if self._provider_factory is not None else None
+            made: Provider | None = None
+            if self._provider_factory is not None:
+                try:
+                    made = self._provider_factory(name)
+                except Exception:
+                    logger.exception("provider factory raised for %r; route skipped", name)
+                    made = None
             self._factory_results[name] = made
             if made is not None:
                 self._limiters[name] = _RateLimiter(self._max_requests_per_minute, self._now)
@@ -242,7 +252,8 @@ class ProviderRouter:
         last_error: ProviderError | None = None
         for route in await self._order(ctx, first):
             provider = self._provider_for(route.provider)
-            assert provider is not None
+            if provider is None:  # unreachable: _order drops a first with no provider
+                raise ProviderUnavailable(f"No provider for {route.provider}", provider="router")
             routed = request.model_copy(update={"model": route.model})
             breaker = self._breakers[route]
             for attempt in range(1, self._max_attempts + 1):
@@ -304,7 +315,8 @@ class ProviderRouter:
         last_error: ProviderError | None = None
         for route in await self._order(ctx, first):
             provider = self._provider_for(route.provider)
-            assert provider is not None
+            if provider is None:  # unreachable: _order drops a first with no provider
+                raise ProviderUnavailable(f"No provider for {route.provider}", provider="router")
             routed = request.model_copy(update={"model": route.model})
             breaker = self._breakers[route]
             if ctx.cancelled:
@@ -332,13 +344,13 @@ class ProviderRouter:
                             on_route(route)
                     yield chunk
                 settled = True
-                if not started and on_route is not None:
-                    on_route(route)  # zero-chunk stream completed: it still answered
                 if breaker.record_success(probe=claim.probe):
                     await ctx.emit(
                         CircuitClosed(provider=route.provider, model=route.model),
                         source="router",
                     )
+                if not started and on_route is not None:
+                    on_route(route)  # zero-chunk stream completed: it still answered
                 return
             except ProviderError as error:
                 settled = True

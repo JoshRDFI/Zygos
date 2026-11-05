@@ -690,3 +690,58 @@ async def test_first_none_event_sequence_unchanged():
         ("circuit.opened", "p1"),
         ("route.claimed", "p2"),
     ]
+
+
+class _FailThenEmptyStream:
+    name = "fe"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def generate(self, request):  # pragma: no cover - unused
+        raise AssertionError("not used")
+
+    async def stream(self, request):
+        self.calls += 1
+        if self.calls == 1:
+            raise ProviderUnavailable("down", provider="fe")
+        return
+        yield
+
+
+async def test_zero_chunk_probe_settles_even_if_on_route_raises():
+    clock = {"t": 0.0}
+    provider = _FailThenEmptyStream()
+    router = _router(
+        [RouteChoice("fe", "m")], {"fe": provider},
+        failure_threshold=1, cooldown_s=10.0, now=lambda: clock["t"],
+    )
+    with pytest.raises(ProviderUnavailable):
+        [c async for c in router.stream(_ctx(), _request())]  # opens the breaker
+    clock["t"] = 11.0
+
+    def boom(route):
+        raise RuntimeError("callback failed")
+
+    with pytest.raises(RuntimeError):
+        [c async for c in router.stream(_ctx(), _request(), on_route=boom)]  # half-open probe
+    # The probe succeeded, so the breaker closed and the route is admitted again.
+    assert router.snapshot().routes[0].circuit == "closed"
+    assert [c async for c in router.stream(_ctx(), _request())] == []
+    assert provider.calls == 3
+
+
+async def test_factory_raising_is_cached_as_none_and_skipped():
+    calls: list[str] = []
+
+    def factory(name: str):
+        calls.append(name)
+        raise RuntimeError("factory broke")
+
+    router = _router([RouteChoice("p1", "m1")], {"p1": FakeProvider(text="primary")}, provider_factory=factory)
+    events, bus = _bus_with_recorder()
+    first = RouteChoice("ghost", "gm")
+    assert (await router.generate(root_context(bus), _request(), first=first)).text == "primary"
+    assert (await router.generate(root_context(bus), _request(), first=first)).text == "primary"
+    assert calls == ["ghost"]
+    assert [e.payload.reason for e in events if e.type == "route.skipped"] == ["no_provider", "no_provider"]
