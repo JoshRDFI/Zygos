@@ -186,6 +186,27 @@ def test_doctor_shows_config_only_ollama_address(tmp_path):
     assert "backends_restart" not in by
 
 
+class _ListingOllama:
+    name = "ollama"
+    capabilities = frozenset()
+
+    def __init__(self, names):
+        self._names = names
+
+    async def list_models(self):
+        from zygos.providers.types import OllamaModel
+
+        return tuple(OllamaModel(name=n, size=1024**3, digest=f"d-{n}", family="x") for n in self._names)
+
+    async def running_models(self):
+        return ()
+
+    async def show(self, model):
+        from zygos.errors import ProviderUnavailable
+
+        raise ProviderUnavailable("no show", provider="ollama")
+
+
 def _default_check(tmp_path, saved, installed=None):
     import asyncio
 
@@ -206,7 +227,10 @@ def _default_check(tmp_path, saved, installed=None):
         runtime = build_runtime(config)
         try:
             if installed is not None:
-                runtime.model_catalog._installed["ollama"] = frozenset(installed)
+                # Known installation: the catalog listed Ollama in this process
+                # (as the server does on GET /models), through a fake Ollama.
+                runtime.model_catalog._providers["ollama"] = _ListingOllama(installed)
+                await runtime.model_catalog.view(runtime.new_context())
             report = await run_doctor(runtime, gpu_query=lambda: None)
             return next(c for c in report.checks if c.name == "default_model")
         finally:
@@ -227,8 +251,46 @@ def test_doctor_default_model_saved(tmp_path):
     assert check.detail == "ollama/gemma4:e4b (saved)"
 
 
+def test_doctor_default_model_saved_installation_unknown_is_not_an_all_clear(tmp_path):
+    """Final fix wave I4: the doctor's own process has never listed Ollama, so it
+    can't know a saved default was deleted -- it says so instead of '(saved)'."""
+    check = _default_check(tmp_path, ("ollama", "gone:7b"))
+    assert check.ok and not check.warn
+    assert check.detail == ("ollama/gone:7b (saved; installation not checked — "
+                            "run with the server or use --probe)")
+
+
 def test_doctor_default_model_saved_but_ignored_warns(tmp_path):
     check = _default_check(tmp_path, ("ollama", "gone:7b"), installed={"qwen3:8b"})
     assert check.ok and check.warn
     assert check.detail == ("saved default ollama/gone:7b ignored: not installed; "
                             "using ollama/qwen3:8b")
+
+
+def test_doctor_probe_names_the_model_that_answered(tmp_path):
+    """Final fix wave minor (d): --probe generates through the saved default, so
+    it says which model it probed rather than 'primary route responded'."""
+    import asyncio
+
+    from zygos.cli.doctor import run_doctor
+    from zygos.models.choices import DefaultModel, ModelChoices, SqliteModelChoicesStore
+    from zygos.runtime.bootstrap import build_runtime
+
+    config = tmp_path / "config.yaml"
+    db = tmp_path / "p.db"
+    config.write_text(f"personalization:\n  db_path: '{db}'\n"
+                      "providers:\n  primary: {provider: fake, model: fake-1}\n")
+
+    async def go():
+        runtime = build_runtime(config)
+        try:
+            report = await run_doctor(runtime, probe=True, gpu_query=lambda: None)
+            return next(c for c in report.checks if c.name == "probe")
+        finally:
+            await runtime.aclose()
+
+    first = asyncio.run(go())
+    assert first.ok and first.detail == "fake/fake-1 responded"
+    SqliteModelChoicesStore(db).set(ModelChoices(default_model=DefaultModel(provider="fake", model="saved-1")))
+    second = asyncio.run(go())
+    assert second.ok and second.detail == "fake/saved-1 responded (the saved default)"

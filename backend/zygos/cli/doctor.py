@@ -17,6 +17,8 @@ from zygos.hardware.describe import describe_hardware
 from zygos.hardware.probe import HardwareProbe, run_nvidia_smi
 from zygos.providers.types import GenerationRequest, Message
 from zygos.runtime.bootstrap import RuntimeAssembly
+from zygos.services.model import CONFIG_ORDER
+from zygos.services.router import RouteChoice
 from zygos.voice.contract import SttHealth, TtsHealth
 
 GpuQuery = Callable[[], "str | None"]
@@ -80,6 +82,10 @@ def _hardware_check(runtime: RuntimeAssembly, gpu_query: GpuQuery) -> DoctorChec
     return DoctorCheck("hardware", True, describe_hardware(snap), warn=not snap.gpus)
 
 
+# Providers whose installed models the catalog lists (ModelCatalog.installed()).
+_LISTED_PROVIDERS = frozenset({"ollama", "vllm"})
+
+
 def _default_model_check(runtime: RuntimeAssembly) -> DoctorCheck:
     """The model that answers turns (RFC-0013 §4): passive -- the saved choice,
     the config, and the catalog's last-known installed set; no network."""
@@ -90,6 +96,12 @@ def _default_model_check(runtime: RuntimeAssembly) -> DoctorCheck:
         return DoctorCheck(
             "default_model", True,
             f"saved default {saved} ignored: {status.reason}; using {route}", warn=True)
+    if status.source == "saved" and status.route.provider in _LISTED_PROVIDERS \
+            and runtime.model_catalog.installed(status.route.provider) is None:
+        # This process never listed the provider, so a deleted model can't be told
+        # apart from an installed one; say so rather than give a false all-clear.
+        return DoctorCheck("default_model", True,
+                           f"{route} (saved; installation not checked — run with the server or use --probe)")
     return DoctorCheck("default_model", True, f"{route} ({status.source})")
 
 
@@ -193,9 +205,15 @@ async def run_doctor(
     if probe:
         context = runtime.new_context()
         request = GenerationRequest(messages=(Message(role="user", content="ping"),))
+        answered: list[RouteChoice] = []
+        saved = runtime.model_service.turn_route()
         try:
-            await runtime.model_service.generate(context, request)
-            checks.append(DoctorCheck("probe", True, "primary route responded"))
+            await runtime.model_service.generate(
+                context, request, route=saved if saved is not None else CONFIG_ORDER,
+                on_route=answered.append)
+            who = answered[-1] if answered else (saved or runtime.model_service.select_model())
+            note = " (the saved default)" if saved is not None and who == saved else ""
+            checks.append(DoctorCheck("probe", True, f"{who.provider}/{who.model} responded{note}"))
         except Exception as error:  # noqa: BLE001 - any failure is a failed check
             checks.append(DoctorCheck("probe", False, f"probe failed: {error}"))
 
