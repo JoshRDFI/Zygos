@@ -6,6 +6,7 @@ Stability: Experimental.
 """
 
 import time
+from collections.abc import Callable
 from typing import Protocol
 
 from zygos.config.schema import ReasoningConfig
@@ -19,12 +20,16 @@ from zygos.reasoning.types import (
 from zygos.runtime.context import ExecutionContext
 from zygos.runtime.events import ModelSelected, RequestFinished, RequestStarted
 from zygos.services.model import ModelService
+from zygos.services.router import RouteChoice
 from zygos.thinking.capture import Step, ThinkingRecorder
 
 
 class ReasoningService(Protocol):
     async def run(self, ctx: ExecutionContext, input: ReasoningInput, *,
-                  thinking: ThinkingRecorder | None = None) -> ReasoningResult: ...
+                  thinking: ThinkingRecorder | None = None,
+                  route: RouteChoice | None = None,
+                  on_route: Callable[[RouteChoice], None] | None = None,
+                  on_loading: Callable[[RouteChoice], None] | None = None) -> ReasoningResult: ...
 
     def snapshot(self) -> ReasoningState: ...
 
@@ -45,6 +50,7 @@ class DefaultReasoningService:
         self._halted_early = False
         self._cancelled = False
         self._selected_model: str | None = None
+        self._routing: dict = {}
 
     def snapshot(self) -> ReasoningState:
         return ReasoningState(
@@ -69,14 +75,19 @@ class DefaultReasoningService:
             temperature=temperature, max_tokens=max_tokens, think=think,
         )
         t0 = time.monotonic()
-        result = await self._model.generate(ctx, request)
+        result = await self._model.generate(ctx, request, **self._routing)
         if recorder is not None:
             await recorder.record(ctx, step=step, index=index, text=result.thinking,
                                   elapsed_ms=int((time.monotonic() - t0) * 1000))
         return result.text
 
     async def run(self, ctx: ExecutionContext, input: ReasoningInput, *,
-                  thinking: ThinkingRecorder | None = None) -> ReasoningResult:
+                  thinking: ThinkingRecorder | None = None,
+                  route: RouteChoice | None = None,
+                  on_route: Callable[[RouteChoice], None] | None = None,
+                  on_loading: Callable[[RouteChoice], None] | None = None) -> ReasoningResult:
+        """``route`` is the turn's pinned route (RFC-0013 §5): every call uses it and
+        model.selected reports it. None keeps select_model and the router's order."""
         if self._running:
             raise RuntimeError(
                 "ReasoningService.run is not re-entrant; a run is already in progress on this instance"
@@ -84,11 +95,13 @@ class DefaultReasoningService:
         self._running = True
         try:
             self._reset()
+            self._routing = {"route": route, "on_route": on_route, "on_loading": on_loading}
             profile = resolve_profile(self._config.profile)
             await ctx.emit(RequestStarted(prompt_chars=len(input.prompt)), source="reasoning")
 
             classification = self._model.classify_task(input.prompt)
-            route = self._model.select_model(classification if profile.escalate else None)
+            if route is None:
+                route = self._model.select_model(classification if profile.escalate else None)
             self._selected_model = route.model
             await ctx.emit(
                 # classification is the task classification, not necessarily the escalation reason (escalate may be off)

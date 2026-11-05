@@ -68,6 +68,20 @@ class ModelSelected(EventPayload):
     classification: str
 
 
+class ModelChosen(EventPayload):
+    """The route a turn pinned at its start, and why (RFC-0013 §5, §11).
+
+    Distinct from ``model.selected`` (the reasoning path's own pick, other fields)."""
+
+    type: Literal["model.chosen"] = "model.chosen"
+    turn_id: str
+    category: Literal["code", "reasoning", "chat"]
+    provider: str
+    model: str
+    mode: Literal["default"] = "default"
+    reason: str
+
+
 class CapabilityResolved(EventPayload):
     type: Literal["capability.resolved"] = "capability.resolved"
     capability: str
@@ -134,6 +148,7 @@ AnyPayload = Annotated[
         RequestStarted,
         RequestFinished,
         ModelSelected,
+        ModelChosen,
         CapabilityResolved,
         CapabilityRenegotiated,
         ModelThinking,

@@ -76,10 +76,10 @@ class _BlockingModel:
     def select_model(self, classification=None):
         return RouteChoice("fake", "m")
 
-    async def generate(self, ctx, request):
+    async def generate(self, ctx, request, **kw):
         raise NotImplementedError
 
-    async def stream(self, ctx, request):
+    async def stream(self, ctx, request, **kw):
         call = self._calls
         self._calls += 1
         words = self._texts[call].split()

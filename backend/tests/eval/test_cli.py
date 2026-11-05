@@ -18,7 +18,7 @@ class _FakeAssembly:
 
 
 class _StubModel:
-    async def generate(self, ctx, request):
+    async def generate(self, ctx, request, **kw):
         from zygos.providers.types import GenerationResult
         return GenerationResult(text="1.0", model=request.model, provider="fake")
 
@@ -180,7 +180,7 @@ async def test_run_eval_scores_with_the_given_judge_service(tmp_path):
     seen = []
 
     class _Judge:
-        async def generate(self, ctx, request):
+        async def generate(self, ctx, request, **kw):
             from zygos.providers.types import GenerationResult
             seen.append(request)
             return GenerationResult(text="1.0", model="judge-x", provider="fake")

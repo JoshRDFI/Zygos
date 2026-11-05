@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -25,6 +25,7 @@ from zygos.errors import ToolNotFound
 from zygos.providers.types import GenerationRequest, Message
 from zygos.runtime.context import ExecutionContext
 from zygos.services.model import ModelService
+from zygos.services.router import RouteChoice
 from zygos.thinking.capture import ThinkingRecorder
 from zygos.tools.service import ToolService
 from zygos.tools.types import Tool, ToolCall, ToolResult
@@ -62,7 +63,13 @@ async def run_agentic_loop(
     observer: ToolObserver | None = None,
     think: bool | None = None,
     thinking: ThinkingRecorder | None = None,
+    route: RouteChoice | None = None,
+    on_route: Callable[[RouteChoice], None] | None = None,
+    on_loading: Callable[[RouteChoice], None] | None = None,
 ) -> AgentResult:
+    """``route`` is the turn's pinned route (RFC-0013 §5), passed to every
+    generation with ``on_route``/``on_loading``; None keeps the router's order."""
+    routing = {"route": route, "on_route": on_route, "on_loading": on_loading}
     schemas = tuple(tool_schema(t) for t in tools)
     history: list[Message] = list(messages)
 
@@ -73,7 +80,7 @@ async def run_agentic_loop(
         request = GenerationRequest(messages=tuple(history), tools=schemas,
                                     tool_choice=config.default_tool_choice, think=think)
         t0 = time.monotonic()
-        result = await model_service.generate(ctx, request)
+        result = await model_service.generate(ctx, request, **routing)
         if thinking is not None:
             await thinking.record(ctx, step="tool_loop", index=i, text=result.thinking,
                                   elapsed_ms=int((time.monotonic() - t0) * 1000))
@@ -112,7 +119,7 @@ async def run_agentic_loop(
     final_req = GenerationRequest(messages=tuple(history), tools=schemas, tool_choice="none",
                                  think=think)
     t0 = time.monotonic()
-    final = await model_service.generate(ctx, final_req)
+    final = await model_service.generate(ctx, final_req, **routing)
     if thinking is not None:
         await thinking.record(ctx, step="tool_loop", index=config.max_iterations, text=final.thinking,
                               elapsed_ms=int((time.monotonic() - t0) * 1000))

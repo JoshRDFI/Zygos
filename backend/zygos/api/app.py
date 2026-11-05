@@ -112,6 +112,7 @@ def create_app(
         preferences=runtime.preferences,
         think_default=runtime.config.providers.think,
         thinking_support=runtime.thinking_support,
+        default_status=runtime.default_status,
     )
     install_trace_bridge(runtime.event_bus, registry)
     app.state.session_count = session_count if session_count is not None else registry.count

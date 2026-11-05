@@ -20,6 +20,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
@@ -39,13 +40,18 @@ from zygos.personalization.render import render_identity
 from zygos.providers.types import GenerationRequest, Message
 from zygos.reasoning.service import ReasoningService
 from zygos.reasoning.types import ReasoningInput
-from zygos.runtime.context import CancelToken
-from zygos.services.model import ModelService
+from zygos.runtime.context import CancelToken, ExecutionContext
+from zygos.runtime.events import ModelChosen
+from zygos.services.model import CATEGORY_OF, ModelService, classify_task
+from zygos.services.router import RouteChoice
 from zygos.thinking.capture import TailBuffer, ThinkingRecorder
 from zygos.thinking.support import ThinkingSupportChecker
 from zygos.tools.service import ToolService
 from zygos.tools.types import Tool
 from zygos.voice import VoiceService
+
+if TYPE_CHECKING:
+    from zygos.models.default import DefaultStatus
 
 logger = logging.getLogger("zygos.api.turn")
 
@@ -68,6 +74,8 @@ class TurnDeps:
     # RFC-0012: configured thinking default (providers.think) and support gate
     think_default: bool | None = False
     thinking_support: ThinkingSupportChecker | None = None
+    # RFC-0013 §5: the runtime's default-model status, for the model.chosen reason
+    default_status: "Callable[[], DefaultStatus] | None" = None
 
 
 def _json_safe(value):
@@ -107,6 +115,33 @@ def format_exchange(user_text: str, assistant_text: str) -> str:
     return f"User: {user_text}\nAssistant: {assistant_text}"
 
 
+def _route_dict(route: RouteChoice | None) -> dict | None:
+    return None if route is None else {"provider": route.provider, "model": route.model}
+
+
+async def _emit_model_chosen(ctx: ExecutionContext, deps: TurnDeps, turn_id: str,
+                             category: str, pinned: RouteChoice | None) -> None:
+    """One ``model.chosen`` trace per turn (RFC-0013 §11). Observational: a failure
+    to work out the reason never touches the turn."""
+    try:
+        if pinned is not None:
+            route, reason = pinned, "saved default"
+        else:
+            status = deps.default_status() if deps.default_status is not None else None
+            if status is not None and status.ignored is not None:
+                reason = f"saved default ignored: {status.reason}"
+            else:
+                reason = "config default"
+            if status is not None and status.source == "config":
+                route = status.route
+            else:
+                route = deps.model_service.select_model()
+        await ctx.emit(ModelChosen(turn_id=turn_id, category=category, provider=route.provider,
+                                   model=route.model, reason=reason), source="turn")
+    except Exception:  # noqa: BLE001 - trace only
+        logger.warning("model.chosen trace failed", exc_info=True)
+
+
 def _speaks_reply(session: Session, deps: TurnDeps) -> bool:
     """Whether this turn's reply will be synthesized (the gate before speak_reply)."""
     return bool(session.speak and deps.voice_service is not None
@@ -135,8 +170,25 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
     session.enqueue(Frame(channel=CHAT, type="turn.start", payload={
         "turn_id": turn_id, "think": effective, "rethink_of": rethink_of}))
 
+    # RFC-0013 §5 ruling P5: the route is pinned once per turn; every call of the
+    # turn gets it, so a default changed mid-turn applies from the next turn.
+    category = CATEGORY_OF[classify_task(text)]
+    try:
+        pinned = deps.model_service.turn_route()
+    except Exception:  # noqa: BLE001 - an unreadable saved default is ignored, never an error
+        logger.warning("saved default lookup failed; using the router's order", exc_info=True)
+        pinned = None
+    answered: list[RouteChoice] = []  # the last route that answered is who answered
+
+    def _on_loading(route: RouteChoice) -> None:
+        session.enqueue(Frame(channel=CHAT, type="model.loading", payload={
+            "turn_id": turn_id, "provider": route.provider, "model": route.model}))
+
+    routing = {"route": pinned, "on_route": answered.append, "on_loading": _on_loading}
+
     def _think_fields() -> dict:
-        return {"think": effective, "thinking_ms": recorder.total_ms,
+        return {"model": _route_dict(answered[-1] if answered else None), "category": category,
+                "think": effective, "thinking_ms": recorder.total_ms,
                 "think_unsupported_reason": unsupported_reason, "rethink_of": rethink_of}
 
     final = ""
@@ -149,6 +201,8 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
             session.enqueue(Frame(channel=CHAT, type="turn.end",
                                   payload={"text": "", "cancelled": True, **_think_fields()}))
             return
+
+        await _emit_model_chosen(ctx, deps, turn_id, category, pinned)
 
         if spoken_input and effective is True and speaks:
             prefix = asyncio.create_task(
@@ -184,7 +238,7 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
             agent_result = await run_agentic_loop(
                 ctx, model_service=deps.model_service, tool_service=deps.tool_service,
                 tools=deps.tools, messages=messages, config=deps.tool_loop_config, observer=_frame,
-                think=effective, thinking=recorder)
+                think=effective, thinking=recorder, **routing)
             final = agent_result.text
             end_extra = {"stop_reason": agent_result.stop_reason, "iterations": agent_result.iterations}
         elif not deps.reasoning_enabled:
@@ -197,7 +251,7 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
                                            turn_started_at=turn_started_at, wait_for=prefix)
             started = time.monotonic()
             first_text_at: float | None = None
-            async for chunk in deps.model_service.stream(ctx, request):
+            async for chunk in deps.model_service.stream(ctx, request, **routing):
                 if chunk.thinking:
                     thinking.append(chunk.thinking)
                 if ctx.cancelled:
@@ -216,13 +270,12 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
             reasoning = deps.reasoning_factory()
             result = await reasoning.run(ctx, ReasoningInput(
                 prompt=text, context=context, system=system_texts(modality, prefs),
-                think=effective), thinking=recorder)
+                think=effective), thinking=recorder, **routing)
             final = result.text
             end_extra = {
                 "confidence": result.final_confidence,
                 "loops": result.loops_used,
                 "halted_early": result.halted_early,
-                "model": result.model,
             }
 
         if ctx.cancelled:

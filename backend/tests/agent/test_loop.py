@@ -164,12 +164,12 @@ async def test_final_generate_uses_tool_choice_none():
         def classify_task(self, prompt): return "simple"
         def select_model(self, classification=None): ...
         def turn_route(self): return None
-        async def generate(self, ctx, request):
+        async def generate(self, ctx, request, **kw):
             seen.append(request.tool_choice)
             if len(seen) <= 1:
                 return _call("echo", {"value": "x"})
             return GenerationResult(text="final", model="m", provider="fake")
-        def stream(self, ctx, request): ...
+        def stream(self, ctx, request, **kw): ...
 
     ts = _tool_service(EchoTool())
     result = await run_agentic_loop(
@@ -278,3 +278,31 @@ async def test_loop_records_thinking_per_iteration():
         messages=[Message(role="user", content="go")], config=ToolLoopConfig(),
         think=True, thinking=spy)
     assert spy.calls == [("tool_loop", 0, "t0"), ("tool_loop", 1, "t1")]
+
+
+async def test_route_and_callbacks_pass_to_every_generate_including_final():
+    """RFC-0013 ruling P5: the turn's pinned route reaches every call of the loop."""
+    from zygos.services.router import RouteChoice
+    pinned = RouteChoice("other", "s")
+    seen: list = []
+
+    class SpyModel:
+        def classify_task(self, prompt): return "simple"
+        def select_model(self, classification=None): ...
+        def turn_route(self): return None
+        async def generate(self, ctx, request, *, route=None, on_route=None, on_loading=None):
+            seen.append((route, on_route, on_loading))
+            if len(seen) <= 1:
+                return _call("echo", {"value": "x"})
+            return GenerationResult(text="final", model="s", provider="other")
+        def stream(self, ctx, request, **kw): ...
+
+    def on_route(r): ...
+    def on_loading(r): ...
+
+    ts = _tool_service(EchoTool())
+    await run_agentic_loop(
+        _ctx(), model_service=SpyModel(), tool_service=ts, tools=[EchoTool()],
+        messages=[Message(role="user", content="go")], config=ToolLoopConfig(max_iterations=1),
+        route=pinned, on_route=on_route, on_loading=on_loading)
+    assert seen == [(pinned, on_route, on_loading)] * 2

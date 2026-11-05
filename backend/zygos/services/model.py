@@ -29,6 +29,12 @@ _CODE_MARKERS = ("```", "def ", "import ", "function ")
 _REASONING = re.compile(r"\b(why|analyze|prove|design|architecture|compare|trade-?off)\b", re.IGNORECASE)
 
 
+# The task category a turn records (RFC-0013 §11). Recorded only -- nothing
+# in phase 2 switches models by category.
+CATEGORY_OF: dict[str, str] = {"code": "code", "complex_reasoning": "reasoning",
+                               "simple": "chat", "standard": "chat"}
+
+
 def classify_task(prompt: str) -> TaskClassification:
     if any(marker in prompt for marker in _CODE_MARKERS):
         return "code"
