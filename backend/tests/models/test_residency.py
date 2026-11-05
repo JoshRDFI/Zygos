@@ -362,3 +362,74 @@ async def test_non_ollama_route_is_a_no_op(tmp_path):
         pass
     assert rig.ollama.calls == []
     assert rig.events == []
+
+
+async def test_loaded_non_victim_turn_skips_the_lock_while_an_eviction_waits(tmp_path):
+    """Review fix 1: X busy in session A, B waits to evict X for Y. D (Z loaded,
+    not a victim) is not queued behind B; C (X, a victim) goes through the lock."""
+    sizes = {"x:latest": 10 * GiB, "y:latest": 10 * GiB, "z:latest": 1 * GiB}
+    rig = Rig(tmp_path, sizes, loaded=("x:latest", "z:latest"))
+    m = rig.manager
+    a_ends = asyncio.Event()
+
+    async def session_a():
+        await m.ensure_resident(rig.ctx(), _r("x:latest"))
+        async with m.turn(_r("x:latest")):
+            await a_ends.wait()
+
+    a = asyncio.create_task(session_a())
+    await _settle()
+    b = asyncio.create_task(m.ensure_resident(rig.ctx(), _r("y:latest")))
+    await _settle()
+    c = asyncio.create_task(m.ensure_resident(rig.ctx(), _r("x:latest")))
+    d = asyncio.create_task(m.ensure_resident(rig.ctx(), _r("z:latest")))
+    await _settle()
+    assert d.done() and d.exception() is None  # Z's turn proceeds at once
+    assert not b.done() and not c.done()
+    assert rig.ollama.calls == []
+    a_ends.set()
+    await asyncio.wait_for(asyncio.gather(a, b, c), 1)
+    # B unloads X (only X: Z is kept) and loads Y; C then reloads X, unloading
+    # Y (idle once B's task ended). Z is never touched, X moves twice, no more.
+    assert rig.ollama.calls == [("unload", "x:latest"), ("load", "y:latest"),
+                                ("unload", "y:latest"), ("load", "x:latest")]
+
+
+async def test_fast_path_rechecks_after_an_unload_it_raced(tmp_path):
+    """A fast-path /api/ps read taken before an unload must not reserve the gone model."""
+    sizes = {"x:latest": 10 * GiB, "y:latest": 10 * GiB}
+    rig = Rig(tmp_path, sizes, loaded=("x:latest",))
+    m = rig.manager
+    read_gate = asyncio.Event()
+    real = rig.ollama.running_models
+    first = True
+
+    async def slow_first_read():
+        nonlocal first
+        snapshot = await real()
+        if first:
+            first = False
+            await read_gate.wait()  # the snapshot says X is loaded; it goes stale here
+        return snapshot
+
+    rig.ollama.running_models = slow_first_read
+    c = asyncio.create_task(m.ensure_resident(rig.ctx(), _r("x:latest")))
+    await _settle()
+    # Its own task, as a real turn is: the reservation ends with the task.
+    await asyncio.wait_for(asyncio.create_task(m.ensure_resident(rig.ctx(), _r("y:latest"))), 1)
+    read_gate.set()
+    await asyncio.wait_for(c, 1)
+    assert rig.ollama.calls == [("unload", "x:latest"), ("load", "y:latest"),
+                                ("unload", "y:latest"), ("load", "x:latest")]
+
+
+async def test_unneeded_victims_are_pruned(tmp_path):
+    """Review fix 2: idle Z goes first by order, but unloading X alone suffices."""
+    sizes = {"x:latest": 10 * GiB, "y:latest": 10 * GiB, "z:latest": 1 * GiB}
+    rig = Rig(tmp_path, sizes, loaded=("x:latest", "z:latest"))  # 5 GiB free
+    async with rig.manager.turn(_r("x:latest")):
+        task = asyncio.create_task(rig.manager.ensure_resident(rig.ctx(), _r("y:latest")))
+        await _settle()
+    await asyncio.wait_for(task, 1)
+    assert rig.ollama.calls == [("unload", "x:latest"), ("load", "y:latest")]
+    assert rig.loaded_events()[0].evicted == ("x:latest",)

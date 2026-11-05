@@ -12,6 +12,18 @@ instead of counting again, so no load can unload the model between the two
 calls. A reservation that no ``turn`` claims (the caller was cancelled, or fell
 back) is released when the task ends, or replaced by that task's next
 ``ensure_resident``.
+
+**Fast path.** A model that is already loaded and is not a chosen victim of
+the load holding the lock is reserved without taking the lock, so turns on
+loaded models never queue behind an unrelated eviction. The lock holder puts
+its victims in ``_evicting`` before it waits for their turns, and bumps
+``_unloads`` on every unload; a fast-path ``/api/ps`` read is trusted only if
+no unload happened while it was in flight.
+
+**Invariant: one route per turn.** A turn pins one route for every call it
+makes (RFC-0013 §5), so nested ``ensure_resident`` calls inside ``turn(A)``
+are for A and are no-ops. A nested call for a *different* model that needs A
+unloaded would wait for A's turn forever -- a deadlock. Don't nest like that.
 """
 
 from __future__ import annotations
@@ -78,6 +90,9 @@ class ResidencyManager:
         self._reserved: dict[asyncio.Task[Any], str] = {}
         self._watched: set[asyncio.Task[Any]] = set()
         self._preload: asyncio.Task[None] | None = None
+        # Victims the lock holder will unload; never reserved on the fast path.
+        self._evicting: set[str] = set()
+        self._unloads = 0  # bumped on every unload Zygos makes
 
     # -- in-use counts --------------------------------------------------------
 
@@ -182,6 +197,12 @@ class ResidencyManager:
             freed += r.size_vram
             if level(freed) == goal:
                 break
+        # Keep any victim whose unloading turns out not to be needed (an idle
+        # small model chosen first, before the large one that does the job).
+        for r in reversed(victims[:]):
+            if level(freed - r.size_vram) == goal:
+                victims.remove(r)
+                freed -= r.size_vram
         return victims
 
     async def ensure_resident(
@@ -200,15 +221,20 @@ class ResidencyManager:
         if ollama is None or not hasattr(ollama, "load"):
             return
         announced = False
-        if self._lock.locked() and on_loading is not None:
+        unloads = self._unloads
+        try:
+            seen = await ollama.running_models()
+        except Exception:  # noqa: BLE001 - the read under the lock decides and reports
+            seen = None
+        # No await from here to _reserve: the check and the reservation are atomic.
+        if seen is not None and any(r.name == name for r in seen):
+            if name not in self._evicting and self._unloads == unloads:
+                self._reserve(name)
+                return
+        if self._lock.locked() and on_loading is not None and seen is not None:
             # Another load holds the lock: say "loading" now, while this turn waits.
-            try:
-                loaded = any(r.name == name for r in await ollama.running_models())
-            except Exception:  # noqa: BLE001 - the check under the lock decides
-                loaded = True
-            if not loaded:
-                on_loading(route)
-                announced = True
+            on_loading(route)
+            announced = True
         async with self._lock:
             running = await self._running(ollama)
             if any(r.name == name for r in running):
@@ -216,17 +242,27 @@ class ResidencyManager:
                 return
             profile = self._profile(route.model, name)
             victims = await self._victims(profile, [r for r in running if r.name != name])
+            # No await between choosing victims and marking them: the fast path
+            # must not reserve a model this load is about to unload.
+            self._evicting = {v.name for v in victims}
             if on_loading is not None and not announced:
                 on_loading(route)
             evicted: list[str] = []
-            for victim in victims:
-                await self._wait_idle(victim.name)  # never unload under a turn
-                try:
-                    await ollama.unload(victim.name)
-                except Exception as exc:  # noqa: BLE001 - the load decides the outcome
-                    log.warning("can't unload %s: %s", victim.name, exc)
-                    continue
-                evicted.append(victim.name)
+            try:
+                for victim in victims:
+                    # The fit was computed before this wait; after a long wait the
+                    # free VRAM may have changed. Accepted: Ollama spills or refuses,
+                    # and a refused load falls back like any other failure.
+                    await self._wait_idle(victim.name)  # never unload under a turn
+                    self._unloads += 1
+                    try:
+                        await ollama.unload(victim.name)
+                    except Exception as exc:  # noqa: BLE001 - the load decides the outcome
+                        log.warning("can't unload %s: %s", victim.name, exc)
+                        continue
+                    evicted.append(victim.name)
+            finally:
+                self._evicting = set()
             started = self._timer()
             await self._load(ollama, name)
             load_ms = round((self._timer() - started) * 1000)
@@ -262,7 +298,11 @@ class ResidencyManager:
     # -- background preload ---------------------------------------------------
 
     def preload(self, route: RouteChoice) -> None:
-        """Load ``route`` in the background; a newer preload cancels this one."""
+        """Load ``route`` in the background; a newer preload cancels this one.
+
+        Cancelling only cancels Zygos's HTTP call: Ollama may still finish that
+        load server-side. The next load's fit check sees it in ``/api/ps`` and
+        unloads it if it is in the way."""
         previous = self._preload
         if previous is not None and not previous.done():
             previous.cancel()
