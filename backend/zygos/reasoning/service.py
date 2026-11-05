@@ -19,7 +19,7 @@ from zygos.reasoning.types import (
 )
 from zygos.runtime.context import ExecutionContext
 from zygos.runtime.events import ModelSelected, RequestFinished, RequestStarted
-from zygos.services.model import ModelService
+from zygos.services.model import CONFIG_ORDER, ModelService, TurnRoute
 from zygos.services.router import RouteChoice
 from zygos.thinking.capture import Step, ThinkingRecorder
 
@@ -27,7 +27,7 @@ from zygos.thinking.capture import Step, ThinkingRecorder
 class ReasoningService(Protocol):
     async def run(self, ctx: ExecutionContext, input: ReasoningInput, *,
                   thinking: ThinkingRecorder | None = None,
-                  route: RouteChoice | None = None,
+                  route: TurnRoute | None = None,
                   on_route: Callable[[RouteChoice], None] | None = None,
                   on_loading: Callable[[RouteChoice], None] | None = None) -> ReasoningResult: ...
 
@@ -83,11 +83,12 @@ class DefaultReasoningService:
 
     async def run(self, ctx: ExecutionContext, input: ReasoningInput, *,
                   thinking: ThinkingRecorder | None = None,
-                  route: RouteChoice | None = None,
+                  route: TurnRoute | None = None,
                   on_route: Callable[[RouteChoice], None] | None = None,
                   on_loading: Callable[[RouteChoice], None] | None = None) -> ReasoningResult:
         """``route`` is the turn's pinned route (RFC-0013 §5): every call uses it and
-        model.selected reports it. None keeps select_model and the router's order."""
+        model.selected reports it. CONFIG_ORDER: select_model without the saved default,
+        then the router's configured order. None: the old per-call lookup."""
         if self._running:
             raise RuntimeError(
                 "ReasoningService.run is not re-entrant; a run is already in progress on this instance"
@@ -100,8 +101,14 @@ class DefaultReasoningService:
             await ctx.emit(RequestStarted(prompt_chars=len(input.prompt)), source="reasoning")
 
             classification = self._model.classify_task(input.prompt)
-            if route is None:
-                route = self._model.select_model(classification if profile.escalate else None)
+            pick = classification if profile.escalate else None
+            if isinstance(route, RouteChoice):
+                selected = route
+            elif route is CONFIG_ORDER:
+                selected = self._model.select_model(pick, route=CONFIG_ORDER)
+            else:
+                selected = self._model.select_model(pick)
+            route = selected
             self._selected_model = route.model
             await ctx.emit(
                 # classification is the task classification, not necessarily the escalation reason (escalate may be off)

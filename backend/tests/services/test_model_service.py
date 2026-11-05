@@ -288,3 +288,29 @@ async def test_a_change_after_turn_route_does_not_affect_the_pinned_turn():
     [_ async for _ in svc.stream(_ctx(), REQUEST, route=pinned)]
     assert [c["first"] for c in router.calls] == [RouteChoice("ollama", "a")] * 2
     assert store.reads == reads  # an explicit route skips the lookup
+
+
+# -- CONFIG_ORDER: a turn that started with no saved default stays on it ---------
+
+
+async def test_config_order_never_looks_up_the_saved_default():
+    from zygos.services.model import CONFIG_ORDER
+    store = _Store(DefaultModel(provider="ollama", model="q"))
+    router = _SpyRouter()
+    residency = _Residency()
+    svc = DefaultModelService(router, default_status=_status_of(store), residency=residency)
+    await svc.generate(_ctx(), REQUEST, route=CONFIG_ORDER)
+    [_ async for _ in svc.stream(_ctx(), REQUEST, route=CONFIG_ORDER)]
+    assert [(c["op"], c["first"]) for c in router.calls] == [("generate", None), ("stream", None)]
+    assert residency.log == []
+    assert store.reads == 0
+
+
+def test_select_model_config_order_ignores_saved_default():
+    from zygos.services.model import CONFIG_ORDER
+    store = _Store(DefaultModel(provider="ollama", model="q"))
+    svc = DefaultModelService(_SpyRouter(), default_status=_status_of(store))
+    assert svc.select_model(route=CONFIG_ORDER) == PRIMARY
+    assert svc.select_model() == RouteChoice("ollama", "q")
+    pinned = RouteChoice("x", "y")
+    assert svc.select_model(route=pinned) == pinned

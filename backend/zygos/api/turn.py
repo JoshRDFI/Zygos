@@ -42,7 +42,7 @@ from zygos.reasoning.service import ReasoningService
 from zygos.reasoning.types import ReasoningInput
 from zygos.runtime.context import CancelToken, ExecutionContext
 from zygos.runtime.events import ModelChosen
-from zygos.services.model import CATEGORY_OF, ModelService, classify_task
+from zygos.services.model import CATEGORY_OF, CONFIG_ORDER, ModelService, classify_task
 from zygos.services.router import RouteChoice
 from zygos.thinking.capture import TailBuffer, ThinkingRecorder
 from zygos.thinking.support import ThinkingSupportChecker
@@ -135,7 +135,7 @@ async def _emit_model_chosen(ctx: ExecutionContext, deps: TurnDeps, turn_id: str
             if status is not None and status.source == "config":
                 route = status.route
             else:
-                route = deps.model_service.select_model()
+                route = deps.model_service.select_model(route=CONFIG_ORDER)
         await ctx.emit(ModelChosen(turn_id=turn_id, category=category, provider=route.provider,
                                    model=route.model, reason=reason), source="turn")
     except Exception:  # noqa: BLE001 - trace only
@@ -184,7 +184,10 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
         session.enqueue(Frame(channel=CHAT, type="model.loading", payload={
             "turn_id": turn_id, "provider": route.provider, "model": route.model}))
 
-    routing = {"route": pinned, "on_route": answered.append, "on_loading": _on_loading}
+    # No saved default at turn start -> CONFIG_ORDER: the configured order for the
+    # whole turn, never re-reading the default (route=None would look it up per call).
+    routing = {"route": pinned if pinned is not None else CONFIG_ORDER,
+               "on_route": answered.append, "on_loading": _on_loading}
 
     def _think_fields() -> dict:
         return {"model": _route_dict(answered[-1] if answered else None), "category": category,

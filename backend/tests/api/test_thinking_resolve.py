@@ -11,7 +11,7 @@ from zygos.thinking.support import ThinkingSupport
 
 class _Model:
     def turn_route(self): return None
-    def select_model(self, classification=None):
+    def select_model(self, classification=None, **kw):
         return RouteChoice("fake", "m")
 
 

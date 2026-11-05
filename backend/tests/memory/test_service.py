@@ -12,7 +12,7 @@ from zygos.runtime.events import InProcessEventBus
 class FakeModelService:
     def __init__(self, texts): self._texts = list(texts)
     def classify_task(self, prompt): return "standard"
-    def select_model(self, classification=None): raise NotImplementedError
+    def select_model(self, classification=None, **kw): raise NotImplementedError
     def turn_route(self): return None
     def stream(self, ctx, request): raise NotImplementedError
     async def generate(self, ctx, request):

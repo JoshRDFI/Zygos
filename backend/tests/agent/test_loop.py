@@ -162,7 +162,7 @@ async def test_final_generate_uses_tool_choice_none():
 
     class SpyModel:
         def classify_task(self, prompt): return "simple"
-        def select_model(self, classification=None): ...
+        def select_model(self, classification=None, **kw): ...
         def turn_route(self): return None
         async def generate(self, ctx, request, **kw):
             seen.append(request.tool_choice)
@@ -288,7 +288,7 @@ async def test_route_and_callbacks_pass_to_every_generate_including_final():
 
     class SpyModel:
         def classify_task(self, prompt): return "simple"
-        def select_model(self, classification=None): ...
+        def select_model(self, classification=None, **kw): ...
         def turn_route(self): return None
         async def generate(self, ctx, request, *, route=None, on_route=None, on_loading=None):
             seen.append((route, on_route, on_loading))

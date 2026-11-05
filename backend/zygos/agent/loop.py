@@ -24,7 +24,7 @@ from zygos.agent.schema import tool_schema
 from zygos.errors import ToolNotFound
 from zygos.providers.types import GenerationRequest, Message
 from zygos.runtime.context import ExecutionContext
-from zygos.services.model import ModelService
+from zygos.services.model import ModelService, TurnRoute
 from zygos.services.router import RouteChoice
 from zygos.thinking.capture import ThinkingRecorder
 from zygos.tools.service import ToolService
@@ -63,12 +63,12 @@ async def run_agentic_loop(
     observer: ToolObserver | None = None,
     think: bool | None = None,
     thinking: ThinkingRecorder | None = None,
-    route: RouteChoice | None = None,
+    route: TurnRoute | None = None,
     on_route: Callable[[RouteChoice], None] | None = None,
     on_loading: Callable[[RouteChoice], None] | None = None,
 ) -> AgentResult:
     """``route`` is the turn's pinned route (RFC-0013 §5), passed to every
-    generation with ``on_route``/``on_loading``; None keeps the router's order."""
+    generation with ``on_route``/``on_loading``; CONFIG_ORDER keeps the router's configured order; None looks the default up per call."""
     routing = {"route": route, "on_route": on_route, "on_loading": on_loading}
     schemas = tuple(tool_schema(t) for t in tools)
     history: list[Message] = list(messages)

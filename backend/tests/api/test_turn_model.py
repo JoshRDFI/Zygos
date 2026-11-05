@@ -255,6 +255,52 @@ async def test_tools_turn_default_changed_between_generates_keeps_original_route
     assert end2["model"] == {"provider": "third", "model": "t"}
 
 
+@pytest.mark.asyncio
+async def test_tools_turn_no_default_then_saved_mid_turn_stays_on_config_order():
+    rig = None
+
+    class _FlippingPrimary(_Recording):
+        async def generate(self, request):
+            result = await super().generate(request)
+            rig.change_default(SAVED)  # the user saves a default mid-turn
+            return result
+
+    rig = _Rig(saved=None)
+    rig.primary = _FlippingPrimary("fake", script=[_call("echo", {"value": "hi"}), "final answer"])
+    rig.router = ProviderRouter([PRIMARY], {"fake": rig.primary, "other": rig.saved,
+                                            "third": rig.third}, max_attempts=1)
+    rig.service = DefaultModelService(rig.router, default_status=lambda: rig.status)
+    end = _end(await _turn(rig, "echo hi", tools=True))
+    assert rig.primary.calls == 2       # second call still used the configured order
+    assert rig.saved.calls == 0
+    assert end["model"] == {"provider": "fake", "model": "m"}
+    rig.saved._script = None
+    end2 = _end(await _turn(rig, "hi", tools=True))  # the next turn picks it up
+    assert end2["model"] == {"provider": "other", "model": "s"}
+
+
+@pytest.mark.asyncio
+async def test_reasoning_turn_no_default_then_saved_mid_run_stays_on_config_order():
+    rig = None
+
+    class _FlippingPrimary(_Recording):
+        async def generate(self, request):
+            rig.change_default(SAVED)
+            return await super().generate(request)
+
+    rig = _Rig(saved=None)
+    rig.primary = _FlippingPrimary("fake", text="primary answer")
+    rig.router = ProviderRouter([PRIMARY], {"fake": rig.primary, "other": rig.saved,
+                                            "third": rig.third}, max_attempts=1)
+    rig.service = DefaultModelService(rig.router, default_status=lambda: rig.status)
+    end = _end(await _turn(rig, "hard question", reasoning=True))
+    assert rig.primary.calls >= 2
+    assert rig.saved.calls == 0
+    assert end["model"] == {"provider": "fake", "model": "m"}
+    (selected,) = rig.of_type("model.selected")
+    assert (selected.provider, selected.model) == ("fake", "m")
+
+
 # --- reasoning path -----------------------------------------------------------
 
 @pytest.mark.asyncio

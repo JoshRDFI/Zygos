@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import re
 from contextlib import AbstractAsyncContextManager, aclosing
-from typing import TYPE_CHECKING, AsyncIterator, Callable, Literal, Mapping, Protocol
+from typing import TYPE_CHECKING, AsyncIterator, Callable, Final, Literal, Mapping, Protocol, Union
 
 from zygos.errors import ProviderError
 from zygos.providers.types import LOCAL_PROVIDERS, GenerationChunk, GenerationRequest, GenerationResult
@@ -45,6 +45,29 @@ def classify_task(prompt: str) -> TaskClassification:
     return "standard"
 
 
+class _ConfigOrder:
+    """A turn that began with no saved default (RFC-0013 §5, ruling P5): use the
+    router's configured order and do not look the saved default up again, so a
+    default saved mid-turn applies from the next turn."""
+
+    _instance: "_ConfigOrder | None" = None
+
+    def __new__(cls) -> "_ConfigOrder":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __repr__(self) -> str:
+        return "CONFIG_ORDER"
+
+
+CONFIG_ORDER: Final = _ConfigOrder()
+
+# What a turn pins for all its calls: the saved default, or CONFIG_ORDER.
+# ``route=None`` (non-turn callers: memory consolidation, doctor) looks it up per call.
+TurnRoute = Union[RouteChoice, _ConfigOrder]
+
+
 class ResidencyLike(Protocol):
     """Keeps a local model loaded for a call (RFC-0013 §5; implemented in Task 4).
 
@@ -66,7 +89,8 @@ class ResidencyLike(Protocol):
 class ModelService(Protocol):
     def classify_task(self, prompt: str) -> TaskClassification: ...
 
-    def select_model(self, classification: TaskClassification | None = None) -> RouteChoice: ...
+    def select_model(self, classification: TaskClassification | None = None, *,
+                     route: TurnRoute | None = None) -> RouteChoice: ...
 
     def turn_route(self) -> RouteChoice | None: ...
 
@@ -75,7 +99,7 @@ class ModelService(Protocol):
         ctx: ExecutionContext,
         request: GenerationRequest,
         *,
-        route: RouteChoice | None = None,
+        route: TurnRoute | None = None,
         on_route: Callable[[RouteChoice], None] | None = None,
         on_loading: Callable[[RouteChoice], None] | None = None,
     ) -> GenerationResult: ...
@@ -85,7 +109,7 @@ class ModelService(Protocol):
         ctx: ExecutionContext,
         request: GenerationRequest,
         *,
-        route: RouteChoice | None = None,
+        route: TurnRoute | None = None,
         on_route: Callable[[RouteChoice], None] | None = None,
         on_loading: Callable[[RouteChoice], None] | None = None,
     ) -> AsyncIterator[GenerationChunk]: ...
@@ -122,7 +146,9 @@ class DefaultModelService:
         status = self._default_status()
         return status.route if status.source == "saved" else None
 
-    def _first(self, route: RouteChoice | None) -> RouteChoice | None:
+    def _first(self, route: TurnRoute | None) -> RouteChoice | None:
+        if route is CONFIG_ORDER:
+            return None  # the configured order, exactly the no-default path
         return route if route is not None else self._saved_default()
 
     def _needs_residency(self, first: RouteChoice | None) -> bool:
@@ -145,10 +171,15 @@ class DefaultModelService:
             return False
         return True
 
-    def select_model(self, classification: TaskClassification | None = None) -> RouteChoice:
+    def select_model(self, classification: TaskClassification | None = None, *,
+                     route: TurnRoute | None = None) -> RouteChoice:
+        """``route`` is a turn's pinned route: a RouteChoice is returned as is;
+        CONFIG_ORDER skips the saved-default lookup; None looks it up."""
+        if isinstance(route, RouteChoice):
+            return route
         if classification is not None and classification in self._task_routes:
             return self._task_routes[classification]
-        saved = self._saved_default()
+        saved = None if route is CONFIG_ORDER else self._saved_default()
         if saved is not None:
             return saved
         return self._router.first_eligible()
@@ -158,7 +189,7 @@ class DefaultModelService:
         ctx: ExecutionContext,
         request: GenerationRequest,
         *,
-        route: RouteChoice | None = None,
+        route: TurnRoute | None = None,
         on_route: Callable[[RouteChoice], None] | None = None,
         on_loading: Callable[[RouteChoice], None] | None = None,
     ) -> GenerationResult:
@@ -176,7 +207,7 @@ class DefaultModelService:
         ctx: ExecutionContext,
         request: GenerationRequest,
         *,
-        route: RouteChoice | None = None,
+        route: TurnRoute | None = None,
         on_route: Callable[[RouteChoice], None] | None = None,
         on_loading: Callable[[RouteChoice], None] | None = None,
     ) -> AsyncIterator[GenerationChunk]:
