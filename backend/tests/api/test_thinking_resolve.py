@@ -97,3 +97,19 @@ async def test_think_state_unroutable_model():
     await send_think_state(session, _unroutable_deps())
     assert sent[0].payload == {"enabled": False, "supported": False,
                                "reason": "couldn't check the model"}
+
+
+@pytest.mark.asyncio
+async def test_resolve_think_checks_the_given_route():
+    pinned = RouteChoice("other", "s")
+    seen = []
+
+    class _PinModel:
+        def select_model(self, classification=None, *, route=None):
+            seen.append(route)
+            return route if isinstance(route, RouteChoice) else RouteChoice("fake", "m")
+
+    checker = _Checker(ThinkingSupport(supported=True))
+    deps = SimpleNamespace(think_default=False, thinking_support=checker, model_service=_PinModel())
+    assert await resolve_think(_session(), deps, True, route=pinned) == (True, None)
+    assert checker.calls == [pinned] and seen == [pinned]

@@ -16,7 +16,7 @@ from zygos.config.schema import ReasoningConfig
 from zygos.errors import ProviderUnavailable
 from zygos.models.default import DefaultModel, DefaultStatus
 from zygos.providers.fake import FakeProvider
-from zygos.providers.types import GenerationResult, ToolInvocation
+from zygos.providers.types import GenerationChunk, GenerationResult, ToolInvocation
 from zygos.reasoning.service import DefaultReasoningService
 from zygos.runtime.context import CancelToken, root_context
 from zygos.runtime.events import InProcessEventBus
@@ -79,7 +79,7 @@ class _Rig:
     def change_default(self, route):
         self.status = DefaultStatus(source="saved", route=route)
 
-    def deps(self, *, reasoning=False, tools=False, default_status=True):
+    def deps(self, *, reasoning=False, tools=False, default_status=True, thinking_support=None):
         model = self.service
         return TurnDeps(
             model_service=model,
@@ -92,6 +92,7 @@ class _Rig:
             tools=(EchoTool(),) if tools else (),
             tool_loop_config=ToolLoopConfig() if tools else None,
             default_status=(lambda: self.status) if default_status else None,
+            thinking_support=thinking_support,
         )
 
     def frames(self):
@@ -116,9 +117,9 @@ def _call(name, args, cid="c1"):
                             finish_reason="tool_calls")
 
 
-async def _turn(rig, text="hi", **deps_kw):
+async def _turn(rig, text="hi", think=None, **deps_kw):
     await run_turn(rig.session, rig.deps(**deps_kw), text, CancelToken(),
-                   spoken_input=False, think=None)
+                   spoken_input=False, think=think)
     return rig.frames()
 
 
@@ -408,3 +409,68 @@ def test_app_turn_deps_carry_runtime_default_status():
     from zygos.runtime.bootstrap import build_runtime
     runtime = build_runtime()
     assert create_app(runtime).state.turn_deps.default_status is runtime.default_status
+
+
+# --- thinking check uses the pinned route (review fix round 2) ---------------
+
+class _ThinkChecker:
+    def __init__(self, on_check=None):
+        self.routes = []
+        self._on_check = on_check
+
+    async def check(self, route):
+        from zygos.thinking.support import ThinkingSupport
+        self.routes.append(route)
+        if self._on_check is not None:
+            self._on_check()  # e.g. the user changes the default during the probe
+        return ThinkingSupport(supported=True)
+
+
+@pytest.mark.asyncio
+async def test_think_check_names_the_pinned_model():
+    rig = _Rig()
+    checker = _ThinkChecker()
+    end = _end(await _turn(rig, "hi", think=True, thinking_support=checker))
+    assert checker.routes == [SAVED]
+    assert end["model"] == {"provider": "other", "model": "s"}
+    assert end["think"] is True
+
+
+@pytest.mark.asyncio
+async def test_default_changed_during_think_check_keeps_answering_model():
+    rig = _Rig()
+    checker = _ThinkChecker(on_check=lambda: rig.change_default(LATER))
+    end = _end(await _turn(rig, "hi", think=True, thinking_support=checker))
+    assert checker.routes == [SAVED]
+    assert end["model"] == {"provider": "other", "model": "s"}
+    assert rig.third.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_think_check_without_saved_default_skips_the_store_mid_turn():
+    rig = _Rig(saved=None)
+    checker = _ThinkChecker(on_check=lambda: rig.change_default(SAVED))
+    end = _end(await _turn(rig, "hi", think=True, thinking_support=checker))
+    assert checker.routes == [PRIMARY]
+    assert end["model"] == {"provider": "fake", "model": "m"}
+    assert rig.saved.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_cancel_mid_stream_after_a_chunk_carries_the_answering_model():
+    rig = None
+    cancel = CancelToken()
+
+    class _CancelAfterFirst(_Recording):
+        async def stream(self, request):
+            self.calls += 1
+            yield GenerationChunk(text="first")
+            cancel.trip()
+            yield GenerationChunk(text="second")
+            yield GenerationChunk(text="", done=True)
+
+    rig = _Rig(saved_provider=_CancelAfterFirst("other"))
+    await run_turn(rig.session, rig.deps(), "hi", cancel, spoken_input=False, think=None)
+    end = _end(rig.frames())
+    assert end["cancelled"] is True
+    assert end["model"] == {"provider": "other", "model": "s"}

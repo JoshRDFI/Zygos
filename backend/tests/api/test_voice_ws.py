@@ -186,7 +186,7 @@ class _BlockingModel:
         return "simple"
 
     def turn_route(self): return None
-    def select_model(self, classification=None) -> RouteChoice:
+    def select_model(self, classification=None, **kw) -> RouteChoice:
         return RouteChoice("fake", "m")
 
     async def generate(self, ctx, request, **kw):

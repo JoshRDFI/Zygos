@@ -163,13 +163,6 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
             prefs = deps.preferences.get()
         except Exception:  # noqa: BLE001 - personalization is advisory (RFC-0010)
             logger.warning("preferences read failed; degrading to no identity", exc_info=True)
-    effective, unsupported_reason = await resolve_think(session, deps, think)
-    recorder = ThinkingRecorder(turn_id)
-    ctx = session.root.child(turn_id, cancel=cancel)
-    session.begin_turn()
-    session.enqueue(Frame(channel=CHAT, type="turn.start", payload={
-        "turn_id": turn_id, "think": effective, "rethink_of": rethink_of}))
-
     # RFC-0013 §5 ruling P5: the route is pinned once per turn; every call of the
     # turn gets it, so a default changed mid-turn applies from the next turn.
     category = CATEGORY_OF[classify_task(text)]
@@ -178,16 +171,24 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
     except Exception:  # noqa: BLE001 - an unreadable saved default is ignored, never an error
         logger.warning("saved default lookup failed; using the router's order", exc_info=True)
         pinned = None
+    # No saved default at turn start -> CONFIG_ORDER: the configured order for the
+    # whole turn, never re-reading the default (route=None would look it up per call).
+    turn_pin = pinned if pinned is not None else CONFIG_ORDER
+    # The thinking check names the pinned model (it can take PROBE_TIMEOUT_S).
+    effective, unsupported_reason = await resolve_think(session, deps, think, route=turn_pin)
+    recorder = ThinkingRecorder(turn_id)
+    ctx = session.root.child(turn_id, cancel=cancel)
+    session.begin_turn()
+    session.enqueue(Frame(channel=CHAT, type="turn.start", payload={
+        "turn_id": turn_id, "think": effective, "rethink_of": rethink_of}))
+
     answered: list[RouteChoice] = []  # the last route that answered is who answered
 
     def _on_loading(route: RouteChoice) -> None:
         session.enqueue(Frame(channel=CHAT, type="model.loading", payload={
             "turn_id": turn_id, "provider": route.provider, "model": route.model}))
 
-    # No saved default at turn start -> CONFIG_ORDER: the configured order for the
-    # whole turn, never re-reading the default (route=None would look it up per call).
-    routing = {"route": pinned if pinned is not None else CONFIG_ORDER,
-               "on_route": answered.append, "on_loading": _on_loading}
+    routing = {"route": turn_pin, "on_route": answered.append, "on_loading": _on_loading}
 
     def _think_fields() -> dict:
         return {"model": _route_dict(answered[-1] if answered else None), "category": category,

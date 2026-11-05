@@ -68,7 +68,8 @@ async def run_agentic_loop(
     on_loading: Callable[[RouteChoice], None] | None = None,
 ) -> AgentResult:
     """``route`` is the turn's pinned route (RFC-0013 §5), passed to every
-    generation with ``on_route``/``on_loading``; CONFIG_ORDER keeps the router's configured order; None looks the default up per call."""
+    generation with ``on_route``/``on_loading``. CONFIG_ORDER keeps the
+    router's configured order; None looks the default up per call."""
     routing = {"route": route, "on_route": on_route, "on_loading": on_loading}
     schemas = tuple(tool_schema(t) for t in tools)
     history: list[Message] = list(messages)

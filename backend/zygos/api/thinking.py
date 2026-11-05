@@ -16,20 +16,29 @@ from zygos.thinking.support import ThinkingSupport, check_selected
 THINKING_PREFIX = "Let me think about that."
 
 
-async def _check_support(deps) -> ThinkingSupport:
-    """Route + support check that never raises (an unroutable model is unsupported)."""
-    return await check_selected(deps.thinking_support, deps.model_service.select_model)
+async def _check_support(deps, route=None) -> ThinkingSupport:
+    """Route + support check that never raises (an unroutable model is unsupported).
+
+    ``route`` is a turn's pinned route (RFC-0013 §5): the check names the model
+    that will answer, without reading the saved default again."""
+    select = deps.model_service.select_model
+    if route is not None:
+        def select():
+            return deps.model_service.select_model(route=route)
+    return await check_selected(deps.thinking_support, select)
 
 
-async def resolve_think(session, deps, requested: bool | None) -> tuple[bool | None, str | None]:
-    """Return ``(effective, unsupported_reason)`` for this turn."""
+async def resolve_think(session, deps, requested: bool | None, *,
+                        route=None) -> tuple[bool | None, str | None]:
+    """Return ``(effective, unsupported_reason)`` for this turn; ``route`` is the
+    turn's pinned route (a RouteChoice or CONFIG_ORDER), None to look it up."""
     value = requested
     if value is None:
         value = session.think
     if value is None:
         value = deps.think_default
     if value is True and deps.thinking_support is not None:
-        support = await _check_support(deps)
+        support = await _check_support(deps, route)
         if not support.supported:
             return False, support.reason
     return value, None
