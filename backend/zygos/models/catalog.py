@@ -315,6 +315,14 @@ class ModelCatalog:
         profile = None if name is None else self._profiles.get("ollama", name)
         return profile if profile is not None and profile.digest is None else None
 
+    async def hardware_now(self) -> HardwareSnapshot:
+        """A fresh hardware scan (residency's fit check, RFC-0013 §8); never raises."""
+        return await asyncio.to_thread(self._hardware.scan)
+
+    def reserve_bytes(self) -> int:
+        """VRAM about to be taken by Kokoro on CUDA (see ``VramContext``)."""
+        return self._reserve_bytes()
+
     def _reserve_bytes(self) -> int:
         voice = self._config.voice
         if not (voice.enabled and voice.tts.engine == "kokoro" and voice.tts.device == "cuda"):

@@ -115,6 +115,16 @@ class ModelFit(EventPayload):
     measured: bool
 
 
+class ModelLoaded(EventPayload):
+    """Zygos loaded a local model, unloading ``evicted`` to make room (RFC-0013 §8)."""
+
+    type: Literal["model.loaded"] = "model.loaded"
+    provider: str
+    model: str
+    load_ms: int
+    evicted: tuple[str, ...]
+
+
 AnyPayload = Annotated[
     Union[
         RouteClaimed,
@@ -129,6 +139,7 @@ AnyPayload = Annotated[
         ModelThinking,
         SpeechTiming,
         ModelFit,
+        ModelLoaded,
     ],
     Field(discriminator="type"),
 ]

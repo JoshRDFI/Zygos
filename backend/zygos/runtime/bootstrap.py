@@ -35,6 +35,7 @@ from zygos.memory.vector_search import VectorSearch
 from zygos.models.catalog import ModelCatalog
 from zygos.models.choices import ModelChoicesStore, SqliteModelChoicesStore
 from zygos.models.default import DefaultStatus, can_create, resolve_default
+from zygos.models.residency import ResidencyManager
 from zygos.models.store import ProfileStore
 from zygos.personalization import PreferencesStore, SqlitePreferencesStore
 from zygos.plugins.resolver import PluginRegistry
@@ -90,6 +91,7 @@ class RuntimeAssembly:
     backends: BackendsStore
     address_sources: Mapping[str, AddressSource]
     addresses_at_start: Mapping[str, str]
+    residency: ResidencyManager | None = None
 
     def new_context(self, *, session_id: str | None = None) -> ExecutionContext:
         return root_context(self.event_bus, session_id=session_id)
@@ -289,8 +291,39 @@ def build_runtime(
             routable=lambda name: name in providers or creatable(name),
         )
 
-    # residency is wired by RFC-0013 phase 2 Task 4.
-    model_service = DefaultModelService(router, task_routes=task_routes, default_status=default_status)
+    voice_service: VoiceService | None = None
+    if config.voice.enabled:
+        stt_plugin = build_stt_plugin(config.voice.stt)
+        tts_plugin = build_tts_plugin(config.voice.tts)
+        voice_service = VoiceService(stt=stt_plugin, tts=tts_plugin)
+        registry.register(Capability.SPEECH_TO_TEXT, stt_plugin, priority=0)
+        registry.register(Capability.TEXT_TO_SPEECH, tts_plugin, priority=0)
+        # `VoiceService.start` is intentionally NOT awaited here — build_runtime
+        # is a sync composition root; the async consumer (Task 10) spawns the
+        # sidecar at startup.
+
+    hardware = HardwareProbe(models_dir=config.models.ollama_models_dir)
+    profiles = ProfileStore(Path(config.models.profiles_dir))
+    profiles.load_all()
+    model_catalog = ModelCatalog(
+        providers=providers,
+        profiles=profiles,
+        hardware=hardware,
+        config=config,
+        voice_snapshot=(voice_service.snapshot if voice_service is not None else lambda: None),
+        clock=lambda: datetime.now(timezone.utc),
+        backends=backends,
+        client=client,
+    )
+    assembled.append(model_catalog)
+
+    # Serialised local loads, no eviction mid-turn (RFC-0013 §8).
+    residency = ResidencyManager(
+        router.provider_for, model_catalog, profiles,
+        clock=lambda: datetime.now(timezone.utc), context=lambda: root_context(bus),
+    )
+    model_service = DefaultModelService(
+        router, task_routes=task_routes, default_status=default_status, residency=residency)
     reasoning_service = DefaultReasoningService(model_service, config.reasoning)
 
     def reasoning_factory() -> ReasoningService:
@@ -341,32 +374,6 @@ def build_runtime(
         # `resume()` is intentionally NOT awaited here — build_runtime is a sync
         # composition root; the async consumer (M8) drains it at startup.
 
-    voice_service: VoiceService | None = None
-    if config.voice.enabled:
-        stt_plugin = build_stt_plugin(config.voice.stt)
-        tts_plugin = build_tts_plugin(config.voice.tts)
-        voice_service = VoiceService(stt=stt_plugin, tts=tts_plugin)
-        registry.register(Capability.SPEECH_TO_TEXT, stt_plugin, priority=0)
-        registry.register(Capability.TEXT_TO_SPEECH, tts_plugin, priority=0)
-        # `VoiceService.start` is intentionally NOT awaited here — build_runtime
-        # is a sync composition root; the async consumer (Task 10) spawns the
-        # sidecar at startup.
-
-    hardware = HardwareProbe(models_dir=config.models.ollama_models_dir)
-    profiles = ProfileStore(Path(config.models.profiles_dir))
-    profiles.load_all()
-    model_catalog = ModelCatalog(
-        providers=providers,
-        profiles=profiles,
-        hardware=hardware,
-        config=config,
-        voice_snapshot=(voice_service.snapshot if voice_service is not None else lambda: None),
-        clock=lambda: datetime.now(timezone.utc),
-        backends=backends,
-        client=client,
-    )
-    assembled.append(model_catalog)
-
     return RuntimeAssembly(
         config=config,
         plugins=plugin_registry,
@@ -395,4 +402,5 @@ def build_runtime(
         backends=backends,
         address_sources=address_sources,
         addresses_at_start=addresses_at_start,
+        residency=residency,
     )

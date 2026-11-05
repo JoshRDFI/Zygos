@@ -422,3 +422,21 @@ def test_bootstrap_routable_agrees_with_the_provider_factory(tmp_path: Path):
                 assert status.route == RouteChoice("fake", "demo")
     finally:
         asyncio.run(runtime.aclose())
+
+
+def test_build_runtime_wires_residency_into_the_model_service(tmp_path: Path):
+    from zygos.models.residency import ResidencyManager
+
+    file = tmp_path / "config.yaml"
+    file.write_text(
+        f"personalization:\n  db_path: '{tmp_path / 'p.db'}'\nmodels:\n  profiles_dir: '{tmp_path / 'profiles'}'\n",
+        encoding="utf-8")
+    runtime = build_runtime(file)
+    try:
+        assert isinstance(runtime.residency, ResidencyManager)
+        assert runtime.model_service._residency is runtime.residency
+        # provider_for is the router's lookup: the configured Ollama provider.
+        assert runtime.residency._provider_for("ollama") is runtime.providers["ollama"]
+        assert runtime.residency._catalog is runtime.model_catalog
+    finally:
+        asyncio.run(runtime.aclose())

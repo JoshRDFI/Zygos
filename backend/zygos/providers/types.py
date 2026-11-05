@@ -111,6 +111,10 @@ class EmbedResult(BaseModel):
 
 
 PROBE_TIMEOUT_S = 5.0
+# Loading a local model can take minutes from a cold disk (RFC-0013 §8).
+LOAD_TIMEOUT_S = 300.0
+# keep_alive on Zygos's own load call only; Ollama's default applies otherwise.
+OLLAMA_KEEP_ALIVE = "30m"
 """Upper bound on a thinking-support probe (RFC-0012 §5); far below the generation timeout."""
 
 

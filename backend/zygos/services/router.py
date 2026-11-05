@@ -196,6 +196,10 @@ class ProviderRouter:
                 self._limiters[name] = _RateLimiter(self._max_requests_per_minute, self._now)
         return self._factory_results[name]
 
+    def provider_for(self, name: str) -> Provider | None:
+        """The provider the router would call for ``name`` (residency, RFC-0013 §8)."""
+        return self._provider_for(name)
+
     async def _order(self, ctx: ExecutionContext, first: RouteChoice | None) -> list[RouteChoice]:
         """[first] + configured routes without it. A `first` with no provider is
         reported as skipped and dropped. first=None -> configured order unchanged."""

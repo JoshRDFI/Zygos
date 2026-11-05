@@ -51,6 +51,13 @@ class ProviderProtocolError(ProviderError):
     retryable = False
 
 
+class ModelLoadFailed(ProviderError):
+    """A local model could not be loaded (RFC-0013 §8): the turn falls back."""
+
+    code = "model_load_failed"
+    retryable = False
+
+
 class ToolError(ZygosError):
     """A tool operation failed. Base for the tool-error taxonomy.
 

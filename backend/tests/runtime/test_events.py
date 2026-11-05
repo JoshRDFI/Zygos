@@ -129,3 +129,14 @@ def test_route_skipped_round_trips():
     ev = Event(run_id="r", span_id="s", source="router", payload=payload)
     assert ev.type == "route.skipped"
     assert Event.model_validate(ev.model_dump()) == ev
+
+
+def test_model_loaded_payload_round_trips():
+    from zygos.runtime.events import Event, ModelLoaded
+
+    payload = ModelLoaded(provider="ollama", model="qwen3:8b", load_ms=2500, evicted=("gemma4:latest",))
+    event = Event(run_id="r", session_id=None, span_id="s", parent_span_id=None, source="models",
+                  payload=payload)
+    again = Event.model_validate_json(event.model_dump_json())
+    assert again.payload == payload
+    assert again.payload.type == "model.loaded"

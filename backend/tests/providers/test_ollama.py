@@ -247,3 +247,46 @@ async def test_thinking_support_reads_capabilities():
     no = await make(["completion"]).thinking_support("qwen3:8b")
     assert no.supported is False
     assert no.reason == "qwen3:8b can't think"
+
+
+async def test_load_posts_an_empty_generate_with_keep_alive_and_the_load_timeout():
+    from zygos.providers.types import LOAD_TIMEOUT_S
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content)
+        seen["timeout"] = request.extensions["timeout"]
+        return httpx.Response(200, json={"model": "m", "done": True, "done_reason": "load"})
+
+    await _make(make_client(handler)).load("qwen3:8b", keep_alive="30m")
+    assert seen["path"] == "/api/generate"
+    assert seen["body"] == {"model": "qwen3:8b", "prompt": "", "keep_alive": "30m"}
+    assert seen["timeout"]["read"] == LOAD_TIMEOUT_S == 300.0
+
+
+async def test_unload_posts_keep_alive_zero():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"model": "m", "done": True, "done_reason": "unload"})
+
+    await _make(make_client(handler)).unload("qwen3:8b")
+    assert seen["body"] == {"model": "qwen3:8b", "prompt": "", "keep_alive": 0}
+
+
+async def test_load_errors_map_to_the_provider_error_family():
+    import pytest
+
+    from zygos.errors import ProviderProtocolError, ProviderTimeout
+
+    with pytest.raises(ProviderProtocolError):
+        await _make(make_client(lambda r: httpx.Response(404, json={"error": "not found"}))).load(
+            "missing", keep_alive="30m")
+
+    def slow(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("slow", request=request)
+
+    with pytest.raises(ProviderTimeout):
+        await _make(make_client(slow)).load("m", keep_alive="30m")

@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from zygos.errors import ProviderProtocolError
 from zygos.providers.base import ProviderSettings, ensure_ok, translate_transport_error
 from zygos.providers.types import (
-    PROBE_TIMEOUT_S, EmbedRequest, EmbedResult, GenerationChunk, GenerationRequest, GenerationResult,
+    LOAD_TIMEOUT_S, PROBE_TIMEOUT_S, EmbedRequest, EmbedResult, GenerationChunk, GenerationRequest, GenerationResult,
     OllamaModel, OllamaRunning, OllamaShow, ThinkingSupport, ToolInvocation, Usage,
 )
 from zygos.runtime.capabilities import Capability
@@ -148,6 +148,26 @@ class OllamaProvider:
             return OllamaShow(**payload)
         except (ValidationError, TypeError) as error:
             raise ProviderProtocolError(f"ollama returned malformed body: {error}", provider=self.name) from error
+
+    async def _keep_alive(self, model: str, keep_alive: str | int) -> None:
+        """An empty-prompt ``/api/generate``: Ollama loads (or, at 0, unloads) the model."""
+        try:
+            response = await self._client.post(
+                f"{self._settings.base_url}/api/generate",
+                json={"model": model, "prompt": "", "keep_alive": keep_alive},
+                timeout=LOAD_TIMEOUT_S,
+            )
+        except httpx.HTTPError as error:
+            raise translate_transport_error(self.name, error) from error
+        ensure_ok(self.name, response)
+
+    async def load(self, model: str, *, keep_alive: str) -> None:
+        """Load ``model`` and keep it loaded for ``keep_alive`` (RFC-0013 §8)."""
+        await self._keep_alive(model, keep_alive)
+
+    async def unload(self, model: str) -> None:
+        """Unload ``model`` now (``keep_alive: 0``)."""
+        await self._keep_alive(model, 0)
 
     async def embed(self, request: EmbedRequest) -> EmbedResult:
         try:
