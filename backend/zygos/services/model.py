@@ -13,10 +13,9 @@ from contextlib import AbstractAsyncContextManager, aclosing
 from typing import TYPE_CHECKING, AsyncIterator, Callable, Literal, Mapping, Protocol
 
 from zygos.errors import ProviderError
-from zygos.models.catalog import LOCAL_PROVIDERS
-
-from zygos.providers.types import GenerationChunk, GenerationRequest, GenerationResult
+from zygos.providers.types import LOCAL_PROVIDERS, GenerationChunk, GenerationRequest, GenerationResult
 from zygos.runtime.context import ExecutionContext
+from zygos.runtime.events import RouteSkipped
 from zygos.services.router import ProviderRouter, RouteChoice
 
 if TYPE_CHECKING:
@@ -63,6 +62,8 @@ class ModelService(Protocol):
 
     def select_model(self, classification: TaskClassification | None = None) -> RouteChoice: ...
 
+    def turn_route(self) -> RouteChoice | None: ...
+
     async def generate(
         self,
         ctx: ExecutionContext,
@@ -101,6 +102,13 @@ class DefaultModelService:
     def classify_task(self, prompt: str) -> TaskClassification:
         return classify_task(prompt)
 
+    def turn_route(self) -> RouteChoice | None:
+        """The saved default when it is in effect, else None -- one store read.
+
+        A turn calls this once and passes the result as ``route=`` to every
+        call it makes, so a change made mid-turn does not affect it."""
+        return self._saved_default()
+
     def _saved_default(self) -> RouteChoice | None:
         """The saved default when it is in effect, looked up on every call."""
         if self._default_status is None:
@@ -124,6 +132,10 @@ class DefaultModelService:
             await self._residency.ensure_resident(ctx, first, on_loading=on_loading)
         except ProviderError as exc:
             _log.warning("%s/%s can't be loaded (%s); falling back", first.provider, first.model, exc)
+            await ctx.emit(
+                RouteSkipped(provider=first.provider, model=first.model, reason="load_failed"),
+                source="models",
+            )
             return False
         return True
 

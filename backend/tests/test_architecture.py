@@ -57,3 +57,28 @@ def test_providers_never_import_the_thinking_package():
                for m in _imported_modules(file.read_text(encoding="utf-8")))
     ]
     assert offenders == [], f"providers import zygos.thinking: {offenders}"
+
+
+def test_model_service_does_not_load_the_catalog_or_voice():
+    """RFC-0013 §5: the turn-path model service stays light; the catalog
+    (hardware probe, GGUF, voice state) sits above it."""
+    import subprocess
+    import sys
+
+    code = (
+        "import sys, zygos.services.model\n"
+        "bad = sorted(m for m in sys.modules if m == 'zygos.models.catalog' or m == 'zygos.voice'"
+        " or m.startswith('zygos.voice.'))\n"
+        "print(','.join(bad))\n"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True,
+                         cwd=PACKAGE_ROOT.parent)
+    assert out.stdout.strip() == ""
+
+
+def test_local_providers_live_below_the_catalog():
+    from zygos.models import catalog
+    from zygos.providers import types
+
+    assert catalog.LOCAL_PROVIDERS is types.LOCAL_PROVIDERS
+    assert types.LOCAL_PROVIDERS == frozenset({"ollama", "llamacpp", "vllm", "fake"})

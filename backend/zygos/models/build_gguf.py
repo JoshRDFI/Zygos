@@ -15,8 +15,7 @@ from zygos.models.fit import KV_BYTES_PER_ELEMENT
 from zygos.models.gguf import GgufHeader
 from zygos.models.gguf_scan import GgufModel
 from zygos.models.profile import ModelProfile, Source, record
-
-LLAMACPP_PROVIDER = "llamacpp"
+from zygos.providers.types import LLAMACPP_PROVIDER
 
 # llama.cpp LLAMA_FTYPE values (general.file_type) for the common quantizations.
 QUANT_NAMES: dict[int, str] = {

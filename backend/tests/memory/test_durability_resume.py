@@ -19,6 +19,7 @@ class FlakyModelService:
 
     def classify_task(self, prompt): return "standard"
     def select_model(self, classification=None): raise NotImplementedError
+    def turn_route(self): return None
     def stream(self, ctx, request): raise NotImplementedError
 
     async def generate(self, ctx, request):

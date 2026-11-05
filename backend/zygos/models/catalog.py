@@ -42,18 +42,13 @@ from zygos.models.gguf_scan import GgufModel, scan_folder
 from zygos.models.profile import ModelProfile, Sourced, record, resolve
 from zygos.models.store import ProfileStore
 from zygos.providers.base import Provider
-from zygos.providers.types import OllamaModel, OllamaRunning, OllamaShow
+# LOCAL_PROVIDERS is defined with the provider types and re-exported here.
+from zygos.providers.types import LOCAL_PROVIDERS, OllamaModel, OllamaRunning, OllamaShow, ollama_name
 from zygos.runtime.context import ExecutionContext
 from zygos.runtime.events import ModelFit
 from zygos.voice.service import VoiceState
 
 log = logging.getLogger("zygos.models")
-
-# Every generation provider declares Capability.LOCAL_INFERENCE (it is the
-# "can generate" contract), so it cannot tell local from cloud. These are the
-# built-in providers that run on this machine; anything else is labelled cloud,
-# the label that never understates where data goes.
-LOCAL_PROVIDERS: frozenset[str] = frozenset({"ollama", LLAMACPP_PROVIDER, "vllm", "fake"})
 
 _ERROR_CHARS = 200
 VLLM_FIT_TEXT = "fit not checked: vLLM reserves its GPU share at start"
@@ -106,8 +101,7 @@ class ModelsView(BaseModel):
     models: tuple[ModelEntry, ...]
 
 
-def _ollama_name(model: str) -> str:
-    return model if ":" in model else f"{model}:latest"
+_ollama_name = ollama_name
 
 
 def _value(profile: ModelProfile, key: str) -> Any:

@@ -34,7 +34,7 @@ class RouteSkipped(EventPayload):
     type: Literal["route.skipped"] = "route.skipped"
     provider: str
     model: str
-    reason: Literal["no_provider", "circuit_open", "rate_limited"]
+    reason: Literal["no_provider", "circuit_open", "rate_limited", "load_failed"]
 
 
 class CircuitOpened(EventPayload):

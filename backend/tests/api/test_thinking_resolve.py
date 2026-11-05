@@ -10,6 +10,7 @@ from zygos.thinking.support import ThinkingSupport
 
 
 class _Model:
+    def turn_route(self): return None
     def select_model(self, classification=None):
         return RouteChoice("fake", "m")
 
@@ -73,6 +74,7 @@ async def test_resolve_false_never_checks(requested, default):
 
 
 class _UnroutableModel:
+    def turn_route(self): return None
     def select_model(self, *a, **k):
         from zygos.errors import ProviderUnavailable
         raise ProviderUnavailable("No eligible provider routes", provider="router")

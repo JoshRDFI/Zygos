@@ -72,6 +72,7 @@ class _BlockingModel:
     def classify_task(self, prompt):
         return "simple"
 
+    def turn_route(self): return None
     def select_model(self, classification=None):
         return RouteChoice("fake", "m")
 

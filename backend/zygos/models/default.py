@@ -15,8 +15,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from zygos.models.build_gguf import LLAMACPP_PROVIDER
 from zygos.models.choices import DefaultModel, ModelChoices
+from zygos.providers.types import LLAMACPP_PROVIDER, ollama_name
 from zygos.services.router import RouteChoice
 
 # Providers that need an API key credential before they can answer.
@@ -45,9 +45,7 @@ def can_create(name: str, *, declared: Collection[str], api_key: str | None) -> 
 
 
 def _is_installed(provider: str, model: str, names: frozenset[str]) -> bool:
-    if model in names:
-        return True
-    return provider == "ollama" and ":" not in model and f"{model}:latest" in names
+    return model in names or (provider == "ollama" and ollama_name(model) in names)
 
 
 def resolve_default(

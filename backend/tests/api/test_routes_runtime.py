@@ -93,6 +93,7 @@ async def test_get_runtime_populates_thinking():
 class _UnroutableModel:
     """A model service whose every circuit is open."""
 
+    def turn_route(self): return None
     def select_model(self, *a, **k):
         from zygos.errors import ProviderUnavailable
         raise ProviderUnavailable("No eligible provider routes", provider="router")

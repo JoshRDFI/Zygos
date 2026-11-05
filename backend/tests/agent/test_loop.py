@@ -163,6 +163,7 @@ async def test_final_generate_uses_tool_choice_none():
     class SpyModel:
         def classify_task(self, prompt): return "simple"
         def select_model(self, classification=None): ...
+        def turn_route(self): return None
         async def generate(self, ctx, request):
             seen.append(request.tool_choice)
             if len(seen) <= 1:

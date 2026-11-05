@@ -6,10 +6,10 @@ import pytest
 
 from zygos.errors import ProviderUnavailable
 from zygos.models.choices import DefaultModel, ModelChoices
-from zygos.models.default import DefaultStatus, resolve_default
+from zygos.models.default import resolve_default
 from zygos.providers.types import GenerationChunk, GenerationRequest, GenerationResult, Message, Usage
 from zygos.runtime.context import root_context
-from zygos.runtime.events import InProcessEventBus
+from zygos.runtime.events import InProcessEventBus, RouteSkipped
 from zygos.services.model import DefaultModelService
 from zygos.services.router import ProviderRouter, RouteChoice
 
@@ -17,8 +17,13 @@ PRIMARY = RouteChoice("fake", "primary")
 REQUEST = GenerationRequest(messages=(Message(role="user", content="hi"),))
 
 
-def _ctx():
-    return root_context(InProcessEventBus())
+def _ctx(events=None):
+    bus = InProcessEventBus()
+    if events is not None:
+        async def collect(event):
+            events.append(event)
+        bus.subscribe(collect)
+    return root_context(bus)
 
 
 class _Store:
@@ -242,12 +247,44 @@ async def test_a_failed_load_falls_back_through_the_router():
     residency = _Residency(fail=True)
     store = _Store(DefaultModel(provider="ollama", model="huge"))
     svc = DefaultModelService(router, default_status=_status_of(store), residency=residency)
-    await svc.generate(_ctx(), REQUEST)
-    [_ async for _ in svc.stream(_ctx(), REQUEST)]
+    events = []
+    await svc.generate(_ctx(events), REQUEST)
+    [_ async for _ in svc.stream(_ctx(events), REQUEST)]
     assert [c["first"] for c in router.calls] == [None, None]
     assert [e[0] for e in residency.log] == ["ensure", "ensure"]  # never held
+    skipped = [e.payload for e in events if isinstance(e.payload, RouteSkipped)]
+    assert skipped == [RouteSkipped(provider="ollama", model="huge", reason="load_failed")] * 2
 
 
-def test_default_status_is_a_status():
+
+# -- turn_route: the route is pinned once per turn (a running turn is unaffected) --
+
+
+def test_turn_route_is_the_saved_default_read_once():
     store = _Store(DefaultModel(provider="ollama", model="a"))
-    assert isinstance(_status_of(store)(), DefaultStatus)
+    svc = DefaultModelService(_SpyRouter(), default_status=_status_of(store))
+    assert svc.turn_route() == RouteChoice("ollama", "a")
+    assert store.reads == 1
+    store.choices = ModelChoices()
+    assert svc.turn_route() is None
+
+
+def test_turn_route_none_without_a_saved_default_or_status():
+    assert DefaultModelService(_SpyRouter(), default_status=_status_of(_Store())).turn_route() is None
+    assert DefaultModelService(_SpyRouter()).turn_route() is None
+    store = _Store(DefaultModel(provider="anthropic", model="c"))
+    svc = DefaultModelService(_SpyRouter(), default_status=_status_of(store, routable=lambda p: False))
+    assert svc.turn_route() is None
+
+
+async def test_a_change_after_turn_route_does_not_affect_the_pinned_turn():
+    router = _SpyRouter()
+    store = _Store(DefaultModel(provider="ollama", model="a"))
+    svc = DefaultModelService(router, default_status=_status_of(store))
+    pinned = svc.turn_route()
+    reads = store.reads
+    store.choices = ModelChoices(default_model=DefaultModel(provider="ollama", model="b"))
+    await svc.generate(_ctx(), REQUEST, route=pinned)
+    [_ async for _ in svc.stream(_ctx(), REQUEST, route=pinned)]
+    assert [c["first"] for c in router.calls] == [RouteChoice("ollama", "a")] * 2
+    assert store.reads == reads  # an explicit route skips the lookup

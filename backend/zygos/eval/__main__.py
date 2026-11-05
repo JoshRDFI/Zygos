@@ -11,11 +11,9 @@ from zygos.eval.report import EvalReport, build_report, render_table
 from zygos.eval.runner import EvalRunner
 from zygos.eval.scorers import CodeExecScorer, LlmJudgeScorer, Scorer, match_scorers
 from zygos.eval.suite import load_suite
+from zygos.providers.types import LOCAL_PROVIDERS
 from zygos.services.model import DefaultModelService, ModelService
 from zygos.services.router import ProviderRouter, RouteChoice
-
-_LOCAL_PROVIDERS = {"ollama", "vllm", "fake"}
-
 
 def build_scorers(model: ModelService, judge_model: str) -> dict[str, Scorer]:
     scorers = match_scorers()
@@ -26,7 +24,7 @@ def build_scorers(model: ModelService, judge_model: str) -> dict[str, Scorer]:
 
 def check_provider_configured(config: ZygosConfig) -> str | None:
     provider = config.providers.primary.provider
-    if provider in _LOCAL_PROVIDERS:
+    if provider in LOCAL_PROVIDERS:
         return None
     cred = config.providers.credentials.get(provider)
     if cred is None or getattr(cred, "api_key", None) in (None, ""):

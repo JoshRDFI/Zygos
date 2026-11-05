@@ -275,11 +275,17 @@ def build_runtime(
     model_choices = SqliteModelChoicesStore(Path(config.personalization.db_path))
     config_primary = RouteChoice(config.providers.primary.provider, config.providers.primary.model)
 
+    assembled: list[ModelCatalog] = []  # model_catalog, once assembled below
+
+    def installed(name: str) -> frozenset[str] | None:
+        if not assembled:
+            raise RuntimeError("default_status() called before the runtime was assembled")
+        return assembled[0].installed(name)
+
     def default_status() -> DefaultStatus:
         return resolve_default(
             model_choices.get(), config_primary,
-            # model_catalog is assembled below; this is only called per turn, after assembly.
-            installed=lambda name: model_catalog.installed(name),
+            installed=installed,
             routable=lambda name: name in providers or creatable(name),
         )
 
@@ -359,6 +365,7 @@ def build_runtime(
         backends=backends,
         client=client,
     )
+    assembled.append(model_catalog)
 
     return RuntimeAssembly(
         config=config,

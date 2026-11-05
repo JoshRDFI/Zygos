@@ -73,3 +73,12 @@ def test_can_create():
     assert not can_create("openai", declared=declared, api_key="")
     assert can_create("openai", declared=declared, api_key="sk-x")
     assert not can_create("nope", declared=declared, api_key=None)
+
+
+def test_ollama_name_is_shared_with_the_catalog():
+    from zygos.models import catalog, default
+    from zygos.providers.types import ollama_name
+
+    assert catalog._ollama_name is ollama_name
+    assert default.ollama_name is ollama_name
+    assert ollama_name("gemma4") == "gemma4:latest" and ollama_name("a:b") == "a:b"

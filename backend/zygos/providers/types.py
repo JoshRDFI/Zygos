@@ -7,6 +7,19 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+LLAMACPP_PROVIDER = "llamacpp"
+
+# Every generation provider declares Capability.LOCAL_INFERENCE (it is the
+# "can generate" contract), so it cannot tell local from cloud. These are the
+# built-in providers that run on this machine; anything else is labelled cloud,
+# the label that never understates where data goes.
+LOCAL_PROVIDERS: frozenset[str] = frozenset({"ollama", LLAMACPP_PROVIDER, "vllm", "fake"})
+
+
+def ollama_name(model: str) -> str:
+    """Ollama's own name for a model: an untagged name means ``:latest``."""
+    return model if ":" in model else f"{model}:latest"
+
 
 class ToolSchema(BaseModel):
     """A tool as the model sees it (RFC-0008 §1). parameters is a JSON Schema."""

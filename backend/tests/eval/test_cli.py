@@ -229,3 +229,12 @@ def test_main_warns_when_the_model_grades_itself(tmp_path, monkeypatch, capsys):
 
     assert cli.main([str(tmp_path / "s.yaml")]) == 0
     assert "grades its own" in capsys.readouterr().err
+
+
+def test_check_provider_configured_uses_the_shared_local_providers():
+    class C:
+        class providers:
+            class primary:
+                provider = "llamacpp"
+            credentials = {}
+    assert check_provider_configured(C) is None

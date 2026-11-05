@@ -32,6 +32,7 @@ def test_inspect_survives_unroutable_model(monkeypatch, capsys):
     from zygos.thinking.support import ThinkingSupportChecker
 
     class _Unroutable:
+        def turn_route(self): return None
         def select_model(self, *a, **k):
             raise ProviderUnavailable("No eligible provider routes", provider="router")
 
