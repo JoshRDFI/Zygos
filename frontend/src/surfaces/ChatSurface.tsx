@@ -62,6 +62,12 @@ export default function ChatSurface() {
                 {`thinking unavailable — ${m.thinkUnsupportedReason}`}
               </span>
             )}
+            {m.role === "assistant" && m.streaming && m.loadingModel && (
+              <span className="ml-2 text-xs text-text-muted">{`loading ${m.loadingModel}…`}</span>
+            )}
+            {m.role === "assistant" && !m.streaming && m.answeredBy && (
+              <span className="ml-2 text-xs text-text-muted">{`answered by ${m.answeredBy}`}</span>
+            )}
             {m.role === "assistant" && m.streaming && m.think === true && (
               <span className="ml-2 text-xs text-text-muted">Thinking…</span>
             )}

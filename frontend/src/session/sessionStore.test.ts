@@ -160,3 +160,21 @@ test("turn.end clears the voice notice", async () => {
   fake.emit("chat:turn.end", { text: "x" });
   expect(useThinkStore.getState().voiceNotice).toBeNull();
 });
+
+test("trace model events reach the model trace store; chat:model.loading reaches chat; stop() resets", async () => {
+  const { useModelTraceStore } = await import("../stores/modelTraceStore");
+  const { useChatStore } = await import("../stores/chatStore");
+  useModelTraceStore.getState().reset();
+  useChatStore.getState().reset();
+  useSessionStore.getState().start();
+  await Promise.resolve();
+  await Promise.resolve();
+  fake.emit("trace:event", { type: "model.chosen", turn_id: "t1", category: "chat", provider: "o", model: "m", mode: "default", reason: "saved default" });
+  fake.emit("chat:turn.start", { turn_id: "t1" });
+  fake.emit("chat:model.loading", { turn_id: "t1", provider: "o", model: "m" });
+  expect(useModelTraceStore.getState().lines).toHaveLength(1);
+  expect(useChatStore.getState().messages.at(-1)!.loadingModel).toBe("m");
+  useSessionStore.getState().stop();
+  expect(useModelTraceStore.getState().lines).toEqual([]);
+  useChatStore.getState().reset();
+});

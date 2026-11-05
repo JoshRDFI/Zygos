@@ -1,0 +1,5 @@
+{
+  "detail": "needs \u2248401.6 GB: 400.0 GB model + 1.1 GB context (8192 tokens) + 0.5 GB overhead; 11.7 GB free \u2014 RAM unknown",
+  "fit": "unknown",
+  "needs_confirm": true
+}

@@ -93,3 +93,21 @@ test("speech section: empty state and timing lines", async () => {
     expect(screen.getByText("first word 1.8 s · started after 14 words at 52 w/s · no gaps")).toBeInTheDocument());
   useSpeechStore.getState().reset();
 });
+
+test("model section: empty state, then chosen/loaded/skipped lines", async () => {
+  const { useModelTraceStore } = await import("../stores/modelTraceStore");
+  useModelTraceStore.getState().reset();
+  render(<InspectSurface />);
+  await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+  expect(screen.getByRole("heading", { name: "models" })).toBeInTheDocument();
+  expect(screen.getByText("No model choices recorded yet.")).toBeInTheDocument();
+  useModelTraceStore.setState({ lines: [
+    { kind: "chosen", turnId: "t", category: "chat", provider: "other", model: "s", reason: "saved default" },
+    { kind: "loaded", provider: "ollama", model: "q", loadMs: 5, evicted: [] },
+    { kind: "skipped", provider: "ollama", model: "q", reason: "load_failed" },
+  ] });
+  await waitFor(() => expect(screen.getByText("chat: other/s — saved default")).toBeInTheDocument());
+  expect(screen.getByText("loaded ollama/q in 5 ms")).toBeInTheDocument();
+  expect(screen.getByText("skipped ollama/q: load_failed")).toBeInTheDocument();
+  useModelTraceStore.getState().reset();
+});

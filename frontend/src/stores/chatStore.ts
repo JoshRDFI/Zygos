@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { Frame } from "../client/types";
 
 // The chat-channel frame types the session subscribes to and onFrame consumes.
-export const CHAT_FRAME_TYPES = ["turn.start", "token", "turn.end", "error", "partial", "final"] as const;
+export const CHAT_FRAME_TYPES = ["turn.start", "token", "turn.end", "error", "partial", "final", "model.loading"] as const;
 
 export type ChatMessage = {
   role: "user" | "assistant";
@@ -14,6 +14,10 @@ export type ChatMessage = {
   question?: string;
   thinkingMs?: number | null;
   thinkUnsupportedReason?: string | null;
+  /** Set from chat:model.loading until the first token or turn.end of this turn. */
+  loadingModel?: string | null;
+  /** The model that answered, from turn.end.model (RFC-0013 phase 2). */
+  answeredBy?: string | null;
 };
 
 interface ChatState {
@@ -68,15 +72,25 @@ export const useChatStore = create<ChatState>((set) => ({
       }
       if (f.type === "token") {
         const t = String(f.payload.text ?? "");
-        return { messages: mapLastAssistant(s.messages, (m) => ({ ...m, text: m.text + t })) };
+        return { messages: mapLastAssistant(s.messages, (m) => ({ ...m, text: m.text + t, loadingModel: null })) };
+      }
+      if (f.type === "model.loading") {
+        const tid = f.payload.turn_id as string | undefined;
+        const label = String(f.payload.model ?? "");
+        const i = s.messages.map((m) => m.role === "assistant" && m.streaming && m.turnId === tid).lastIndexOf(true);
+        if (i < 0 || !label) return s;
+        return { messages: s.messages.map((m, j) => (j === i ? { ...m, loadingModel: label } : m)) };
       }
       if (f.type === "turn.end") {
         const text = String(f.payload.text ?? "");
         const thinkingMs = (f.payload.thinking_ms as number | null | undefined) ?? null;
         const reason = (f.payload.think_unsupported_reason as string | null | undefined) ?? null;
+        const model = f.payload.model as { model?: unknown } | null | undefined;
+        const answeredBy = model && typeof model.model === "string" ? model.model : null;
         return {
           messages: mapLastAssistant(s.messages, (m) => ({
             ...m, text, streaming: false, thinkingMs, thinkUnsupportedReason: reason,
+            loadingModel: null, answeredBy,
           })),
         };
       }
@@ -85,7 +99,7 @@ export const useChatStore = create<ChatState>((set) => ({
         // A failed turn sends no turn.end: release its stuck streaming message, or
         // "Thinking…" never clears and every "Think it through" stays disabled.
         const i = s.messages.map((m) => m.role === "assistant" && m.streaming).lastIndexOf(true);
-        const released = i < 0 ? s.messages : s.messages.map((m, j) => (j === i ? { ...m, streaming: false } : m));
+        const released = i < 0 ? s.messages : s.messages.map((m, j) => (j === i ? { ...m, streaming: false, loadingModel: null } : m));
         return { messages: [...released, { role: "assistant", text, streaming: false }] };
       }
       if (f.type === "final") {

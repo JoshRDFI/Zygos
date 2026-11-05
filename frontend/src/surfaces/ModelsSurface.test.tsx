@@ -156,9 +156,9 @@ test("a failed request shows an error rather than loading forever", async () => 
   await waitFor(() => expect(screen.getByText(/request failed: 500/)).toBeInTheDocument());
 });
 
-test("notes that choosing and downloading come next", async () => {
+test("notes that downloads, tests and suggestions come later", async () => {
   render(<ModelsSurface />);
-  await waitFor(() => expect(screen.getByText("Choosing a default model and downloading models come next.")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText("Downloading models, testing them and model suggestions come in later phases.")).toBeInTheDocument());
   expect(screen.queryByText(/coming later/i)).not.toBeInTheDocument();
 });
 

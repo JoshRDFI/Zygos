@@ -1,0 +1,167 @@
+{
+  "_note": "Captured from backend run_turn (zygos.api.turn) against FakeProvider routes via scratch capture script; trace frames formatted by install_trace_bridge.",
+  "turn_end_saved_default": {
+    "channel": "chat",
+    "type": "turn.end",
+    "payload": {
+      "text": "savedanswer",
+      "model": {
+        "provider": "other",
+        "model": "s"
+      },
+      "category": "chat",
+      "think": false,
+      "thinking_ms": null,
+      "think_unsupported_reason": null,
+      "rethink_of": null
+    }
+  },
+  "turn_end_no_saved_default": {
+    "channel": "chat",
+    "type": "turn.end",
+    "payload": {
+      "text": "primaryanswer",
+      "model": {
+        "provider": "fake",
+        "model": "m"
+      },
+      "category": "chat",
+      "think": false,
+      "thinking_ms": null,
+      "think_unsupported_reason": null,
+      "rethink_of": null
+    }
+  },
+  "turn_end_after_load": {
+    "channel": "chat",
+    "type": "turn.end",
+    "payload": {
+      "text": "savedanswer",
+      "model": {
+        "provider": "ollama",
+        "model": "qwen3:8b"
+      },
+      "category": "code",
+      "think": false,
+      "thinking_ms": null,
+      "think_unsupported_reason": null,
+      "rethink_of": null
+    }
+  },
+  "model_loading": {
+    "channel": "chat",
+    "type": "model.loading",
+    "payload": {
+      "turn_id": "turn-1",
+      "provider": "ollama",
+      "model": "qwen3:8b"
+    }
+  },
+  "trace_model_chosen_saved": {
+    "channel": "trace",
+    "type": "event",
+    "payload": {
+      "type": "model.chosen",
+      "turn_id": "turn-1",
+      "category": "chat",
+      "provider": "other",
+      "model": "s",
+      "mode": "default",
+      "reason": "saved default",
+      "span_id": "turn-1",
+      "source": "turn"
+    }
+  },
+  "trace_model_chosen_ignored": {
+    "channel": "trace",
+    "type": "event",
+    "payload": {
+      "type": "model.chosen",
+      "turn_id": "turn-1",
+      "category": "reasoning",
+      "provider": "fake",
+      "model": "m",
+      "mode": "default",
+      "reason": "saved default ignored: other/s isn't installed",
+      "span_id": "turn-1",
+      "source": "turn"
+    }
+  },
+  "turn_with_load_all_frames": [
+    {
+      "channel": "chat",
+      "type": "turn.start",
+      "payload": {
+        "turn_id": "turn-1",
+        "think": false,
+        "rethink_of": null
+      }
+    },
+    {
+      "channel": "trace",
+      "type": "event",
+      "payload": {
+        "type": "model.chosen",
+        "turn_id": "turn-1",
+        "category": "code",
+        "provider": "ollama",
+        "model": "qwen3:8b",
+        "mode": "default",
+        "reason": "saved default",
+        "span_id": "turn-1",
+        "source": "turn"
+      }
+    },
+    {
+      "channel": "chat",
+      "type": "model.loading",
+      "payload": {
+        "turn_id": "turn-1",
+        "provider": "ollama",
+        "model": "qwen3:8b"
+      }
+    },
+    {
+      "channel": "trace",
+      "type": "event",
+      "payload": {
+        "type": "route.claimed",
+        "provider": "ollama",
+        "model": "qwen3:8b",
+        "probe": false,
+        "span_id": "turn-1",
+        "source": "router"
+      }
+    },
+    {
+      "channel": "chat",
+      "type": "token",
+      "payload": {
+        "text": "saved"
+      }
+    },
+    {
+      "channel": "chat",
+      "type": "token",
+      "payload": {
+        "text": "answer"
+      }
+    },
+    {
+      "channel": "chat",
+      "type": "turn.end",
+      "payload": {
+        "text": "savedanswer",
+        "model": {
+          "provider": "ollama",
+          "model": "qwen3:8b"
+        },
+        "category": "code",
+        "think": false,
+        "thinking_ms": null,
+        "think_unsupported_reason": null,
+        "rethink_of": null
+      }
+    }
+  ]
+}

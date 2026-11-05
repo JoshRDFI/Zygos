@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { getBackends, getModels } from "../client/rest";
-import type { BackendsView, Check, HardwareSnapshot, ModelEntry, ModelsView, Sourced } from "../client/types";
+import { DefaultModelError, getBackends, getModels, resetDefaultModel, setDefaultModel } from "../client/rest";
+import type { BackendsView, Check, DefaultView, HardwareSnapshot, ModelEntry, ModelsView, Sourced } from "../client/types";
 
 const GB = 1024 ** 3;
 const gb = (n: number) => `${(n / GB).toFixed(1)} GB`;
@@ -132,7 +132,28 @@ function LaunchInfo({ m }: { m: ModelEntry }) {
   );
 }
 
-function Row({ m }: { m: ModelEntry }) {
+type SetDefault = (m: ModelEntry) => void;
+
+function DefaultControl({ m, onSet, busy }: { m: ModelEntry; onSet: SetDefault; busy: boolean }) {
+  if (m.is_default) return <span className="border border-border rounded px-1 text-xs text-accent">default</span>;
+  if (m.provider === "llamacpp") {
+    return <span className="text-text-muted">can answer once Zygos runs llama-server (next phase)</span>;
+  }
+  // A model Ollama doesn't have would be ignored straight away; an unreachable Ollama stays settable.
+  if (m.provider === "ollama" && m.fit_text === "not installed") return null;
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => onSet(m)}
+      className="px-2 rounded border border-border text-xs text-text disabled:opacity-50"
+    >
+      Set as default
+    </button>
+  );
+}
+
+function Row({ m, onSet, busy }: { m: ModelEntry; onSet: SetDefault; busy: boolean }) {
   const caps = Object.entries(m.capabilities).filter(([, v]) => v).map(([k]) => k);
   const chip = "border border-border rounded px-1 text-xs text-text-muted";
   return (
@@ -152,6 +173,7 @@ function Row({ m }: { m: ModelEntry }) {
       <div className="flex flex-wrap items-center gap-2 text-text-muted">
         {m.fit && <span className="border border-border rounded px-1 text-text">{m.fit.level}</span>}
         {m.fit_text && <span>{m.fit_text}</span>}
+        <DefaultControl m={m} onSet={onSet} busy={busy} />
       </div>
       {m.served_by && <div className="text-text-muted">served by {m.served_by}</div>}
       <LaunchInfo m={m} />
@@ -161,15 +183,59 @@ function Row({ m }: { m: ModelEntry }) {
   );
 }
 
-function Group({ title, models, sub = false }: { title: string; models: ModelEntry[]; sub?: boolean }) {
+function Group({ title, models, onSet, busy, sub = false }: { title: string; models: ModelEntry[]; onSet: SetDefault; busy: boolean; sub?: boolean }) {
   const Heading = sub ? "h4" : "h3";
   return (
     <section className="space-y-2">
       <Heading className="font-mono text-text-muted">{title}</Heading>
       <ul className="space-y-3">
-        {models.map((m) => <Row key={`${m.provider}/${m.name}`} m={m} />)}
+        {models.map((m) => <Row key={`${m.provider}/${m.name}`} m={m} onSet={onSet} busy={busy} />)}
       </ul>
     </section>
+  );
+}
+
+const routeText = (r: { provider: string; model: string }) => `${r.provider}/${r.model}`;
+
+function DefaultLine({ d, busy, onReset }: { d: DefaultView; busy: boolean; onReset: () => void }) {
+  return (
+    <section aria-label="Default model" className="space-y-1 font-mono text-sm border border-border rounded p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {d.route ? (
+          <span>{`Default: ${routeText(d.route)} (${d.source === "saved" ? "saved" : "from config"})`}</span>
+        ) : (
+          <span className="text-text-muted">Default: none</span>
+        )}
+        {(d.source === "saved" || d.ignored) && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onReset}
+            className="px-2 rounded border border-border text-xs text-text disabled:opacity-50"
+          >
+            Reset to config default
+          </button>
+        )}
+      </div>
+      {d.ignored && (
+        <div className="text-text-muted">
+          {`Your saved default ${routeText(d.ignored)} isn't used: ${d.reason ?? "unavailable"}.${d.route ? ` Using ${routeText(d.route)}.` : ""}`}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ConfirmDialog({ text, onYes, onNo }: { text: string; onYes: () => void; onNo: () => void }) {
+  return (
+    <div role="dialog" aria-modal="true" aria-label="Confirm default model"
+      className="border border-accent rounded p-3 space-y-2 text-sm bg-surface-2">
+      <p>{text}</p>
+      <div className="flex gap-2">
+        <button type="button" onClick={onYes} className="px-2 py-1 rounded bg-accent text-accent-fg">Use anyway</button>
+        <button type="button" onClick={onNo} className="px-2 py-1 rounded border border-border">Cancel</button>
+      </div>
+    </div>
   );
 }
 
@@ -178,12 +244,36 @@ export default function ModelsSurface() {
   const [error, setError] = useState<string | null>(null);
   const [b, setB] = useState<BackendsView | null>(null);
   const [bError, setBError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [defaultError, setDefaultError] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<{ m: ModelEntry; text: string } | null>(null);
   useEffect(() => {
     getBackends().then(setB).catch((e: unknown) => setBError(e instanceof Error ? e.message : String(e)));
   }, []);
   useEffect(() => {
     getModels().then(setV).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
+
+  // The PUT/DELETE reply is the full GET /models view: replace the page's data with it.
+  const apply = async (call: () => Promise<ModelsView>, m?: ModelEntry) => {
+    setBusy(true);
+    setDefaultError(null);
+    try {
+      setV(await call());
+      setConfirm(null);
+    } catch (e) {
+      if (e instanceof DefaultModelError && e.needsConfirm && m) {
+        setConfirm({ m, text: `${e.detail}. Use ${m.name} as the default anyway?` });
+      } else {
+        setConfirm(null);
+        setDefaultError(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  const onSet: SetDefault = (m) => void apply(() => setDefaultModel(m.provider, m.name, false), m);
+  const onUseAnyway = () => confirm && void apply(() => setDefaultModel(confirm.m.provider, confirm.m.name, true), confirm.m);
 
   const local = (v?.models ?? []).filter((m) => m.location === "local" && m.provider !== "vllm" && m.provider !== "llamacpp");
   const llama = (v?.models ?? []).filter((m) => m.location === "local" && m.provider === "llamacpp");
@@ -209,6 +299,9 @@ export default function ModelsSurface() {
         <div className="text-text-muted">Loading…</div>
       ) : (
         <>
+          {v.default && <DefaultLine d={v.default} busy={busy} onReset={() => void apply(resetDefaultModel)} />}
+          {confirm && <ConfirmDialog text={confirm.text} onYes={onUseAnyway} onNo={() => setConfirm(null)} />}
+          {defaultError && <div role="alert" className="border border-border rounded p-3 text-sm">{defaultError}</div>}
           <Hardware hw={v.hardware} />
           <Backends b={b} error={bError} />
           {v.ollama.configured && !v.ollama.reachable && (
@@ -216,21 +309,21 @@ export default function ModelsSurface() {
               Ollama is unreachable{v.ollama.error ? `: ${v.ollama.error}` : ""}
             </div>
           )}
-          {[...ollamaFamilies].map(([family, ms]) => <Group key={`ollama/${family}`} title={family} models={ms} />)}
+          {[...ollamaFamilies].map(([family, ms]) => <Group key={`ollama/${family}`} title={family} models={ms} onSet={onSet} busy={busy} />)}
           {llama.length > 0 && (
             <section className="space-y-3">
               <h3 className="font-mono text-text-muted">llama.cpp</h3>
               <div className="pl-3 space-y-3">
-                {[...llamaFamilies].map(([family, ms]) => <Group key={`llamacpp/${family}`} title={family} models={ms} sub />)}
+                {[...llamaFamilies].map(([family, ms]) => <Group key={`llamacpp/${family}`} title={family} models={ms} onSet={onSet} busy={busy} sub />)}
               </div>
             </section>
           )}
-          {vllm.length > 0 && <Group title="vLLM" models={vllm} />}
-          {cloud.length > 0 && <Group title="cloud" models={cloud} />}
+          {vllm.length > 0 && <Group title="vLLM" models={vllm} onSet={onSet} busy={busy} />}
+          {cloud.length > 0 && <Group title="cloud" models={cloud} onSet={onSet} busy={busy} />}
         </>
       )}
       <p className="text-text-muted text-sm border border-dashed border-border rounded p-3">
-        Choosing a default model and downloading models come next.
+        Downloading models, testing them and model suggestions come in later phases.
       </p>
     </div>
   );

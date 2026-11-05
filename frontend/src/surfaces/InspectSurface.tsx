@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useThinkStore } from "../stores/thinkStore";
+import { formatModelTrace, useModelTraceStore } from "../stores/modelTraceStore";
 import { formatSpeechTiming, useSpeechStore } from "../stores/speechStore";
 import { getManifest } from "../client/rest";
 import type { Manifest } from "../client/types";
@@ -12,6 +13,7 @@ export default function InspectSurface() {
   const turnOrder = useThinkStore((st) => st.turnOrder);
   const selectedTurnId = useThinkStore((st) => st.selectedTurnId);
   const timings = useSpeechStore((st) => st.timings);
+  const modelLines = useModelTraceStore((st) => st.lines);
   const selectedRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -77,6 +79,18 @@ export default function InspectSurface() {
               );
             })}
           </div>
+        )}
+      </section>
+      <section>
+        <h2 className="text-text-muted mb-1">models</h2>
+        {modelLines.length === 0 ? (
+          <div className="text-text-muted">No model choices recorded yet.</div>
+        ) : (
+          <ul className="space-y-1">
+            {modelLines.map((l, i) => (
+              <li key={i}>{formatModelTrace(l)}</li>
+            ))}
+          </ul>
         )}
       </section>
       <section>

@@ -95,3 +95,51 @@ test("a voice rethink copies the question from the rethought turn (M2)", () => {
   });
   expect(useChatStore.getState().messages.at(-1)!.question).toBe("why is the sky blue?");
 });
+
+// ---- RFC-0013 phase 2: answering model + loading (frames captured from the backend) ----
+import frames from "./fixtures/model-turn-frames.json";
+import type { Frame } from "../client/types";
+
+const feed = (fs: unknown[]) => fs.forEach((f) => useChatStore.getState().onFrame(f as Frame));
+const chat = (fs: unknown[]) => (fs as { channel: string }[]).filter((f) => f.channel === "chat");
+
+test("model.loading is subscribed to by the session", async () => {
+  const { CHAT_FRAME_TYPES } = await import("./chatStore");
+  expect(CHAT_FRAME_TYPES).toContain("model.loading");
+});
+
+test("model.loading marks the running turn until the first token", () => {
+  const all = chat(frames.turn_with_load_all_frames);
+  feed(all.slice(0, 2)); // turn.start, model.loading
+  expect(useChatStore.getState().messages.at(-1)).toMatchObject({ streaming: true, loadingModel: "qwen3:8b" });
+  feed([all[2]]); // first token
+  expect(useChatStore.getState().messages.at(-1)!.loadingModel).toBeNull();
+});
+
+test("model.loading for another turn_id is ignored", () => {
+  const all = chat(frames.turn_with_load_all_frames);
+  feed([all[0]]);
+  feed([{ channel: "chat", type: "model.loading", payload: { turn_id: "other", provider: "ollama", model: "x" } }]);
+  expect(useChatStore.getState().messages.at(-1)!.loadingModel ?? null).toBeNull();
+});
+
+test("turn.end clears loading and records the answering model", () => {
+  const all = chat(frames.turn_with_load_all_frames);
+  feed([all[0], all[1], all.at(-1)]); // no token: loading must still clear
+  expect(useChatStore.getState().messages.at(-1)).toMatchObject({
+    streaming: false, loadingModel: null, answeredBy: "qwen3:8b", text: "savedanswer",
+  });
+});
+
+test("turn.end with model null leaves answeredBy empty", () => {
+  feed([{ channel: "chat", type: "turn.start", payload: { turn_id: "t" } },
+    { channel: "chat", type: "turn.end", payload: { text: "x", model: null, category: "chat" } }]);
+  expect(useChatStore.getState().messages.at(-1)!.answeredBy ?? null).toBeNull();
+});
+
+test("an error frame clears a pending loading note", () => {
+  const all = chat(frames.turn_with_load_all_frames);
+  feed(all.slice(0, 2));
+  feed([{ channel: "chat", type: "error", payload: { message: "boom" } }]);
+  expect(useChatStore.getState().messages.some((m) => m.loadingModel)).toBe(false);
+});

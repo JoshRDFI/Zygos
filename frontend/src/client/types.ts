@@ -91,6 +91,21 @@ export interface ModelEntry {
   mmproj?: string | null;
   mmproj_ambiguous?: string[];
   served_by?: string | null;
+  /** True on the row the next turn is answered by (RFC-0013 phase 2). */
+  is_default?: boolean;
+}
+
+export interface ModelRoute {
+  provider: string;
+  model: string;
+}
+
+/** The model new turns use, and whether a saved choice is being ignored. */
+export interface DefaultView {
+  source: "saved" | "config";
+  route: ModelRoute | null;
+  ignored: ModelRoute | null;
+  reason: string | null;
 }
 
 export interface Check {
@@ -117,6 +132,7 @@ export interface ModelsView {
   hardware: HardwareSnapshot | null;
   ollama: { configured: boolean; reachable: boolean; error: string | null };
   models: ModelEntry[];
+  default?: DefaultView;
 }
 
 export interface RuntimeHealth {

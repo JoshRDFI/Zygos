@@ -1,4 +1,4 @@
-import { render as rtlRender, screen } from "@testing-library/react";
+import { act, render as rtlRender, screen } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import type { ReactElement } from "react";
 import { useThinkStore } from "../stores/thinkStore";
@@ -184,4 +184,36 @@ test("no unsupported note without a reason (M3)", () => {
   useChatStore.setState({ messages: [answered()] });
   const { container } = render(<ChatSurface />);
   expect(container.textContent).not.toContain("thinking unavailable");
+});
+
+// ---- RFC-0013 phase 2 ----
+test("a finished reply shows 'answered by <model>'; a null model shows nothing", async () => {
+  const { useChatStore } = await import("../stores/chatStore");
+  useChatStore.getState().reset();
+  const f = (await import("../stores/fixtures/model-turn-frames.json")).default;
+  const chatFrames = f.turn_with_load_all_frames.filter((x) => x.channel === "chat");
+  chatFrames.forEach((x) => useChatStore.getState().onFrame(x as never));
+  render(<ChatSurface />);
+  expect(screen.getByText("answered by qwen3:8b")).toBeInTheDocument();
+  expect(screen.queryByText(/loading qwen3:8b/)).toBeNull();
+  act(() => {
+    useChatStore.getState().reset();
+    useChatStore.getState().onFrame({ channel: "chat", type: "turn.start", payload: { turn_id: "n" } } as never);
+    useChatStore.getState().onFrame({ channel: "chat", type: "turn.end", payload: { text: "hi", model: null } } as never);
+  });
+  expect(screen.queryByText(/answered by/)).toBeNull();
+  useChatStore.getState().reset();
+});
+
+test("a pending reply shows 'loading <model>…' until the first token", async () => {
+  const { useChatStore } = await import("../stores/chatStore");
+  useChatStore.getState().reset();
+  const f = (await import("../stores/fixtures/model-turn-frames.json")).default;
+  const chatFrames = f.turn_with_load_all_frames.filter((x) => x.channel === "chat");
+  chatFrames.slice(0, 2).forEach((x) => useChatStore.getState().onFrame(x as never));
+  render(<ChatSurface />);
+  expect(screen.getByText("loading qwen3:8b…")).toBeInTheDocument();
+  act(() => useChatStore.getState().onFrame(chatFrames[2] as never));
+  expect(screen.queryByText("loading qwen3:8b…")).toBeNull();
+  useChatStore.getState().reset();
 });
