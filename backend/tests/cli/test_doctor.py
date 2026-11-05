@@ -184,3 +184,51 @@ def test_doctor_shows_config_only_ollama_address(tmp_path):
     by = {c.name: c for c in asyncio.run(go()).checks}
     assert by["ollama_address"].detail == "http://cfg:1 (from config)"
     assert "backends_restart" not in by
+
+
+def _default_check(tmp_path, saved, installed=None):
+    import asyncio
+
+    from zygos.cli.doctor import run_doctor
+    from zygos.models.choices import DefaultModel, ModelChoices, SqliteModelChoicesStore
+    from zygos.runtime.bootstrap import build_runtime
+
+    config = tmp_path / "config.yaml"
+    db = tmp_path / "p.db"
+    config.write_text(
+        f"personalization:\n  db_path: '{db}'\n"
+        "providers:\n  primary: {provider: ollama, model: 'qwen3:8b'}\n"
+    )
+    if saved is not None:
+        SqliteModelChoicesStore(db).set(ModelChoices(default_model=DefaultModel(provider=saved[0], model=saved[1])))
+
+    async def go():
+        runtime = build_runtime(config)
+        try:
+            if installed is not None:
+                runtime.model_catalog._installed["ollama"] = frozenset(installed)
+            report = await run_doctor(runtime, gpu_query=lambda: None)
+            return next(c for c in report.checks if c.name == "default_model")
+        finally:
+            await runtime.aclose()
+
+    return asyncio.run(go())
+
+
+def test_doctor_default_model_config(tmp_path):
+    check = _default_check(tmp_path, None)
+    assert check.ok and not check.warn
+    assert check.detail == "ollama/qwen3:8b (config)"
+
+
+def test_doctor_default_model_saved(tmp_path):
+    check = _default_check(tmp_path, ("ollama", "gemma4:e4b"), installed={"gemma4:e4b"})
+    assert check.ok and not check.warn
+    assert check.detail == "ollama/gemma4:e4b (saved)"
+
+
+def test_doctor_default_model_saved_but_ignored_warns(tmp_path):
+    check = _default_check(tmp_path, ("ollama", "gone:7b"), installed={"qwen3:8b"})
+    assert check.ok and check.warn
+    assert check.detail == ("saved default ollama/gone:7b ignored: not installed; "
+                            "using ollama/qwen3:8b")

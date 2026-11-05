@@ -314,6 +314,7 @@ def build_runtime(
         clock=lambda: datetime.now(timezone.utc),
         backends=backends,
         client=client,
+        default_status=default_status,
     )
     assembled.append(model_catalog)
 

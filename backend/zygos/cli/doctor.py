@@ -80,6 +80,19 @@ def _hardware_check(runtime: RuntimeAssembly, gpu_query: GpuQuery) -> DoctorChec
     return DoctorCheck("hardware", True, describe_hardware(snap), warn=not snap.gpus)
 
 
+def _default_model_check(runtime: RuntimeAssembly) -> DoctorCheck:
+    """The model that answers turns (RFC-0013 §4): passive -- the saved choice,
+    the config, and the catalog's last-known installed set; no network."""
+    status = runtime.default_status()
+    route = f"{status.route.provider}/{status.route.model}"
+    if status.ignored is not None:
+        saved = f"{status.ignored.provider}/{status.ignored.model}"
+        return DoctorCheck(
+            "default_model", True,
+            f"saved default {saved} ignored: {status.reason}; using {route}", warn=True)
+    return DoctorCheck("default_model", True, f"{route} ({status.source})")
+
+
 async def _backend_checks(runtime: RuntimeAssembly) -> list[DoctorCheck]:
     """Optional backends (RFC-0014): shown only when set up; problems warn, never fail."""
     settings = runtime.backends.get()
@@ -172,6 +185,7 @@ async def run_doctor(
             f"set (assistant: {prefs.assistant_name or '-'}, user: {prefs.user_name or '-'})",
         ))
 
+    checks.append(_default_model_check(runtime))
     checks.append(_hardware_check(runtime, gpu_query))
     checks.extend(_voice_device_checks(runtime))
     checks.extend(await _backend_checks(runtime))

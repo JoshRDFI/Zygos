@@ -27,6 +27,7 @@ from zygos.config.schema import ZygosConfig
 from zygos.hardware.probe import HardwareProbe, HardwareSnapshot
 from zygos.models.build import apply_running, profile_from_ollama, refresh_from_ollama
 from zygos.models.build_gguf import LLAMACPP_PROVIDER, gguf_digest, profile_from_gguf
+from zygos.models.default import DefaultStatus
 from zygos.models.fit import (
     KOKORO_CUDA_RESERVE_BYTES,
     RUNTIME_OVERHEAD_BYTES,
@@ -46,6 +47,7 @@ from zygos.providers.base import Provider
 from zygos.providers.types import LOCAL_PROVIDERS, OllamaModel, OllamaRunning, OllamaShow, ollama_name
 from zygos.runtime.context import ExecutionContext
 from zygos.runtime.events import ModelFit
+from zygos.services.router import RouteChoice
 from zygos.voice.service import VoiceState
 
 log = logging.getLogger("zygos.models")
@@ -83,6 +85,8 @@ class ModelEntry(BaseModel):
     mmproj: str | None = None  # paired projector, relative to the models folder
     mmproj_ambiguous: tuple[str, ...] = ()
     served_by: str | None = None  # vLLM address (RFC-0014 §9)
+    # RFC-0013 §4: the route that will answer the next turn (saved default, else config primary).
+    is_default: bool = False
 
 
 class OllamaStatus(BaseModel):
@@ -99,9 +103,14 @@ class ModelsView(BaseModel):
     hardware: HardwareSnapshot | None
     ollama: OllamaStatus
     models: tuple[ModelEntry, ...]
+    default: DefaultStatus
 
 
 _ollama_name = ollama_name
+
+
+def _entry_model(provider: str, model: str) -> str:
+    return _ollama_name(model) if provider == "ollama" else model
 
 
 def _value(profile: ModelProfile, key: str) -> Any:
@@ -147,6 +156,7 @@ class ModelCatalog:
         backends: BackendsStore | None = None,
         client: httpx.AsyncClient | None = None,
         read_header: Callable[[Path], GgufHeader] = read_header,
+        default_status: Callable[[], DefaultStatus] | None = None,
     ) -> None:
         self._providers = providers
         self._profiles = profiles
@@ -167,6 +177,7 @@ class ModelCatalog:
         self._backends = backends
         self._client = client
         self._read_header = read_header
+        self._default_status = default_status
         # llama.cpp model name -> (digest, reason) of a header that can't be
         # read: not re-read until its files change.
         self._gguf_failed: dict[str, tuple[str | None, str]] = {}
@@ -236,7 +247,18 @@ class ModelCatalog:
         entries.extend(self._route_entries(installed, ollama_reachable=status.reachable,
                                            listed=listed, vllm=vllm))
         entries.sort(key=_order)
-        return ModelsView(hardware=hardware, ollama=status, models=tuple(entries))
+        default = self._default()
+        route = (default.route.provider, _entry_model(default.route.provider, default.route.model))
+        marked = tuple(
+            e.model_copy(update={"is_default": True}) if (e.provider, _entry_model(e.provider, e.name)) == route else e
+            for e in entries)
+        return ModelsView(hardware=hardware, ollama=status, models=marked, default=default)
+
+    def _default(self) -> DefaultStatus:
+        if self._default_status is not None:
+            return self._default_status()
+        p = self._config.providers.primary
+        return DefaultStatus(source="config", route=RouteChoice(p.provider, p.model))
 
     async def _settings(self) -> BackendsSettings:
         if self._backends is None:
