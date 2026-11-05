@@ -70,9 +70,13 @@ async def put_default(body: SetDefault, request: Request):
     choices = runtime.model_choices.get().model_copy(
         update={"default_model": DefaultModel(provider=entry.provider, model=entry.name)})
     await asyncio.to_thread(runtime.model_choices.set, ModelChoices.model_validate(choices.model_dump()))
-    # Only Ollama has residency to manage; vLLM and cloud models need no load.
-    if entry.provider == "ollama" and runtime.residency is not None:
-        runtime.residency.preload(RouteChoice(entry.provider, entry.name))
+    # Only Ollama has residency to manage; vLLM and cloud models need no load,
+    # but a preload still running for the previous default must stop.
+    if runtime.residency is not None:
+        if entry.provider == "ollama":
+            runtime.residency.preload(RouteChoice(entry.provider, entry.name))
+        else:
+            runtime.residency.cancel_preload()
     return await runtime.model_catalog.view(runtime.new_context())
 
 
@@ -81,4 +85,6 @@ async def delete_default(request: Request) -> ModelsView:
     runtime = request.app.state.runtime
     choices = runtime.model_choices.get().model_copy(update={"default_model": None})
     await asyncio.to_thread(runtime.model_choices.set, ModelChoices.model_validate(choices.model_dump()))
+    if runtime.residency is not None:
+        runtime.residency.cancel_preload()  # back to the config default: stop loading the old one
     return await runtime.model_catalog.view(runtime.new_context())

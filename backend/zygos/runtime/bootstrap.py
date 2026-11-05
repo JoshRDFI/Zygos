@@ -101,6 +101,10 @@ class RuntimeAssembly:
         return self._router.snapshot()
 
     async def aclose(self) -> None:
+        if self.residency is not None:
+            # A preload still running would fail on the closed client below.
+            self.residency.cancel_preload()
+            await self.residency.preload_done()
         if self._memory_store is not None:
             self._memory_store.close()
         await self.http_client.aclose()

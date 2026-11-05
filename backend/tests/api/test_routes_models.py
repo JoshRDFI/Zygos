@@ -153,6 +153,9 @@ class _Residency:
     def preload(self, route):
         self.preloads.append(route)
 
+    def cancel_preload(self):
+        self.cancels = getattr(self, "cancels", 0) + 1
+
 
 class _MultiOllama(_Ollama):
     def __init__(self, models):
@@ -371,3 +374,121 @@ async def test_saved_default_not_installed_is_ignored_and_reported(tmp_path):
     assert body["default"]["ignored"] == {"provider": "ollama", "model": "gone:7b"}
     assert body["default"]["reason"] == "not installed"
     assert [m["name"] for m in body["models"] if m["is_default"]] == ["qwen3:8b"]
+
+
+# -- final fix wave I2: a reset or a non-Ollama default cancels the pending preload --
+
+
+class _GatedOllama:
+    """Ollama whose loads hang until released; records what ended up loaded."""
+
+    name = "ollama"
+
+    def __init__(self):
+        import asyncio
+
+        self.gates = {}
+        self.started = []
+        self.loaded = []
+        self._asyncio = asyncio
+
+    async def running_models(self):
+        return ()
+
+    async def load(self, model, *, keep_alive):
+        self.started.append(model)
+        gate = self.gates.setdefault(model, self._asyncio.Event())
+        await gate.wait()
+        self.loaded.append(model)
+
+    async def unload(self, model):
+        raise AssertionError("nothing should be unloaded")
+
+
+class _NoGpuCatalog:
+    async def hardware_now(self):
+        from zygos.hardware.probe import HardwareSnapshot
+
+        return HardwareSnapshot(gpus=None, ram_total_bytes=None, ram_available_bytes=None, cpu_model=None,
+                                cpu_cores=None, disk_path=None, disk_free_bytes=None, scanned_at=NOW)
+
+    def reserve_bytes(self):
+        return 0
+
+
+def _real_residency(tmp_path, ollama):
+    from zygos.models.residency import ResidencyManager
+    from zygos.runtime.context import root_context
+    from zygos.runtime.events import InProcessEventBus
+
+    return ResidencyManager(lambda name: ollama if name == "ollama" else None, _NoGpuCatalog(),
+                            ProfileStore(tmp_path / "rprof"), clock=lambda: NOW,
+                            context=lambda: root_context(InProcessEventBus()))
+
+
+def _with_vllm_row(runtime):
+    real_view = runtime.model_catalog.view
+
+    async def view(ctx):
+        v = await real_view(ctx)
+        extra = v.models[0].model_copy(update={"provider": "vllm", "name": "served-model"})
+        return v.model_copy(update={"models": (*v.models, extra)})
+
+    runtime.model_catalog.view = view  # type: ignore[method-assign]
+
+
+async def _started(ollama, model):
+    import asyncio
+
+    for _ in range(200):
+        if model in ollama.started:
+            return
+        await asyncio.sleep(0)
+    raise AssertionError(f"{model} never started loading")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("second", ["delete", "vllm"])
+async def test_reset_or_non_ollama_default_cancels_the_pending_preload(tmp_path, second):
+    ollama = _GatedOllama()
+    residency = _real_residency(tmp_path, ollama)
+    original, runtime, _ = _picker(tmp_path, residency=residency)
+    _with_vllm_row(runtime)
+    try:
+        async with _client(_mount(runtime)) as client:
+            assert (await client.put("/models/default", json={"provider": "ollama", "model": "gemma4:e4b",
+                                                               "confirm": True})).status_code == 200
+            await _started(ollama, "gemma4:e4b")
+            if second == "delete":
+                resp = await client.delete("/models/default")
+            else:
+                resp = await client.put("/models/default", json={"provider": "vllm", "model": "served-model",
+                                                                  "confirm": True})
+            assert resp.status_code == 200
+            import asyncio
+            await asyncio.wait_for(residency.preload_done(), 1)
+            assert residency._preload.cancelled()
+            ollama.gates["gemma4:e4b"].set()  # had it not been cancelled, it would finish now
+    finally:
+        await original.aclose()
+    assert ollama.loaded == []
+
+
+@pytest.mark.asyncio
+async def test_two_ollama_defaults_in_a_row_only_the_second_loads(tmp_path):
+    ollama = _GatedOllama()
+    residency = _real_residency(tmp_path, ollama)
+    original, runtime, _ = _picker(tmp_path, residency=residency)
+    try:
+        async with _client(_mount(runtime)) as client:
+            await client.put("/models/default", json={"provider": "ollama", "model": "gemma4:e4b", "confirm": True})
+            await _started(ollama, "gemma4:e4b")
+            await client.put("/models/default", json={"provider": "ollama", "model": "mistral", "confirm": True})
+            await _started(ollama, "mistral:latest")
+            ollama.gates["gemma4:e4b"].set()
+            ollama.gates["mistral:latest"].set()
+            import asyncio
+            await asyncio.wait_for(residency.preload_done(), 1)
+    finally:
+        await original.aclose()
+    assert ollama.loaded == ["mistral:latest"]

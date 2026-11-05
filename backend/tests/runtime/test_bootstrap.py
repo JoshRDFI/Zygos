@@ -440,3 +440,21 @@ def test_build_runtime_wires_residency_into_the_model_service(tmp_path: Path):
         assert runtime.residency._catalog is runtime.model_catalog
     finally:
         asyncio.run(runtime.aclose())
+
+
+async def test_aclose_cancels_a_pending_preload_before_closing_the_client():
+    """Final fix wave minor 7: shutdown doesn't leave a preload on a closed client."""
+    from zygos.services.router import RouteChoice
+
+    runtime = build_runtime()
+    assert runtime.residency is not None
+    hang = asyncio.Event()
+
+    async def never(*args, **kwargs):
+        await hang.wait()
+
+    runtime.residency._run_preload = never  # type: ignore[method-assign]
+    runtime.residency.preload(RouteChoice("ollama", "x"))
+    task = runtime.residency._preload
+    await asyncio.wait_for(runtime.aclose(), 1)
+    assert task.cancelled()
