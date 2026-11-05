@@ -24,7 +24,7 @@ class _StubModel:
 
 
 class _FakeReasoning:
-    async def run(self, ctx, input, thinking=None):
+    async def run(self, ctx, input, thinking=None, **routing):
         return ReasoningResult(text="4", loops_used=1, final_confidence=0.9,
                                halted_early=True, model="fake")
 
@@ -238,3 +238,47 @@ def test_check_provider_configured_uses_the_shared_local_providers():
                 provider = "llamacpp"
             credentials = {}
     assert check_provider_configured(C) is None
+
+
+@pytest.mark.asyncio
+async def test_eval_measures_the_config_model_even_with_a_saved_default(tmp_path):
+    """Final fix wave I3: the CLI says providers.primary.model is under test, so a
+    saved default (one click in the Models page) must not answer eval runs."""
+    from zygos.models.default import DefaultStatus
+    from zygos.providers.types import GenerationResult
+    from zygos.services.router import RouteChoice
+
+    assembly = _fake_runtime(tmp_path)
+    asked = []
+    provider = assembly.providers["fake"]
+
+    async def generate(request):
+        asked.append(request.model)
+        return GenerationResult(text="4" if "Score" not in request.messages[-1].content else "1.0",
+                                model=request.model, provider="fake")
+
+    provider.generate = generate
+    assembly.model_service._default_status = lambda: DefaultStatus(
+        source="saved", route=RouteChoice("fake", "saved-default"))
+    suite = tmp_path / "s.yaml"
+    suite.write_text(textwrap.dedent("""
+        suite: demo
+        tasks:
+          - id: a
+            category: simple
+            split: val
+            input: "2+2?"
+            scorer: {kind: exact_match, expected: "4"}
+          - id: b
+            category: simple
+            split: val
+            input: "2+2?"
+            scorer: {kind: llm_judge, rubric: "is 4"}
+    """))
+    try:
+        report = await run_eval(suite, split=None, category=None, assembly=assembly,
+                                judge_model="contestant")
+    finally:
+        await assembly.aclose()
+    assert asked and set(asked) == {"contestant"}
+    assert all(r.error is None for r in report.records), [r.error for r in report.records]

@@ -8,6 +8,7 @@ from zygos.eval.types import RunRecord, Task
 from zygos.reasoning.service import ReasoningService
 from zygos.reasoning.types import ReasoningInput
 from zygos.runtime.context import ExecutionContext
+from zygos.services.model import TurnRoute
 
 
 class EvalRunner:
@@ -16,8 +17,13 @@ class EvalRunner:
         reasoning: ReasoningService,
         scorers: Mapping[str, Scorer],
         make_context: Callable[[], ExecutionContext],
+        *,
+        route: TurnRoute | None = None,
     ) -> None:
+        """``route`` pins every run (RFC-0013 §5); the CLI passes CONFIG_ORDER so
+        the configured model is the one under test, not a saved default."""
         self._reasoning = reasoning
+        self._route = route
         self._scorers = scorers
         self._make_context = make_context
 
@@ -33,7 +39,11 @@ class EvalRunner:
         ctx = self._make_context()
         started = time.perf_counter()
         try:
-            result = await self._reasoning.run(ctx, ReasoningInput(prompt=task.input))
+            prompt = ReasoningInput(prompt=task.input)
+            if self._route is None:
+                result = await self._reasoning.run(ctx, prompt)
+            else:
+                result = await self._reasoning.run(ctx, prompt, route=self._route)
         except Exception as exc:  # provider/reasoning failure — captured, not fatal
             return RunRecord(**base, output="", score=None, passed=None,
                              error=f"reasoning: {exc}")

@@ -7,7 +7,7 @@ from zygos.eval.codeexec import extract_code, run_checks
 from zygos.eval.types import ScoreResult, Task
 from zygos.providers.types import GenerationRequest, Message
 from zygos.runtime.context import ExecutionContext
-from zygos.services.model import ModelService
+from zygos.services.model import ModelService, TurnRoute
 
 _NUM = re.compile(r"-?\d+(?:\.\d+)?")
 _PUNCT = re.compile(r"[^\w\s]")
@@ -64,8 +64,10 @@ _JUDGE_INSTRUCTIONS = (
 
 
 class LlmJudgeScorer:
-    def __init__(self, model: ModelService, judge_model: str, pass_threshold: float = 0.6) -> None:
+    def __init__(self, model: ModelService, judge_model: str, pass_threshold: float = 0.6, *,
+                 route: TurnRoute | None = None) -> None:
         self._model = model
+        self._route = route
         self._judge_model = judge_model
         self._threshold = pass_threshold
 
@@ -82,7 +84,10 @@ class LlmJudgeScorer:
             messages=(Message(role="user", content=prompt),),
             temperature=0.0,
         )
-        reply = (await self._model.generate(ctx, request)).text
+        if self._route is None:
+            reply = (await self._model.generate(ctx, request)).text
+        else:
+            reply = (await self._model.generate(ctx, request, route=self._route)).text
         match = _NUM.search(reply)
         if match is None:
             raise ValueError(f"judge returned no parseable score: {reply!r}")

@@ -12,12 +12,13 @@ from zygos.eval.runner import EvalRunner
 from zygos.eval.scorers import CodeExecScorer, LlmJudgeScorer, Scorer, match_scorers
 from zygos.eval.suite import load_suite
 from zygos.providers.types import LOCAL_PROVIDERS
-from zygos.services.model import DefaultModelService, ModelService
+from zygos.services.model import CONFIG_ORDER, DefaultModelService, ModelService
 from zygos.services.router import ProviderRouter, RouteChoice
 
 def build_scorers(model: ModelService, judge_model: str) -> dict[str, Scorer]:
     scorers = match_scorers()
-    scorers["llm_judge"] = LlmJudgeScorer(model, judge_model=judge_model)
+    # CONFIG_ORDER: the judge named here is the one that grades, never a saved default.
+    scorers["llm_judge"] = LlmJudgeScorer(model, judge_model=judge_model, route=CONFIG_ORDER)
     scorers["code_exec"] = CodeExecScorer()
     return scorers
 
@@ -52,7 +53,9 @@ async def run_eval(suite_path, *, split, category, assembly, judge_model,
     suite = load_suite(suite_path)
     tasks = suite.filter(split=split, category=category)
     scorers = build_scorers(judge_service or assembly.model_service, judge_model)
-    runner = EvalRunner(assembly.reasoning_service, scorers, assembly.new_context)
+    # The model under test is providers.primary.model (as the CLI says), never the
+    # saved default from the Models page (RFC-0013 final review I3).
+    runner = EvalRunner(assembly.reasoning_service, scorers, assembly.new_context, route=CONFIG_ORDER)
     records = await runner.run(tasks)
     return build_report(suite.name, records)
 
