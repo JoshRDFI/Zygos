@@ -184,7 +184,7 @@ from zygos.runtime.bootstrap import (
     LOAD_SKILLS_STAGE,
     build_runtime,
 )
-from zygos.services.router import RouterSnapshot
+from zygos.services.router import RouteChoice, RouterSnapshot
 
 
 def test_lifecycle_stage_constants_are_snake_case():
@@ -367,5 +367,58 @@ def test_build_runtime_resolves_ollama_and_vllm_addresses_even_unrouted(tmp_path
         assert runtime.address_sources["ollama"] == "default"
         assert runtime.addresses_at_start["vllm"] == "http://cfgv:2/v1"
         assert runtime.address_sources["vllm"] == "config"
+    finally:
+        asyncio.run(runtime.aclose())
+
+
+# -- RFC-0013 §5: saved default read per turn ------------------------------------
+
+
+def _fake_config(tmp_path: Path, extra: str = "") -> Path:
+    file = tmp_path / "config.yaml"
+    file.write_text(
+        "providers:\n  primary: {provider: fake, model: demo}\n" + extra
+        + f"tools:\n  enabled: []\npersonalization:\n  db_path: '{tmp_path / 'p.db'}'\n"
+        f"models:\n  profiles_dir: '{tmp_path / 'profiles'}'\n",
+        encoding="utf-8")
+    return file
+
+
+def test_bootstrap_wires_the_model_choices_store_on_the_preferences_db(tmp_path: Path):
+    from zygos.models.choices import DefaultModel, ModelChoices, SqliteModelChoicesStore
+
+    runtime = build_runtime(_fake_config(tmp_path))
+    try:
+        assert isinstance(runtime.model_choices, SqliteModelChoicesStore)
+        assert runtime.default_status().source == "config"
+        assert not (tmp_path / "p.db").exists()  # reading never creates the file
+        runtime.model_choices.set(ModelChoices(default_model=DefaultModel(provider="fake", model="other")))
+        assert SqliteModelChoicesStore(tmp_path / "p.db").get().default_model.model == "other"
+        request = GenerationRequest(messages=(Message(role="user", content="hi"),))
+        result = asyncio.run(runtime.model_service.generate(runtime.new_context(), request))
+        assert result.model == "other"  # read per turn: no restart needed
+        runtime.model_choices.set(ModelChoices())
+        result = asyncio.run(runtime.model_service.generate(runtime.new_context(), request))
+        assert result.model == "demo"
+    finally:
+        asyncio.run(runtime.aclose())
+
+
+def test_bootstrap_routable_agrees_with_the_provider_factory(tmp_path: Path):
+    from zygos.models.choices import DefaultModel, ModelChoices
+
+    runtime = build_runtime(_fake_config(
+        tmp_path, "  credentials:\n    openai: {api_key: sk-test}\n"))
+    try:
+        router = runtime._router
+        for name, expected in [("fake", True), ("ollama", True), ("vllm", True), ("openai", True),
+                               ("anthropic", False), ("llamacpp", False), ("nope", False)]:
+            runtime.model_choices.set(ModelChoices(default_model=DefaultModel(provider=name, model="m")))
+            status = runtime.default_status()
+            assert (status.source == "saved") is expected, name
+            assert (router._provider_for(name) is not None) is expected, name
+            if not expected:
+                assert status.reason == f"{name} isn't available"
+                assert status.route == RouteChoice("fake", "demo")
     finally:
         asyncio.run(runtime.aclose())

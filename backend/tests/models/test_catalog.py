@@ -587,3 +587,37 @@ async def test_view_lists_configured_ollama_routes_when_ollama_is_unreachable(tm
     (qwen,) = view.models
     assert (qwen.provider, qwen.name, qwen.location, qwen.primary) == ("ollama", "qwen3:8b", "local", True)
     assert qwen.fit is None and qwen.fit_text == "Ollama unreachable"
+
+
+# -- installed(provider): names seen in the last successful listing (RFC-0013 §5) --
+
+
+@pytest.mark.asyncio
+async def test_installed_is_none_before_a_listing_then_the_ollama_tags(tmp_path):
+    ollama = FakeOllama(tags=[_tag("qwen3:8b", "d1"), _tag("gemma4:e4b", "d2", family="gemma4")])
+    catalog, _ = _catalog(tmp_path, ollama, extra={"anthropic": FakeCloud()})
+    assert catalog.installed("ollama") is None
+    await catalog.view(_ctx())
+    assert catalog.installed("ollama") == frozenset({"qwen3:8b", "gemma4:e4b"})
+    assert catalog.installed("anthropic") is None  # cloud: trusted
+    ollama.tags = (_tag("qwen3:8b", "d1"),)
+    await catalog.view(_ctx())
+    assert catalog.installed("ollama") == frozenset({"qwen3:8b"})
+
+
+@pytest.mark.asyncio
+async def test_installed_keeps_the_last_listing_when_ollama_goes_down(tmp_path):
+    ollama = FakeOllama(tags=[_tag("qwen3:8b", "d1")])
+    catalog, _ = _catalog(tmp_path, ollama)
+    await catalog.view(_ctx())
+    ollama.fail = ProviderUnavailable("down", provider="ollama")
+    await catalog.view(_ctx())
+    assert catalog.installed("ollama") == frozenset({"qwen3:8b"})
+
+
+@pytest.mark.asyncio
+async def test_installed_stays_none_when_ollama_never_answered(tmp_path):
+    ollama = FakeOllama(fail=ProviderUnavailable("down", provider="ollama"))
+    catalog, _ = _catalog(tmp_path, ollama)
+    await catalog.view(_ctx())
+    assert catalog.installed("ollama") is None

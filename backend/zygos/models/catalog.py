@@ -176,6 +176,13 @@ class ModelCatalog:
         # llama.cpp model name -> (digest, reason) of a header that can't be
         # read: not re-read until its files change.
         self._gguf_failed: dict[str, tuple[str | None, str]] = {}
+        # provider -> model names its last successful listing showed (RFC-0013 §5).
+        self._installed: dict[str, frozenset[str]] = {}
+
+    def installed(self, provider: str) -> frozenset[str] | None:
+        """Names Ollama listed or vLLM served at the last successful read; None
+        before one (unknown: trust a saved default) and for other providers."""
+        return self._installed.get(provider)
 
     # -- routes ---------------------------------------------------------------
 
@@ -223,10 +230,13 @@ class ModelCatalog:
                 status = OllamaStatus(configured=True, reachable=False, error=error)
             else:
                 status = OllamaStatus(configured=True, reachable=True, error=None)
+                self._installed["ollama"] = frozenset(t.name for t in tags)
                 entries.extend(await self._ollama_entries(ctx, ollama, tags, running, hardware))
         installed = {e.name for e in entries}
         entries.extend(await self._llamacpp_entries(ctx, settings.llamacpp, hardware, running))
         if vllm is not None:
+            if vllm.check.ok:
+                self._installed["vllm"] = frozenset(m.id for m in vllm.served)
             entries.extend(self._vllm_entries(vllm))
         listed = {(e.provider, e.name) for e in entries}
         entries.extend(self._route_entries(installed, ollama_reachable=status.reachable,

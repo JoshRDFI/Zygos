@@ -368,3 +368,24 @@ async def test_config_only_vllm_route_lists_the_served_model(tmp_path, credentia
     assert calls == [f"{url}/models"]
     qwen = models["Qwen/Qwen3-8B"]
     assert qwen.served_by == url and qwen.fit_text == VLLM_TEXT and qwen.fallback is True
+
+
+@pytest.mark.asyncio
+async def test_installed_records_vllm_served_ids(tmp_path):
+    client = _client(_served({"id": "Qwen/Qwen3-8B"}, {"id": "other"}))
+    settings = BackendsSettings(vllm=[VllmEndpoint(base_url=VLLM_URL)])
+    catalog, _ = _catalog(tmp_path, settings=settings, client=client, extra={"vllm": FakeVllm()})
+    assert catalog.installed("vllm") is None
+    await catalog.view(_ctx())
+    await client.aclose()
+    assert catalog.installed("vllm") == frozenset({"Qwen/Qwen3-8B", "other"})
+
+
+@pytest.mark.asyncio
+async def test_installed_vllm_unknown_while_unreachable(tmp_path):
+    client = _client(lambda r: (_ for _ in ()).throw(httpx.ConnectError("refused")))
+    settings = BackendsSettings(vllm=[VllmEndpoint(base_url=VLLM_URL)])
+    catalog, _ = _catalog(tmp_path, settings=settings, client=client, extra={"vllm": FakeVllm()})
+    await catalog.view(_ctx())
+    await client.aclose()
+    assert catalog.installed("vllm") is None

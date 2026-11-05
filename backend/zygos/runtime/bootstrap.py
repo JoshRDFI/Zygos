@@ -33,6 +33,8 @@ from zygos.memory.service import DefaultMemoryService, MemoryService
 from zygos.memory.store import MemoryStore
 from zygos.memory.vector_search import VectorSearch
 from zygos.models.catalog import ModelCatalog
+from zygos.models.choices import ModelChoicesStore, SqliteModelChoicesStore
+from zygos.models.default import DefaultStatus, can_create, resolve_default
 from zygos.models.store import ProfileStore
 from zygos.personalization import PreferencesStore, SqlitePreferencesStore
 from zygos.plugins.resolver import PluginRegistry
@@ -83,6 +85,8 @@ class RuntimeAssembly:
     hardware: HardwareProbe
     profiles: ProfileStore
     model_catalog: ModelCatalog
+    model_choices: ModelChoicesStore
+    default_status: Callable[[], DefaultStatus]
     backends: BackendsStore
     address_sources: Mapping[str, AddressSource]
     addresses_at_start: Mapping[str, str]
@@ -211,6 +215,19 @@ def build_runtime(
         RouteChoice(provider=route.provider, model=route.model)
         for route in [config.providers.primary, *config.providers.fallbacks]
     ]
+    declared_providers = frozenset(plugin_registry.list("providers"))
+
+    def creatable(name: str) -> bool:
+        credential = config.providers.credentials.get(name)
+        return can_create(name, declared=declared_providers,
+                          api_key=credential.api_key if credential else None)
+
+    def provider_factory(name: str) -> Provider | None:
+        if not creatable(name):
+            return None
+        provider_cls = plugin_registry.resolve("providers", name)
+        return provider_cls(settings=_provider_settings(config, name, backends_settings), client=client)
+
     providers: dict[str, Provider] = {}
     address_sources: dict[str, AddressSource] = {}
     addresses_at_start: dict[str, str] = {}
@@ -238,6 +255,7 @@ def build_runtime(
         failure_threshold=config.providers.circuit_breaker.failure_threshold,
         cooldown_s=config.providers.circuit_breaker.cooldown_s,
         max_requests_per_minute=config.providers.rate_limit.max_requests_per_minute,
+        provider_factory=provider_factory,
     )
 
     registry = CapabilityRegistry(health_of=lambda name: _provider_healthy(router, name))
@@ -254,7 +272,19 @@ def build_runtime(
         classification: RouteChoice(provider=route.provider, model=route.model)
         for classification, route in config.providers.task_routes.items()
     }
-    model_service = DefaultModelService(router, task_routes=task_routes)
+    model_choices = SqliteModelChoicesStore(Path(config.personalization.db_path))
+    config_primary = RouteChoice(config.providers.primary.provider, config.providers.primary.model)
+
+    def default_status() -> DefaultStatus:
+        return resolve_default(
+            model_choices.get(), config_primary,
+            # model_catalog is assembled below; this is only called per turn, after assembly.
+            installed=lambda name: model_catalog.installed(name),
+            routable=lambda name: name in providers or creatable(name),
+        )
+
+    # residency is wired by RFC-0013 phase 2 Task 4.
+    model_service = DefaultModelService(router, task_routes=task_routes, default_status=default_status)
     reasoning_service = DefaultReasoningService(model_service, config.reasoning)
 
     def reasoning_factory() -> ReasoningService:
@@ -353,6 +383,8 @@ def build_runtime(
         hardware=hardware,
         profiles=profiles,
         model_catalog=model_catalog,
+        model_choices=model_choices,
+        default_status=default_status,
         backends=backends,
         address_sources=address_sources,
         addresses_at_start=addresses_at_start,
