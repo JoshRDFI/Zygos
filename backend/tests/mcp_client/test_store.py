@@ -16,8 +16,11 @@ def _spec(name="fs"):
     return ServerSpec(name=name, transport="stdio", command="x", env_names=["K"])
 
 
-def _entry(tool="fs__read", via="tool"):
-    return TrustEntry(tool=tool, fingerprint="f", description="d", input_schema={}, via=via)
+def _entry(tool="fs__read", via="tool", server=None):
+    return TrustEntry(
+        server=server or tool.split("__")[0], tool=tool, fingerprint="f",
+        description="d", input_schema={}, via=via,
+    )
 
 
 def test_roundtrip_server_and_state(tmp_path):
@@ -43,8 +46,8 @@ def test_remove_server_clears_everything(tmp_path):
     s.trust_tool(_entry("other__x"))
     s.trust_server("fs", [_entry("fs__w", "server")])
     s.set_off("server", "fs", True)
-    s.set_off("tool", "fs__read", True)
-    s.set_off("tool", "other__x", True)
+    s.set_off("tool", "fs__read", True, server="fs")
+    s.set_off("tool", "other__x", True, server="other")
     s.remove_server("fs")
     assert set(s.servers()) == {"other"}
     assert s.state("fs") == ServerState()
@@ -76,7 +79,7 @@ def test_untrust_server_keeps_tool_trust(tmp_path):
 def test_off_keys(tmp_path):
     s = SqliteMcpStore(tmp_path / "p.db")
     s.set_off("server", "fs", True)
-    s.set_off("tool", "fs__a", True)
+    s.set_off("tool", "fs__a", True, server="fs")
     assert s.off() == {"server:fs", "tool:fs__a"}
     s.set_off("server", "fs", False)
     s.set_off("server", "never", False)
@@ -168,7 +171,7 @@ def test_remove_server_leaves_prefix_sibling_alone(tmp_path):
     s.put_server(_spec("ab"))
     s.trust_tool(_entry("a__x"))
     s.trust_tool(_entry("ab__x"))
-    s.set_off("tool", "ab__x", True)
+    s.set_off("tool", "ab__x", True, server="ab")
     s.remove_server("a")
     assert set(s.servers()) == {"ab"}
     assert set(s.trust_entries()) == {"ab__x"}
@@ -188,3 +191,32 @@ def test_invalid_row_warning_has_no_stored_values(tmp_path, caplog):
         assert s.servers() == {}
     assert "SECRETVALUE" not in caplog.text and "bogus" not in caplog.text
     assert "mcp_servers" in caplog.text
+
+
+def test_set_off_tool_requires_server(tmp_path):
+    s = SqliteMcpStore(tmp_path / "p.db")
+    with pytest.raises(ValueError, match="server"):
+        s.set_off("tool", "fs__a", True)
+
+
+@pytest.mark.parametrize("tool_a_, tool_a", [("x", "x"), ("y", "_x")])
+def test_underscore_neighbour_server_untouched(tmp_path, tool_a_, tool_a):
+    # server "a" tool "_x" -> a___x; server "a_" tool "x" -> a___x as well (a prefix match would catch it)
+    s = SqliteMcpStore(tmp_path / "p.db")
+    s.put_server(_spec("a"))
+    s.put_server(_spec("a_"))
+    n_a, n_b = f"a__{tool_a}", f"a___{tool_a_}"
+    s.trust_tool(_entry(n_a, "tool", server="a"))
+    s.trust_server("a_", [_entry(n_b, "server", server="a_")])
+    s.set_off("tool", n_b, True, server="a_")
+    s.set_off("server", "a_", True)
+    s.remove_server("a")
+    assert set(s.servers()) == {"a_"}
+    assert set(s.trust_entries()) == {n_b}
+    assert s.trusted_servers() == {"a_"}
+    assert s.off() == {f"tool:{n_b}", "server:a_"}
+    s.trust_tool(_entry(n_a, "server", server="a"))
+    s.untrust_server("a")
+    assert set(s.trust_entries()) == {n_b}
+    s.untrust_server("a_")
+    assert s.trust_entries() == {}

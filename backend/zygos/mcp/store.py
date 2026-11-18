@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS mcp_servers (name TEXT PRIMARY KEY, spec TEXT NOT NUL
 CREATE TABLE IF NOT EXISTS mcp_state (name TEXT PRIMARY KEY, state TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS mcp_trust (tool TEXT PRIMARY KEY, entry TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS mcp_trust_servers (name TEXT PRIMARY KEY);
-CREATE TABLE IF NOT EXISTS mcp_off (key TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS mcp_off (key TEXT PRIMARY KEY, server TEXT);
 CREATE TABLE IF NOT EXISTS mcp_meta (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     version INTEGER NOT NULL
@@ -61,6 +61,7 @@ class ServerState(BaseModel):
 
 
 class TrustEntry(BaseModel):
+    server: str  # server key the tool belongs to
     tool: str  # zygos tool name
     fingerprint: str
     description: str
@@ -181,13 +182,8 @@ class SqliteMcpStore:
             c.execute("DELETE FROM mcp_state WHERE name=?", (name,))
             c.execute("DELETE FROM mcp_trust_servers WHERE name=?", (name,))
             c.execute("DELETE FROM mcp_off WHERE key=?", (f"server:{name}",))
-            prefix = f"{name}__"
-            for (tool,) in c.execute("SELECT tool FROM mcp_trust").fetchall():
-                if tool.startswith(prefix):
-                    c.execute("DELETE FROM mcp_trust WHERE tool=?", (tool,))
-            for (key,) in c.execute("SELECT key FROM mcp_off WHERE key LIKE 'tool:%'").fetchall():
-                if key[len("tool:") :].startswith(prefix):
-                    c.execute("DELETE FROM mcp_off WHERE key=?", (key,))
+            c.execute("DELETE FROM mcp_trust WHERE json_extract(entry, '$.server') = ?", (name,))
+            c.execute("DELETE FROM mcp_off WHERE server = ?", (name,))
 
         self._write(go)
 
@@ -225,20 +221,28 @@ class SqliteMcpStore:
     def untrust_server(self, name: str) -> None:
         def go(c: sqlite3.Connection) -> None:
             c.execute("DELETE FROM mcp_trust_servers WHERE name=?", (name,))
-            for tool, raw in c.execute("SELECT tool, entry FROM mcp_trust").fetchall():
-                entry = self._parse(TrustEntry, raw, "mcp_trust", tool)
-                if (
-                    entry is not None
-                    and entry.via == "server"
-                    and tool.startswith(f"{name}__")
-                ):
-                    c.execute("DELETE FROM mcp_trust WHERE tool=?", (tool,))
+            c.execute(
+                "DELETE FROM mcp_trust WHERE json_extract(entry, '$.server') = ? "
+                "AND json_extract(entry, '$.via') = 'server'",
+                (name,),
+            )
 
         self._write(go)
 
-    def set_off(self, kind: Literal["server", "tool"], name: str, off: bool) -> None:
+    def set_off(
+        self, kind: Literal["server", "tool"], name: str, off: bool, *, server: str | None = None
+    ) -> None:
+        if kind == "tool" and server is None:
+            raise ValueError("set_off for a tool needs its server")
         key = f"{kind}:{name}"
+        owner = server if kind == "tool" else None
         if off:
-            self._write(lambda c: c.execute("INSERT OR IGNORE INTO mcp_off(key) VALUES (?)", (key,)))
+            self._write(
+                lambda c: c.execute(
+                    "INSERT INTO mcp_off(key, server) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET server = excluded.server",
+                    (key, owner),
+                )
+            )
         else:
             self._write(lambda c: c.execute("DELETE FROM mcp_off WHERE key=?", (key,)))
