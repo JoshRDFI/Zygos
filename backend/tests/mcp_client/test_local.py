@@ -52,16 +52,32 @@ async def _until(cond, timeout: float = 10.0) -> None:
 
 
 def _alive(pid: int) -> bool:
+    """Is the process running? (A zombie, dead but not yet reaped, counts as gone.)"""
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
-    # A zombie still answers kill(0); it is not running.
+    except PermissionError:
+        return True
+    proc = Path("/proc")
+    if not proc.is_dir():  # not Linux: kill(0) is all we can ask
+        return True
     try:
-        with open(f"/proc/{pid}/stat") as stat:
-            return stat.read().split()[2] != "Z"
+        return (proc / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()[0] != "Z"
     except FileNotFoundError:
         return False
+
+
+async def _all_dead(pids: list[int], timeout: float = 5.0) -> bool:
+    try:
+        await _until(lambda: not any(_alive(p) for p in pids), timeout)
+    except AssertionError:
+        return False
+    return True
+
+
+def _pids(path: Path) -> list[int]:
+    return [int(p) for p in path.read_text().split()] if path.exists() else []
 
 
 @pytest.fixture
@@ -220,6 +236,8 @@ async def test_tools_changed_event(make):
     await server.start()
     await server.call("grow", {}, 10.0)
     await _until(lambda: "tools_changed" in events.kinds)
+    await asyncio.sleep(0.3)
+    assert events.kinds.count("tools_changed") == 1  # the SDK hands it over twice; counted once
     assert "grown" in {t.name for t in (await server.list_tools()).tools}
 
 
@@ -259,16 +277,220 @@ async def test_silent_server_fails_after_one_retry(tmp_path):
         await server.stop()
 
 
-async def test_handshake_era_change_notification_counts_once():
-    # Handshake-era servers send plain notifications; modern ones use the listen stream
-    # (the SDK passes those to the message handler as well, so they're ignored there).
-    from mcp_types import ToolListChangedNotification
+async def test_handshake_era_server_change_notification(make):
+    server, events = make(env={"HANDSHAKE_ONLY": "1"})
+    await server.start()
+    assert server.status == "running"
+    assert server.era == "2025-11-25"
+    await server.call("grow", {}, 10.0)
+    await _until(lambda: "tools_changed" in events.kinds)
+    await asyncio.sleep(0.3)
+    assert events.kinds.count("tools_changed") == 1
+    assert "grown" in {t.name for t in (await server.list_tools()).tools}
 
+
+async def test_status_starting_and_start_during_restart_waits(make):
+    server, events = make()
+    starting = asyncio.ensure_future(server.start())
+    await asyncio.sleep(0)
+    assert server.status == "starting"
+    await starting
+    assert server.status == "running"
+
+    with pytest.raises(McpUnavailable):
+        await server.call("crash", {}, 10.0)
+    await _until(lambda: "restarted" in events.kinds)
+    assert server.status == "starting"
+    await server.start()  # waits for the restart to settle
+    assert server.status == "running"
+    assert await server.call("echo", {"text": "up"}, 10.0) == "up"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+async def test_stop_kills_term_ignoring_grandchild(make, tmp_path, monkeypatch):
+    import zygos.mcp.local as local
+
+    monkeypatch.setattr(local, "_KILL_AFTER_S", 1.0)  # the grandchild ignores SIGTERM
+    pid_file = tmp_path / "grandchildren"
+    server, _ = make(env={"GRANDCHILD_PIDS": str(pid_file)})
+    await server.start()
+    pids = _pids(pid_file)
+    assert len(pids) == 1 and _alive(pids[0])
+    await server.stop()
+    assert await _all_dead(pids)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+async def test_terminate_then_kill_reaches_term_ignoring_grandchild(make, tmp_path, monkeypatch):
+    # The leader hangs (survives stdin closing), so the group gets SIGTERM, then SIGKILL.
+    import zygos.mcp.local as local
+
+    monkeypatch.setattr(local, "_KILL_AFTER_S", 1.0)
+    monkeypatch.setattr(local, "_STDIN_GRACE_S", 0.1)
+    pid_file = tmp_path / "grandchildren"
+    server, events = make(env={"GRANDCHILD_PIDS": str(pid_file), "HANG": "1"}, timeout_s=0.5)
+    await server.start()
+    assert events.kinds == ["restarted", "failed"]
+    pids = _pids(pid_file)
+    assert len(pids) == 2
+    assert await _all_dead(pids)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+async def test_crashed_leader_leaves_no_grandchild(make, tmp_path):
+    pid_file = tmp_path / "grandchildren"
+    server, _ = make(env={"GRANDCHILD_PIDS": str(pid_file)})
+    await server.start()
+    for _ in range(2):
+        await _until(lambda: server.status == "running")
+        with pytest.raises(McpUnavailable):
+            await server.call("crash", {}, 10.0)
+        await _until(lambda: server.status != "running")
+    await _until(lambda: server.status == "stopped")
+    pids = _pids(pid_file)
+    assert len(pids) == 2
+    assert await _all_dead(pids)
+
+
+async def test_cancelled_runner_releases_everything(make):
+    import gc
+    import warnings
+
+    server, _ = make()
+    await server.start()
+    pid = int(await server.call("pid", {}, 10.0))
+    server._runner.cancel()  # no public way to cancel the runner task itself
+    await server.stop()  # does not re-raise the runner's cancellation
+    assert server.status == "stopped"
+    assert await _all_dead([pid])
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        gc.collect()
+    assert not [w for w in caught if issubclass(w.category, ResourceWarning)]
+
+
+async def test_stop_caller_cancellation_still_propagates(make):
+    server, _ = make()
+    await server.start()
+    stopping = asyncio.ensure_future(server.stop())
+    await asyncio.sleep(0)
+    stopping.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await stopping
+    await server.stop()
+    assert server.status == "stopped"
+
+
+async def test_exit_code_stays_readable_when_an_env_value_is_a_digit(make):
+    server, events = make(env={"CRASH_AT_START": "1", "N": "3"})
+    await server.start()
+    assert server.exit_code == 3
+    assert events.seen[-1] == ("stopped", "exit 3: crashing at start")
+
+
+async def test_runner_bug_logged_without_traceback_or_secret(tmp_path, monkeypatch, caplog):
+    secret = "hunter2-very-secret"
+
+    async def broken(self, *args):
+        raise RuntimeError(f"boom {secret}")
+
+    monkeypatch.setattr(LocalServer, "_run_once", broken)
     events = Events()
-    server = LocalServer(ServerSpec(name="h", transport="stdio", command="unused"), {}, on_event=events)
-    note = ToolListChangedNotification()
-    server._era = "2025-11-25"
-    await server._on_message(note)
-    server._era = "2026-07-28"
-    await server._on_message(note)
-    assert events.kinds == ["tools_changed"]
+    server = LocalServer(_spec(tmp_path), {"TOKEN": secret}, on_event=events)
+    with caplog.at_level("DEBUG", logger="zygos.mcp"):
+        await server.start()
+    assert server.status == "stopped"
+    assert events.kinds == ["failed"]
+    records = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert records and all(r.exc_info is None for r in records)
+    text = " ".join(r.getMessage() for r in caplog.records)
+    assert "RuntimeError" in text and secret not in text
+
+
+# ---- the Windows branch, driven on any OS by standing in for the SDK's win32 helpers --
+
+
+class _Win32Spy:
+    def __init__(self, monkeypatch, *, fallback: bool = False) -> None:
+        import mcp.os.win32.utilities as win32
+
+        import zygos.mcp.local as local
+
+        self.calls: list[tuple] = []
+        self.fallback = fallback
+        monkeypatch.setattr(local, "_on_windows", lambda: True)
+        monkeypatch.setattr(win32, "get_windows_executable_command", self.resolve)
+        monkeypatch.setattr(win32, "create_windows_process", self.create)
+        monkeypatch.setattr(win32, "terminate_windows_process_tree", self.terminate)
+        monkeypatch.setattr(win32, "close_process_job", self.close_job)
+
+    def resolve(self, command):
+        self.calls.append(("resolve", command))
+        return sys.executable if command == "npx" else command
+
+    async def create(self, command, args, env=None, errlog=None, cwd=None):
+        import subprocess
+
+        import anyio
+        from mcp.os.win32.utilities import FallbackProcess
+
+        self.calls.append(("create", command, list(args), dict(env or {}), errlog, cwd))
+        if self.fallback:
+            popen = subprocess.Popen(
+                [command, *args], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errlog, env=env, cwd=cwd,
+                bufsize=0,
+            )
+            return FallbackProcess(popen)
+        return await anyio.open_process([command, *args], env=env, stderr=errlog, cwd=cwd)
+
+    async def terminate(self, process):
+        self.calls.append(("terminate", process.pid))
+        process.terminate()
+
+    def close_job(self, process):
+        self.calls.append(("close_job", process.pid))
+
+    def kinds(self) -> list[str]:
+        return [c[0] for c in self.calls]
+
+
+def _npx_spec(tmp_path: Path, *, args=None, timeout_s: float = 20.0) -> ServerSpec:
+    return ServerSpec(
+        name="win", transport="stdio", command="npx", args=args or [str(SERVER_SCRIPT)], cwd=str(tmp_path),
+        timeout_s=timeout_s,
+    )
+
+
+@pytest.mark.parametrize("fallback", [False, True], ids=["anyio-process", "popen-fallback"])
+async def test_windows_branch_uses_sdk_helpers(tmp_path, monkeypatch, fallback):
+    import subprocess
+
+    spy = _Win32Spy(monkeypatch, fallback=fallback)
+    events = Events()
+    server = LocalServer(_npx_spec(tmp_path), {"TOKEN": "tok-value"}, on_event=events)
+    try:
+        await server.start()
+        assert server.status == "running"
+        assert await server.call("echo", {"text": "win"}, 10.0) == "win"
+        await _until(lambda: STDERR_START in server.stderr_tail)  # stderr piped to the tail
+    finally:
+        await server.stop()
+    assert spy.calls[0] == ("resolve", "npx")
+    _, command, args, env, errlog, cwd = spy.calls[1]
+    assert (command, args, errlog, cwd) == (sys.executable, [str(SERVER_SCRIPT)], subprocess.PIPE, str(tmp_path))
+    assert env["TOKEN"] == "tok-value" and "PATH" in env
+    assert "close_job" in spy.kinds()
+
+
+async def test_windows_branch_terminates_job_tree_when_server_hangs(tmp_path, monkeypatch):
+    spy = _Win32Spy(monkeypatch)
+    events = Events()
+    spec = _npx_spec(tmp_path, args=["-c", "import time; time.sleep(60)"], timeout_s=1.0)
+    server = LocalServer(spec.model_copy(update={"command": sys.executable}), {}, on_event=events)
+    try:
+        await server.start()
+    finally:
+        await server.stop()
+    assert events.kinds == ["restarted", "failed"]
+    assert spy.kinds().count("terminate") == 2
+    assert spy.kinds().count("close_job") == 2
