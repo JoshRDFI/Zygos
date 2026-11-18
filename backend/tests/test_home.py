@@ -132,3 +132,34 @@ def test_session_guard_comparison():
     assert _new_files({"a"}, {"a"}) == set()
     assert _new_files({"a"}, {"a", "b"}) == {"b"}
     assert _new_files({"a", "c"}, {"a"}) == set()
+
+
+def test_absolute_env_needs_neither_cwd_nor_home(monkeypatch, tmp_path):
+    def boom(*a, **k):
+        raise FileNotFoundError("cwd deleted")
+
+    def boom_home(*a, **k):
+        raise RuntimeError("no home")
+
+    monkeypatch.setenv("ZYGOS_HOME", str(tmp_path / "abs"))
+    reset_zygos_home_cache()
+    monkeypatch.setattr(Path, "cwd", boom)
+    monkeypatch.setattr(Path, "home", boom_home)
+    assert zygos_home().root == tmp_path / "abs"
+    assert resolve_path(str(tmp_path / "x")) == str(tmp_path / "x")
+    reset_zygos_home_cache()
+
+
+def test_relative_env_is_normalized(tmp_path):
+    r = _find(tmp_path, {"ZYGOS_HOME": "../up/./z"})
+    assert r.root == tmp_path / "up" / "z"
+
+
+def test_stray_data_dir_survives_unsearchable_cwd(monkeypatch):
+    from zygos.home import stray_data_dir
+
+    def deny(self):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "is_dir", deny)
+    assert stray_data_dir() is None

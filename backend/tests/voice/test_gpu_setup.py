@@ -112,8 +112,8 @@ def test_backend_dir_has_pyproject():
 
 
 def test_reusing_message_uses_absolute_path(tmp_path, monkeypatch):
-    # DEFAULT_GPU_VENV is intentionally cwd-relative; the printed message must
-    # still be diagnosable when setup-gpu is invoked from an unexpected cwd.
+    # An explicit relative venv_dir stays cwd-relative (the default venv resolves
+    # against the Zygos root); the printed message must still use the absolute path.
     monkeypatch.chdir(tmp_path)
     lines = []
     gpu_setup.setup_gpu(venv_dir="relvenv", run=_Rec(), exists=lambda p: True,

@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import sys
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,11 +27,20 @@ class ZygosHome:
     source: str
 
 
-def _expand(value: str, home: Path, cwd: Path) -> Path:
+PathLike = Path | Callable[[], Path]
+
+
+def _get(p: PathLike) -> Path:
+    return p() if callable(p) else p
+
+
+def _expand(value: str, home: PathLike, cwd: PathLike) -> Path:
+    """``home``/``cwd`` may be callables so they are only read when needed."""
     if value == "~" or value.startswith(("~/", "~\\")):
-        return home / value[2:] if len(value) > 1 else home
+        h = _get(home)
+        return h / value[2:] if len(value) > 1 else h
     p = Path(value)
-    return p if p.is_absolute() else cwd / p
+    return p if p.is_absolute() else Path(os.path.normpath(_get(cwd) / p))
 
 
 def _is_checkout(package_dir: Path) -> bool:
@@ -60,15 +69,15 @@ def find_zygos_home(
     environ: Mapping[str, str],
     package_dir: Path,
     platform: str,
-    home: Path,
-    cwd: Path,
+    home: PathLike,
+    cwd: PathLike,
 ) -> ZygosHome:
     env = environ.get(SOURCE_ENV)
     if env:
         return ZygosHome(_expand(env, home, cwd), SOURCE_ENV)
     if _is_checkout(package_dir):
         return ZygosHome(package_dir, SOURCE_CHECKOUT)
-    return ZygosHome(_user_folder(environ, platform, home), SOURCE_USER)
+    return ZygosHome(_user_folder(environ, platform, _get(home)), SOURCE_USER)
 
 
 _cached: ZygosHome | None = None
@@ -83,8 +92,8 @@ def zygos_home() -> ZygosHome:
             environ=os.environ,
             package_dir=Path(zygos.__file__).resolve().parents[1],
             platform=sys.platform,
-            home=Path.home(),
-            cwd=Path.cwd(),
+            home=Path.home,
+            cwd=Path.cwd,
         )
     return _cached
 
@@ -97,7 +106,7 @@ def reset_zygos_home_cache() -> None:
 def resolve_path(value: str) -> str:
     """Absolute stays; ``~`` expands; anything else is relative to the root."""
     if value == "~" or value.startswith(("~/", "~\\")):
-        return str(_expand(value, Path.home(), Path.cwd()))
+        return str(_expand(value, Path.home, Path.cwd))
     p = Path(value)
     if p.is_absolute():
         return value
@@ -106,10 +115,14 @@ def resolve_path(value: str) -> str:
 
 def stray_data_dir(cwd: Path | None = None) -> Path | None:
     """The unused ``<cwd>/.zygos`` folder, or None when absent or the real one."""
-    stray = (cwd or Path.cwd()) / ".zygos"
-    if not stray.is_dir():
-        return None
-    if stray.resolve() == (zygos_home().root / ".zygos").resolve():
+    # Advisory only: an unreadable/deleted start folder must never break a command.
+    try:
+        stray = (cwd or Path.cwd()) / ".zygos"
+        if not stray.is_dir():
+            return None
+        if stray.resolve() == (zygos_home().root / ".zygos").resolve():
+            return None
+    except OSError:
         return None
     return stray
 

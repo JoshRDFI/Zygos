@@ -6,13 +6,13 @@ import pytest
 from zygos.config.schema import TtsConfig
 from zygos.runtime.context import root_context
 from zygos.runtime.events import InProcessEventBus
-from zygos.voice.device import DEFAULT_GPU_VENV, venv_python
+from zygos.voice.device import default_gpu_venv, venv_python
 from zygos.voice.service import build_tts_plugin
 
 pytestmark = pytest.mark.live_gpu
 
 
-@pytest.mark.skipif(not os.path.exists(venv_python(DEFAULT_GPU_VENV)),
+@pytest.mark.skipif(not os.path.exists(venv_python(default_gpu_venv())),
                     reason="GPU venv not built (zygos voice setup-gpu)")
 async def test_kokoro_synthesizes_on_cuda():
     plugin = build_tts_plugin(TtsConfig(engine="kokoro", device="cuda", readiness_timeout_s=120))

@@ -74,17 +74,44 @@ def test_no_stray_warning_from_root_or_plain_subfolder(tmp_path, monkeypatch):
     link.symlink_to(root)
     for where in (root, root / "sub", link):
         monkeypatch.chdir(where)
-        assert "stray_data_folder" not in _by(_report(tmp_path))
+        checks = _by(_report(tmp_path))
+        assert "zygos_home" in checks  # positive anchor: doctor really ran
+        assert "stray_data_folder" not in checks
 
 
 def test_doctor_creates_no_root(tmp_path, monkeypatch):
+    from zygos.cli.doctor import run_doctor
     from zygos.home import reset_zygos_home_cache
+    from zygos.runtime.bootstrap import build_runtime
 
     fresh = tmp_path / "fresh"
     monkeypatch.setenv("ZYGOS_HOME", str(fresh))
     reset_zygos_home_cache()
-    _report(tmp_path)
+    cfg = tmp_path / "config.yaml"  # default (.zygos/...) paths, fake provider only
+    cfg.write_text("providers:\n  primary: {provider: fake, model: fake-1}\n")
+
+    async def go():
+        runtime = build_runtime(cfg)
+        try:
+            return await run_doctor(runtime, gpu_query=lambda: None)
+        finally:
+            await runtime.aclose()
+
+    report = asyncio.run(go())
+    assert _by(report)["zygos_home"].detail == f"{fresh} (ZYGOS_HOME)"
     assert not fresh.exists()
+
+
+def test_doctor_survives_unsearchable_start_folder(tmp_path, monkeypatch):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    monkeypatch.chdir(locked)
+    locked.chmod(0)
+    try:
+        checks = _by(_report(tmp_path))
+    finally:
+        locked.chmod(0o700)
+    assert "zygos_home" in checks and "stray_data_folder" not in checks
 
 
 def test_serve_logs_stray_warning(tmp_path, monkeypatch, caplog):
