@@ -8,10 +8,13 @@ or replaced are stopped; new local servers are started and stale tool lists refr
 seen. A failing server only loses its own tools.
 
 Offered: tools of a running local server listed by this run, or of a remote server whose
-last listing succeeded; tool on; schema usable (``check_input_schema``); and no other
-tool maps to the same Zygos name (both clashing tools are left out, the clash recorded as
-the tools' ``problem``). Trust (``gate``) is read from the store, pinned per tool to its
-fingerprint; config rules can only tighten (``permission.mcp_decision``).
+last listing succeeded; per tool see ``offered`` (schema usable, on, no name clash).
+Trust (``gate``) is read from the store, pinned per tool to its fingerprint and server;
+config rules can only tighten (``permission.mcp_decision``).
+
+Reads on the event loop use a strict reader with a short busy timeout: a failed or busy
+read keeps the previous view (logged once) and is retried next turn — it is never taken
+for "no servers".
 
 Every lifecycle change is logged (``zygos.mcp``), written to the server's stored state
 and published as ``mcp.server`` without a session. Store writes block (~0.3 s) and run
@@ -31,13 +34,12 @@ from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from zygos.agent.schema import check_input_schema
-from zygos.mcp.config import zygos_tool_name
 from zygos.mcp.permission import McpDecision, mcp_decision, trust_state
 from zygos.mcp.results import McpToolError, McpUnavailable
-from zygos.mcp.store import ServerState, SqliteMcpStore, TrustEntry
+from zygos.mcp.offered import build_offered, checked, with_clashes
+from zygos.mcp.store import McpStoreUnavailable, ServerState, SqliteMcpStore, TrustEntry
 from zygos.mcp.tool import McpTool
-from zygos.mcp.types import SeenTool, ServerSpec
+from zygos.mcp.types import ServerSpec
 from zygos.mcp.wire import ListResult
 from zygos.runtime.context import ExecutionContext
 from zygos.runtime.events import McpServerEvent
@@ -52,10 +54,10 @@ logger = logging.getLogger("zygos.mcp")
 
 NO_MCP = "MCP support isn't installed: pip install -e '.[mcp]'"
 TOOL_COUNT_WARNING = "small local models choose tools less reliably beyond about 20 — consider switching some off"
-CLASH = "name clash: "
 _DEFAULT_TTL_S = 300.0
 _RETRY_S = 30.0  # a failed listing is tried again after this
 _TOOL_WARN_OVER = 20
+_READ_BUSY_S = 0.2  # a turn waits at most this long for a store writer
 
 
 class LocalLike(Protocol):
@@ -98,16 +100,6 @@ def _mcp_installed() -> bool:
         return False
 
 
-def _checked(tools: list[SeenTool]) -> list[SeenTool]:
-    """Note a schema problem on any tool stored without one (a turn must never see it)."""
-    out = []
-    for tool in tools:
-        if tool.problem is None and (problem := check_input_schema(tool.input_schema)) is not None:
-            tool = tool.model_copy(update={"problem": problem})
-        out.append(tool)
-    return out
-
-
 @dataclass(eq=False)
 class _Server:
     spec: ServerSpec
@@ -138,7 +130,9 @@ class McpSupervisor:
         clock: Callable[[], float] = time.time,
         connectors: Connectors | None = None,
     ) -> None:
-        self._store = store
+        self._store = store  # writes (in a thread)
+        self._reader = store.strict_reader(busy_timeout_s=_READ_BUSY_S)  # reads on the loop
+        self._read_failing = False
         self._secrets = secrets
         self._tool_service = tool_service
         self._rules = list(rules)
@@ -176,7 +170,13 @@ class McpSupervisor:
         if self._closed:
             return ()
         self._sync()
-        tools = self._build() if self._servers and self._mcp_ok else []
+        tools: list[McpTool] = []
+        if self._servers and self._mcp_ok:
+            offerable = [(e.spec, e.state.tools) for e in self._servers.values() if self._offerable(e)]
+            tools = build_offered(offerable, self._off, self._offered, self.call)
+            if len(tools) > _TOOL_WARN_OVER and not self._warned_count:
+                logger.warning("%d MCP tools on: %s", len(tools), TOOL_COUNT_WARNING)
+            self._warned_count = len(tools) > _TOOL_WARN_OVER
         if tools or self._offered:
             self._offered = {t.meta.name: t for t in tools}
             self._tool_service.set_dynamic_tools(tools)
@@ -184,9 +184,12 @@ class McpSupervisor:
 
     def gate(self, meta: ToolMeta) -> McpDecision:
         tool = self._offered.get(meta.name)
+        entry = self._trust.get(meta.name)
         trusted = (
             tool is not None
+            and entry is not None
             and tool.meta.server == meta.server
+            and entry.server == meta.server
             and trust_state(meta.name, tool.seen, self._trust) == "trusted"
         )
         return mcp_decision(meta.name, self._rules, trusted)
@@ -239,10 +242,17 @@ class McpSupervisor:
     # ---- reconcile -------------------------------------------------------------
 
     def _sync(self, *, force_remote: bool = False) -> None:
-        version = self._store.version()
-        if version != self._version:
-            self._version = version
-            self._reload()
+        try:
+            version = self._reader.version()
+            if version != self._version:
+                self._reload()
+                self._version = version  # only once the whole record was read
+        except McpStoreUnavailable as exc:
+            if not self._read_failing:
+                logger.warning("%s; keeping the last view, retrying next turn", exc)
+            self._read_failing = True
+        else:
+            self._read_failing = False
         if force_remote:
             for entry in self._servers.values():
                 if not entry.is_local:
@@ -251,18 +261,26 @@ class McpSupervisor:
             self._reconcile()
 
     def _reload(self) -> None:
-        specs = self._store.servers()
-        self._off = self._store.off()
-        self._trust = self._store.trust_entries()
-        active = {name: spec for name, spec in specs.items() if f"server:{name}" not in self._off}
+        """Re-read the record; every read happens before anything changes (a read that
+        fails raises ``McpStoreUnavailable`` and leaves the previous view whole)."""
+        specs = self._reader.servers()
+        off = self._reader.off()
+        trust = self._reader.trust_entries()
+        active = {name: spec for name, spec in specs.items() if f"server:{name}" not in off}
+        new_states = {
+            name: self._reader.state(name)
+            for name, spec in active.items()
+            if name not in self._servers or self._servers[name].spec != spec
+        }
+        self._off, self._trust = off, trust
         for name, entry in list(self._servers.items()):
             if active.get(name) != entry.spec:
                 self._drop(entry, switched_off=name in specs and name not in active)
         for name, spec in active.items():
             if name in self._servers:
                 continue
-            state = self._store.state(name)
-            entry = _Server(spec=spec, state=state.model_copy(update={"tools": _checked(state.tools)}))
+            state = new_states[name]
+            entry = _Server(spec=spec, state=state.model_copy(update={"tools": checked(state.tools)}))
             entry.next_check = state.expires_at or 0.0
             self._servers[name] = entry
             if self._mcp_ok is None:
@@ -382,7 +400,7 @@ class McpSupervisor:
         ttl = result.ttl_s or _DEFAULT_TTL_S
         entry.next_check = now + ttl
         changes: dict[str, Any] = {
-            "era": result.era, "discover": result.discover, "tools": _checked(result.tools),
+            "era": result.era, "discover": result.discover, "tools": checked(result.tools),
             "listed_at": now, "expires_at": now + ttl,
         }
         if entry.is_local:
@@ -420,47 +438,10 @@ class McpSupervisor:
             return entry.local is not None and entry.local.status == "running" and entry.current
         return entry.state.listed_at is not None and entry.state.status not in ("unreachable", "failed")
 
-    def _build(self) -> list[McpTool]:
-        tools: list[McpTool] = []
-        for name, entry in self._servers.items():
-            if not self._offerable(entry):
-                continue
-            for seen in entry.state.tools:
-                zname = zygos_tool_name(name, seen.name)
-                if seen.problem is not None or f"tool:{zname}" in self._off:
-                    continue
-                old = self._offered.get(zname)
-                if old is not None and old.seen == seen and old.spec == entry.spec:
-                    tools.append(old)
-                else:
-                    tools.append(McpTool(entry.spec, seen, self.call))
-        if len(tools) > _TOOL_WARN_OVER and not self._warned_count:
-            logger.warning("%d MCP tools on: %s", len(tools), TOOL_COUNT_WARNING)
-        self._warned_count = len(tools) > _TOOL_WARN_OVER
-        return tools
-
     def _apply_clashes(self) -> None:
-        """Tools of different servers (or one server) that map to one Zygos name: all left out."""
-        owners: dict[str, list[str]] = {}
-        for name, entry in self._servers.items():
-            for seen in entry.state.tools:
-                owners.setdefault(zygos_tool_name(name, seen.name), []).append(f"{name}/{seen.name}")
-        for name, entry in self._servers.items():
-            tools, changed = [], False
-            for seen in entry.state.tools:
-                zname = zygos_tool_name(name, seen.name)
-                problem = seen.problem
-                if problem is not None and problem.startswith(CLASH):
-                    problem = check_input_schema(seen.input_schema)
-                if problem is None and len(owners[zname]) > 1:
-                    problem = f"{CLASH}{' and '.join(owners[zname])} all become {zname}"
-                    if len(owners[zname]) == 2:
-                        problem = problem.replace(" all become ", " both become ")
-                if problem != seen.problem:
-                    seen, changed = seen.model_copy(update={"problem": problem}), True
-                tools.append(seen)
-            if changed:
-                self._update(entry, tools=tools)
+        changed = with_clashes({name: entry.state.tools for name, entry in self._servers.items()})
+        for name, tools in changed.items():
+            self._update(self._servers[name], tools=tools)
 
     # ---- state, events -------------------------------------------------------------
 

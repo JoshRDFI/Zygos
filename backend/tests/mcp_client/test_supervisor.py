@@ -10,6 +10,7 @@ import asyncio
 import sqlite3
 import sys
 import threading
+from contextlib import closing
 import time
 from pathlib import Path
 from typing import Any
@@ -535,3 +536,58 @@ async def test_real_remote_listed_trusted_and_called(h):
         result = await h.service.execute(ToolCall(tool="echo__echo", args={"text": "hi"}), ctx)
         assert result.ok and result.output["text"] == "hi"
         await sup.aclose()
+
+
+async def test_failed_store_read_keeps_previous_view(h, monkeypatch, caplog):
+    import zygos.mcp.store as store_mod
+
+    h.store.put_server(_local("loc"))
+    h.fakes.local_tools["loc"] = [_tool("echo")]
+    sup = h.make()
+    await sup.start()
+    await _until(lambda: _names(sup.before_turn()) == ["loc__echo"])
+    h.other.set_off("tool", "loc__other", True, server="loc")  # a reload is due
+
+    real_connect = sqlite3.connect
+
+    def broken(*args, **kwargs):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(store_mod.sqlite3, "connect", broken)
+    with caplog.at_level("WARNING", logger="zygos.mcp"):
+        for _ in range(3):
+            assert _names(sup.before_turn()) == ["loc__echo"]
+    assert caplog.text.count("store unreadable") == 1  # logged once, not per turn
+    assert h.fakes.locals[0].stop_calls == 0 and len(h.fakes.locals) == 1
+
+    monkeypatch.setattr(store_mod.sqlite3, "connect", real_connect)
+    h.other.set_off("tool", "loc__echo", True, server="loc")
+    assert sup.before_turn() == ()  # reads work again: the record applies
+    assert len(h.fakes.locals) == 1
+
+
+async def test_before_turn_quick_while_store_locked(h):
+    h.store.put_server(_remote("r"))
+    _seed(h.store, "r", [_tool("t")])
+    sup = h.make()
+    assert _names(sup.before_turn()) == ["r__t"]
+    h.other.set_off("tool", "r__nothing", True, server="r")
+    with closing(sqlite3.connect(h.path, isolation_level=None)) as con:
+        con.execute("BEGIN EXCLUSIVE")  # a writer mid-commit
+        t0 = time.monotonic()
+        tools = sup.before_turn()
+        assert time.monotonic() - t0 < 0.5
+        assert _names(tools) == ["r__t"]
+        con.execute("ROLLBACK")
+    assert _names(sup.before_turn()) == ["r__t"]
+
+
+async def test_gate_requires_trust_entry_for_the_same_server(h):
+    find = _tool("find_tasks")
+    h.store.put_server(_remote("archon"))
+    _seed(h.store, "archon", [find])
+    wrong = _entry("archon", find).model_copy(update={"server": "elsewhere"})
+    h.store.trust_tool(wrong)
+    sup = h.make()
+    (tool,) = sup.before_turn()
+    assert sup.gate(tool.meta) == "not_trusted"

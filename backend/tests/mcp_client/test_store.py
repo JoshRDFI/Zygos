@@ -1,9 +1,13 @@
 import logging
+import sqlite3
 import threading
+import time
+from contextlib import closing
 
 import pytest
 
 from zygos.mcp.store import (
+    McpStoreUnavailable,
     ServerState,
     SqliteMcpStore,
     TrustEntry,
@@ -117,7 +121,7 @@ def test_concurrent_writers_lose_nothing(tmp_path):
     def run_a():
         try:
             for i in range(20):
-                a.put_state(f"s{i}", ServerState(status="running", detail=str(i)))
+                a.put_state("fs", ServerState(status="running", detail=str(i)))
         except Exception as exc:  # pragma: no cover
             errors.append(exc)
 
@@ -132,7 +136,7 @@ def test_concurrent_writers_lose_nothing(tmp_path):
     [t.start() for t in ts]
     [t.join() for t in ts]
     assert errors == []
-    assert all(a.state(f"s{i}").detail == str(i) for i in range(20))
+    assert a.state("fs").detail == "19"
     assert len(b.trust_entries()) == 20
     assert a.version() == 41
 
@@ -220,3 +224,43 @@ def test_underscore_neighbour_server_untouched(tmp_path, tool_a_, tool_a):
     assert set(s.trust_entries()) == {n_b}
     s.untrust_server("a_")
     assert s.trust_entries() == {}
+
+
+def test_put_state_needs_its_server(tmp_path):
+    s = SqliteMcpStore(tmp_path / "p.db")
+    s.put_server(_spec())
+    s.put_state("fs", ServerState(status="running", detail="old"))
+    s.remove_server("fs")
+    s.put_state("fs", ServerState(status="running", detail="late write"))  # e.g. a queued supervisor write
+    s.put_state("never", ServerState(status="running"))
+    with closing(sqlite3.connect(tmp_path / "p.db")) as con:
+        assert con.execute("SELECT name FROM mcp_state").fetchall() == []
+    s.put_server(_spec())
+    assert s.state("fs") == ServerState()
+
+
+def test_strict_reader_raises_instead_of_reading_empty(tmp_path):
+    p = tmp_path / "p.db"
+    p.write_bytes(b"not a database at all" * 100)
+    reader = SqliteMcpStore(p).strict_reader(busy_timeout_s=0.2)
+    with pytest.raises(McpStoreUnavailable):
+        reader.servers()
+    with pytest.raises(McpStoreUnavailable):
+        reader.version()
+    assert SqliteMcpStore(p).servers() == {}  # the CLI-facing store still reads empty
+    assert SqliteMcpStore(tmp_path / "absent.db").strict_reader(busy_timeout_s=0.2).servers() == {}
+
+
+def test_strict_reader_gives_up_fast_while_locked(tmp_path):
+    p = tmp_path / "p.db"
+    store = SqliteMcpStore(p)
+    store.put_server(_spec())
+    reader = store.strict_reader(busy_timeout_s=0.2)
+    with closing(sqlite3.connect(p, isolation_level=None)) as con:
+        con.execute("BEGIN EXCLUSIVE")
+        t0 = time.monotonic()
+        with pytest.raises(McpStoreUnavailable):
+            reader.version()
+        assert time.monotonic() - t0 < 0.5
+        con.execute("ROLLBACK")
+    assert set(reader.servers()) == {"fs"}

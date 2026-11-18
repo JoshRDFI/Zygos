@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import copy
 import sqlite3
 from collections.abc import Callable
 from contextlib import closing
@@ -43,6 +44,10 @@ INSERT OR IGNORE INTO mcp_meta(id, version) VALUES (1, 0);
 """
 
 _T = TypeVar("_T")
+
+
+class McpStoreUnavailable(Exception):
+    """A strict reader could not read the record (busy, corrupt, I/O). Never carries values."""
 
 
 class ServerState(BaseModel):
@@ -77,6 +82,17 @@ def fingerprint(name: str, description: str, input_schema: dict[str, Any]) -> st
 class SqliteMcpStore:
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
+        self._busy_timeout_s = _BUSY_TIMEOUT_S
+        self._strict = False
+
+    def strict_reader(self, *, busy_timeout_s: float) -> "SqliteMcpStore":
+        """A copy for reading on the event loop: waits at most ``busy_timeout_s`` for a
+        writer and raises ``McpStoreUnavailable`` instead of reading empty on failure (so
+        a failed read is never mistaken for "no servers"). A missing file still reads empty."""
+        reader = copy.copy(self)
+        reader._busy_timeout_s = busy_timeout_s
+        reader._strict = True
+        return reader
 
     # -- reads ---------------------------------------------------------------
 
@@ -84,7 +100,7 @@ class SqliteMcpStore:
         if not self._path.exists():
             return default
         try:
-            with closing(sqlite3.connect(self._path, timeout=_BUSY_TIMEOUT_S)) as con:
+            with closing(sqlite3.connect(self._path, timeout=self._busy_timeout_s)) as con:
                 has = con.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='mcp_meta'"
                 ).fetchone()
@@ -92,6 +108,8 @@ class SqliteMcpStore:
                     return default
                 return fn(con)
         except sqlite3.Error as exc:
+            if self._strict:
+                raise McpStoreUnavailable(f"mcp store unreadable ({type(exc).__name__}: {exc})") from None
             _log.warning("mcp store unreadable (%s); using empty", exc)
             return default
 
@@ -188,11 +206,14 @@ class SqliteMcpStore:
         self._write(go)
 
     def put_state(self, name: str, state: ServerState) -> None:
+        """Record a server's state; a no-op once the server is gone (a late write must not
+        leave a row a re-added server of the same name would adopt)."""
         self._write(
             lambda c: c.execute(
-                "INSERT INTO mcp_state(name, state) VALUES (?, ?) "
+                "INSERT INTO mcp_state(name, state) SELECT ?, ? "
+                "WHERE EXISTS (SELECT 1 FROM mcp_servers WHERE name = ?) "
                 "ON CONFLICT(name) DO UPDATE SET state = excluded.state",
-                (name, state.model_dump_json()),
+                (name, state.model_dump_json(), name),
             )
         )
 
