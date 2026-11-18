@@ -48,28 +48,37 @@ async def list_remote(
     discover: dict[str, Any] | None,
 ) -> ListResult:
     """List a remote server's tools over one short connection; each tool's schema is checked."""
+    (tools, ttl_ms), negotiated, found = await _with_client(spec, headers, era, discover, list_pages, phase="list")
+    return ListResult(era=negotiated, discover=found, tools=tools, ttl_s=ttl_seconds(negotiated, ttl_ms))
 
-    async def work(client: Any) -> tuple[list[SeenTool], int]:
-        tools: list[SeenTool] = []
-        ttl_ms = 0
-        cursor: str | None = None
-        for page_no in range(_PAGE_CAP):
-            page = await client.list_tools(cursor=cursor, cache_mode="bypass")
-            if page_no == 0:
-                ttl_ms = getattr(page, "ttl_ms", 0) or 0
-            tools.extend(_seen(tool) for tool in page.tools)
-            cursor = page.next_cursor
-            if cursor is None:
-                break
-        return tools, ttl_ms
 
-    (tools, ttl_ms), negotiated, found = await _with_client(spec, headers, era, discover, work, phase="list")
-    return ListResult(
-        era=negotiated,
-        discover=found,
-        tools=tools,
-        ttl_s=ttl_ms / 1000 if _is_modern(negotiated) and ttl_ms > 0 else None,
-    )
+async def list_pages(client: Any) -> tuple[list[SeenTool], int]:
+    """Every page of a connected client's ``tools/list`` (each schema checked) and the
+    first page's ``ttlMs``. Shared with local servers; the client's streams must be
+    wrapped with ``_guard`` so one bad schema can't sink the listing."""
+    tools: list[SeenTool] = []
+    ttl_ms = 0
+    cursor: str | None = None
+    for page_no in range(_PAGE_CAP):
+        page = await client.list_tools(cursor=cursor, cache_mode="bypass")
+        if page_no == 0:
+            ttl_ms = getattr(page, "ttl_ms", 0) or 0
+        tools.extend(_seen(tool) for tool in page.tools)
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+    return tools, ttl_ms
+
+
+def ttl_seconds(era: str, ttl_ms: int) -> float | None:
+    """A modern server's caching hint in seconds; ``None`` when it gave none (or is handshake-era)."""
+    return ttl_ms / 1000 if _is_modern(era) and ttl_ms > 0 else None
+
+
+def dump_discover(client: Any) -> dict[str, Any] | None:
+    """A connected client's discover result as stored JSON (``None`` for handshake-era servers)."""
+    found = client.session.discover_result
+    return None if found is None else found.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 
 async def call_remote(
@@ -208,9 +217,7 @@ async def _with_client(
         async with client:
             connected = True
             value = await work(client)
-            found = client.session.discover_result
-            dumped = None if found is None else found.model_dump(mode="json", by_alias=True, exclude_none=True)
-            return value, client.protocol_version, dumped
+            return value, client.protocol_version, dump_discover(client)
 
     try:
         with anyio.fail_after(spec.timeout_s):
