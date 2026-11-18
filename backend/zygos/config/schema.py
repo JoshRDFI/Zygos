@@ -228,6 +228,14 @@ class PersonalizationConfig(BaseModel):
     db_path: str = ".zygos/preferences.db"
 
 
+class SecretsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # auto: keychain if usable, else encrypted file; sticky once the first secret
+    # is saved (RFC-0015). An explicit value always wins over the recorded choice.
+    backend: Literal["auto", "keyring", "encrypted_file"] = "auto"
+
+
 class ModelsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -248,6 +256,7 @@ class ZygosConfig(BaseModel):
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     personalization: PersonalizationConfig = Field(default_factory=PersonalizationConfig)
     models: ModelsConfig = Field(default_factory=ModelsConfig)
+    secrets: SecretsConfig = Field(default_factory=SecretsConfig)
     # plugin kind -> plugin name -> "module.path:ClassName" (RFC-0001 §3)
     plugins: dict[str, dict[str, str]] = Field(default_factory=_default_plugins)
     # Capabilities a deployment requires; `zygos doctor` fails if any is unbound

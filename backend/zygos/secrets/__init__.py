@@ -8,6 +8,7 @@ Stability: Experimental.
 from __future__ import annotations
 
 from zygos.secrets.handles import validate_handle
+from zygos.secrets.resolve import SecretsHandle, SecretsStatus, build_secret_store
 from zygos.secrets.types import (
     EXTRA_MISSING,
     InvalidHandle,
@@ -26,5 +27,8 @@ __all__ = [
     "SecretStoreCorrupt",
     "SecretStoreError",
     "SecretStoreUnavailable",
+    "SecretsHandle",
+    "SecretsStatus",
+    "build_secret_store",
     "validate_handle",
 ]

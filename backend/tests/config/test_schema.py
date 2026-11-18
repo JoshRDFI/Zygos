@@ -238,3 +238,13 @@ def test_models_config_defaults():
     m = ZygosConfig().models
     assert m.profiles_dir == ".zygos/models/profiles"
     assert m.ollama_models_dir is None
+
+
+def test_secrets_backend_defaults_to_auto_and_rejects_unknown():
+    assert ZygosConfig().secrets.backend == "auto"
+    for name in ("keyring", "encrypted_file"):
+        assert ZygosConfig.model_validate({"secrets": {"backend": name}}).secrets.backend == name
+    with pytest.raises(ValidationError):
+        ZygosConfig.model_validate({"secrets": {"backend": "plaintext"}})
+    with pytest.raises(ValidationError):
+        ZygosConfig.model_validate({"secrets": {"backend": "auto", "extra": 1}})
