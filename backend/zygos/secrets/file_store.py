@@ -15,6 +15,7 @@ import json
 import os
 import stat
 import sys
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -138,7 +139,12 @@ class EncryptedFileStore:
         return key
 
     def _read(self, aes: Any) -> dict[str, str]:
-        blob = self.enc_path.read_bytes()
+        try:
+            blob = self.enc_path.read_bytes()
+        except OSError as exc:
+            raise SecretStoreUnavailable(
+                f"secrets file unreadable ({type(exc).__name__})"
+            ) from exc
         key = self._read_key(create=False)
         n = len(_HEADER)
         if blob[:n] != _HEADER or len(blob) < n + _NONCE_LEN + 16:
@@ -146,9 +152,17 @@ class EncryptedFileStore:
         nonce = blob[n : n + _NONCE_LEN]
         try:
             plain = aes(key).decrypt(nonce, blob[n + _NONCE_LEN :], _HEADER)
-            data = json.loads(plain.decode("utf-8"))
-        except Exception as exc:
+        except Exception as exc:  # InvalidTag carries no plaintext
             raise SecretStoreCorrupt(_CORRUPT) from exc
+        data: Any = None
+        try:
+            data = json.loads(plain.decode("utf-8"))
+        except ValueError:
+            pass
+        if data is None:
+            # Decode errors hold the plaintext (.doc/.object); raised outside the
+            # except block so they are neither the cause nor the context.
+            raise SecretStoreCorrupt(_CORRUPT)
         if not isinstance(data, dict) or not all(
             isinstance(k, str) and isinstance(v, str) for k, v in data.items()
         ):
@@ -159,8 +173,8 @@ class EncryptedFileStore:
         key = self._read_key(create=not self.enc_path.exists())
         nonce = os.urandom(_NONCE_LEN)
         ct = aes(key).encrypt(nonce, json.dumps(data).encode("utf-8"), _HEADER)
-        tmp = self.directory / f"secrets.enc.{os.getpid()}.tmp"
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        fd, tmp_name = tempfile.mkstemp(dir=self.directory, prefix="secrets.enc.", suffix=".tmp")
+        tmp = Path(tmp_name)
         try:
             with os.fdopen(fd, "wb") as fh:
                 fh.write(_HEADER + nonce + ct)

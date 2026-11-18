@@ -97,3 +97,37 @@ def test_write_is_atomic(store, monkeypatch):
     with pytest.raises(OSError):
         store.set(H, "second")
     assert store.get(H) == "first"
+    assert list(store.directory.glob("*.tmp")) == []
+
+
+def _encrypt_raw(store, plaintext: bytes):
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    header = b"ZYGS\x01"
+    nonce = os.urandom(12)
+    key = store.key_path.read_bytes()
+    store.enc_path.write_bytes(header + nonce + AESGCM(key).encrypt(nonce, plaintext, header))
+
+
+@pytest.mark.parametrize("plain", [b"not json " + SENT.encode(), b"\xff\xfe" + SENT.encode()])
+def test_bad_plaintext_is_corrupt_without_leaking_via_chain(store, plain):
+    store.set(H, "v")
+    _encrypt_raw(store, plain)
+    with pytest.raises(SecretStoreCorrupt) as ei:
+        store.get(H)
+    assert SENT not in repr(ei.value.__cause__)
+    assert SENT not in repr(ei.value.__context__)
+    assert SENT not in str(ei.value)
+
+
+@pytest.mark.skipif(sys.platform == "win32" or (hasattr(os, "geteuid") and os.geteuid() == 0), reason="needs non-root POSIX")
+def test_unreadable_enc_is_unavailable(store):
+    store.set(H, "v")
+    os.chmod(store.enc_path, 0o000)
+    try:
+        with pytest.raises(SecretStoreUnavailable, match="secrets file unreadable"):
+            store.get(H)
+        with pytest.raises(SecretStoreUnavailable, match="secrets file unreadable"):
+            store.set(H, "w")
+    finally:
+        os.chmod(store.enc_path, 0o600)
