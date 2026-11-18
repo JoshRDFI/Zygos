@@ -1,6 +1,7 @@
 # RFC-0013: Model Picker, Model Profiles, and Best-Model-Per-Task Routing
 
 - **Status:** Accepted (2026-11-04)
+- **Amended by:** [RFC-0009](RFC-0009-Vision-Input-Images-and-PDFs.md) (accepted 2026-11-17, additive) — saved choices gain an optional image model and OCR model.
 - **Author:** Zygos maintainers
 - **Created:** 2026-11-04
 - **Governs:** how Zygos knows what each model can do and whether it fits the

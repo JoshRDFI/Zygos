@@ -1,6 +1,6 @@
 # RFC-0009: Vision Input — Images and PDFs in the Chat
 
-- **Status:** Draft — **rewritten 2026-11-04.** The original (2026-07-13) covered
+- **Status:** Accepted (2026-11-17) — **rewritten 2026-11-04.** The original (2026-07-13) covered
   per-turn model selection, text-specialist routing, model residency, vision input
   and image generation. Selection, routing and residency moved to
   [RFC-0013](RFC-0013-Model-Picker-Profiles-and-Task-Routing.md) and are built

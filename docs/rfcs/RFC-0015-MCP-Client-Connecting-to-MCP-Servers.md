@@ -1,6 +1,6 @@
 # RFC-0015: MCP Client — Connecting to MCP Servers
 
-- **Status:** Draft
+- **Status:** Accepted (2026-11-17)
 - **Author:** Zygos maintainers
 - **Created:** 2026-11-04
 - **Governs:** how Zygos connects to **Model Context Protocol servers** as a client

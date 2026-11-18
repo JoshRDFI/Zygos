@@ -10,6 +10,7 @@
   snapshotable state, the composition root) and
   [RFC-0002](RFC-0002-Runtime-Event-Bus-and-ExecutionContext.md) (this RFC pulls
   health from snapshotable state and adds two events to RFC-0002's taxonomy)
+- **Amended by:** [RFC-0009](RFC-0009-Vision-Input-Images-and-PDFs.md) (accepted 2026-11-17) — `VISION` is satisfied by "a routable vision-capable model exists", not a separate service. `IMAGE_GENERATION` stays reserved and unused; images come from MCP tools ([RFC-0015](RFC-0015-MCP-Client-Connecting-to-MCP-Servers.md) §6).
 - **Implementation status:** tracked in [ROADMAP.md](../../ROADMAP.md); the
   registry mechanism can land as an early increment, render surfaces attach as
   their adapters arrive

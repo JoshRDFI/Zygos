@@ -4,6 +4,7 @@
 - **Author:** Zygos maintainers
 - **Created:** 2026-07-03
 - **Governs:** Zygos 2.0 runtime core, service contracts, wiring, and API adapter design
+- **Amended by:** RFC-0004 (§8), RFC-0008 (§2, §7), [RFC-0009](RFC-0009-Vision-Input-Images-and-PDFs.md) (§7 — attachment parts on a `Message`, accepted 2026-11-17)
 - **Implementation status:** tracked in [ROADMAP.md](../../ROADMAP.md) (Milestone 1 complete as of 2026-07-03)
 
 ## Motivation

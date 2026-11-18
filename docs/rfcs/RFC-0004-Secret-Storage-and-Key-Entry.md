@@ -10,6 +10,7 @@
   (config-declared plugins) and reinforces
   [RFC-0003](RFC-0003-Capability-Registry-Runtime-Manifest-and-Inspection.md)'s
   "manifest contains no secret material"
+- **Amended by:** [RFC-0015](RFC-0015-MCP-Client-Connecting-to-MCP-Servers.md) (accepted 2026-11-17, additive) — MCP secret handles `mcp:<server>:env:<NAME>` and `mcp:<server>:header:<Name>` beside `provider:<name>`; RFC-0015 phase 0 builds the `SecretStore` part MCP needs (keyring + encrypted_file backends, presence-only reporting).
 - **Implementation status:** tracked in [ROADMAP.md](../../ROADMAP.md); a
   standalone increment, orthogonal to Milestone 3 (not a gate); may ride with the
   CLI adapter
