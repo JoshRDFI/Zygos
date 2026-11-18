@@ -18,6 +18,7 @@ from tests.mcp_client.servers import (  # noqa: E402
     record_requests,
     require_bearer,
     serve,
+    silent_port,
     sse_app,
 )
 from zygos.mcp.remote import (  # noqa: E402
@@ -133,6 +134,19 @@ async def test_unreachable_is_mcp_unavailable_within_timeout():
     with pytest.raises(McpUnavailable):
         await call_remote(spec, {}, "echo", {"text": "x"}, era="2026-07-28", discover=None)
     assert time.monotonic() - started < 5
+
+
+async def test_silent_server_times_out_as_unavailable():
+    with silent_port() as port:
+        spec = _spec(f"http://127.0.0.1:{port}/mcp", timeout_s=1)
+        for era in (None, "2026-07-28"):
+            started = time.monotonic()
+            with pytest.raises(McpUnavailable) as info:
+                await list_remote(spec, {}, era=era, discover=None)
+            assert time.monotonic() - started < 3
+            assert "within 1 s" in str(info.value)
+        with pytest.raises(McpUnavailable):
+            await call_remote(spec, {}, "echo", {"text": "x"}, era=None, discover=None)
 
 
 async def test_bad_schema_tool_marked_problem_others_fine():

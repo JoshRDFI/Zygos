@@ -241,6 +241,15 @@ def closed_port() -> int:
 
 
 @contextmanager
+def silent_port() -> Iterator[int]:
+    """A localhost port that accepts TCP connections (backlog) but never answers."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(8)
+        yield sock.getsockname()[1]
+
+
+@contextmanager
 def serve(app, *, path: str = "/mcp") -> Iterator[str]:
     """Run ``app`` with uvicorn on a free 127.0.0.1 port; yield ``http://127.0.0.1:<port><path>``."""
     import uvicorn

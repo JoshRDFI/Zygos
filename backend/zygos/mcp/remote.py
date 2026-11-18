@@ -66,7 +66,7 @@ async def list_remote(
         modern = _is_modern(negotiated)
         return ListResult(
             era=negotiated,
-            discover=found.model_dump(mode="json", by_alias=True, exclude_none=True) if found is not None else None,
+            discover=None if found is None else found.model_dump(mode="json", by_alias=True, exclude_none=True),
             tools=tools,
             ttl_s=ttl_ms / 1000 if modern and ttl_ms > 0 else None,
         )
@@ -121,7 +121,8 @@ def _http_client(headers: dict[str, str], status: _HttpStatus, timeout_s: float)
     from mcp.shared._httpx_utils import create_mcp_http_client
 
     connect = min(timeout_s, 30.0)
-    client = create_mcp_http_client(headers=dict(headers), timeout=httpx2.Timeout(connect, read=max(timeout_s, connect)))
+    timeout = httpx2.Timeout(connect, read=max(timeout_s, connect))
+    client = create_mcp_http_client(headers=dict(headers), timeout=timeout)
     client.event_hooks = {"request": [], "response": [status.hook]}
     return client
 
@@ -213,7 +214,7 @@ def _seen(tool: Any) -> SeenTool:
         description=tool.description or "",
         input_schema=schema,
         annotations=(
-            annotations.model_dump(mode="json", by_alias=True, exclude_none=True) if annotations is not None else {}
+            {} if annotations is None else annotations.model_dump(mode="json", by_alias=True, exclude_none=True)
         ),
         problem=problem,
     )
@@ -295,10 +296,8 @@ def _object_root(schema: Any) -> bool:
 def _leaf(exc: BaseException) -> BaseException:
     """The first real error inside (possibly nested) exception groups."""
     while isinstance(exc, BaseExceptionGroup) and exc.exceptions:
-        exc = next(
-            (e for e in exc.exceptions if not isinstance(e, (KeyboardInterrupt, SystemExit)) and "Cancel" not in type(e).__name__),
-            exc.exceptions[0],
-        )
+        real = [e for e in exc.exceptions if isinstance(e, Exception) and "Cancel" not in type(e).__name__]
+        exc = real[0] if real else exc.exceptions[0]
     return exc
 
 
