@@ -19,7 +19,8 @@
 ## Summary
 
 Introduce a `SecretStore` service — a Protocol with pluggable, config-declared
-backends (`keyring` for desktops, `encrypted_file` for droplets, `env`/secret-ref
+backends *(as built 2026-11-17: a fixed built-in map of `keyring` and
+`encrypted_file`; `env` not built yet — see §2)* (`keyring` for desktops, `encrypted_file` for droplets, `env`/secret-ref
 for CI and external managers) — so provider keys are stored outside committed
 config and resolved at bootstrap without the composition root knowing the backend.
 Add a `zygos keys` CLI for entry, deprecate plaintext keys in config behind a loud
@@ -99,6 +100,12 @@ enumeration, no value exposure.
 >   `zygos:<install id>`; the id is kept in the choice record.
 > - **Fixed backends.** `secrets.backend: auto | keyring | encrypted_file`. The
 >   backends are a built-in map, not a `plugins.secrets` block.
+> - **Explicit config.** `keyring` uses the keychain always; it takes the install id
+>   from the record and records one at the first save if there is none.
+>   `encrypted_file` uses the file always and never reads or writes the record.
+> - **Not every keychain counts.** A keyring backend that stores plain text or
+>   stores nothing (keyring priority below 1, e.g. keyrings.alt's
+>   `PlaintextKeyring`, or the `fail`/`null` backends) is treated as no keychain.
 > - **The automatic choice is recorded and sticky.** With `auto`, the choice is
 >   written to `preferences.db` at the first save, before the secret is written. It
 >   is never silently switched. If the recorded store is unavailable, there is no
@@ -114,7 +121,10 @@ enumeration, no value exposure.
 >   Values are never shown.
 > - **Doctor.** The `secrets` line fails only when something was saved (a record or
 >   `secrets.enc` exists) and can't be read. Otherwise an unavailable store is a
->   warning with the reason.
+>   warning with the reason. A `secrets_key_file` warning appears when
+>   `secrets.key` is readable by other users.
+> - **Threat model unchanged (§3).** The file store's key sits beside the data:
+>   it guards against accidental exposure only.
 > - **Extra.** `pip install -e '.[secrets]'` brings `keyring` and `cryptography`.
 >   Without it a save fails with that instruction; nothing is stored in plain text.
 >
@@ -123,8 +133,9 @@ enumeration, no value exposure.
 > between stores. These stay with RFC-0004's own cycle.
 >
 > **Superseded by this block:** the `plugins.secrets` block and the
-> `~/.config/zygos/secrets.enc` path in the config sample below, and the
-> auto-selection that was not recorded.
+> `~/.config/zygos/secrets.enc` path in the config sample below, the keychain
+> service name `zygos`, and the unrecorded auto-selection under "Default
+> selection".
 
 Declared like any plugin kind, and only the selected backend is imported:
 
@@ -135,13 +146,14 @@ plugins:
     encrypted_file: "zygos.secrets.file:EncryptedFileStore"
     env:            "zygos.secrets.env:EnvStore"
 secrets:
-  backend: keyring          # optional; auto-selected if omitted (see below)
+  backend: keyring          # optional; auto-selected if omitted (superseded 2026-11-17: auto, recorded at first save)
   encrypted_file:
     path: ~/.config/zygos/secrets.enc   # superseded 2026-11-17: beside preferences.db
 ```
 
 - **`keyring`** (desktop default) — OS keychain via the `keyring` library (macOS
-  Keychain, Windows DPAPI, Linux Secret Service) under service name `zygos`.
+  Keychain, Windows DPAPI, Linux Secret Service) under service name `zygos`
+  *(superseded 2026-11-17: `zygos:<install id>`)*.
 - **`encrypted_file`** (droplet/headless default) — an AEAD-encrypted JSON blob
   (`handle → value`) at `secrets.enc`, encrypted with a 32-byte data key held in a
   sibling **`0600`, machine-local** key file (`secrets.key`). `set` decrypts,
@@ -152,7 +164,8 @@ secrets:
   Vault/KMS/docker-secrets integration lives for anyone who wants a stronger
   threat model, added behind the same Protocol.
 
-**Default selection.** If `secrets.backend` is omitted, the runtime auto-selects
+**Default selection** *(superseded 2026-11-17: the choice is recorded at the first
+save and never switched — see the block above)*. If `secrets.backend` is omitted, the runtime auto-selects
 (`keyring` when an OS keychain is available, else `encrypted_file`) and **reports
 the chosen backend in `zygos doctor` and the manifest** — auto for convenience,
 never hidden.
