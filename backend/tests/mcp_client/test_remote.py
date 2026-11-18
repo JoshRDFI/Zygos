@@ -12,6 +12,7 @@ from tests.mcp_client.servers import (  # noqa: E402
     BEARER_TOKEN,
     build_server,
     closed_port,
+    echo_header_error,
     handshake_only,
     http_app,
     non_object_root,
@@ -224,3 +225,49 @@ async def test_nothing_declared_to_server():
     capabilities = init["params"]["capabilities"]
     assert not {"roots", "sampling", "elicitation", "tasks"} & {k for k, v in capabilities.items() if v}
     assert not any(m.get("method") == "logging/setLevel" for m in sent)
+
+
+async def test_pinned_modern_era_recovers_after_downgrade(handshake_url):
+    spec = _spec(handshake_url)
+    result = await list_remote(spec, {}, era="2026-07-28", discover=None)
+    assert result.era == "2025-11-25"
+    assert {"echo", "pic"} <= _names(result)
+    learned: list = []
+    out = await call_remote(
+        spec, {}, "echo", {"text": "hi"}, era="2026-07-28", discover=None,
+        on_era=lambda era, discover: learned.append((era, discover)),
+    )
+    assert out == {"text": "hi", "structured": {"result": "hi"}}
+    assert learned == [("2025-11-25", None)]
+
+
+async def test_on_era_quiet_when_era_unchanged(modern_url):
+    first = await list_remote(_spec(modern_url), {}, era=None, discover=None)
+    learned: list = []
+    await call_remote(
+        _spec(modern_url), {}, "echo", {"text": "a"}, era=first.era, discover=first.discover,
+        on_era=lambda era, discover: learned.append(era),
+    )
+    assert learned == []
+
+
+async def test_handshake_era_call_skips_discover():
+    sent: list = []
+    with serve(record_requests(handshake_only(http_app(build_server())), sent)) as url:
+        out = await call_remote(_spec(url), {}, "echo", {"text": "a"}, era="2025-11-25", discover=None)
+        assert out["text"] == "a"
+        assert not any(m.get("method") == "server/discover" for m in sent)
+        assert any(m.get("method") == "initialize" for m in sent)
+        sent.clear()
+        # Listing still probes, so an upgraded server would be noticed.
+        await list_remote(_spec(url), {}, era="2025-11-25", discover=None)
+        assert any(m.get("method") == "server/discover" for m in sent)
+
+
+async def test_short_header_value_scrubbed():
+    with serve(echo_header_error("X-Key")) as url:
+        spec = _spec(url, headers=["X-Key"], timeout_s=5)
+        with pytest.raises(McpUnavailable) as info:
+            await list_remote(spec, {"X-Key": "t0k"}, era=None, discover=None)
+    assert "bad key" in str(info.value)
+    assert "t0k" not in str(info.value)

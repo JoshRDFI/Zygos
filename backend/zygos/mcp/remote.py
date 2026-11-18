@@ -49,7 +49,7 @@ async def list_remote(
 ) -> ListResult:
     """List a remote server's tools over one short connection; each tool's schema is checked."""
 
-    async def work(client: Any) -> ListResult:
+    async def work(client: Any) -> tuple[list[SeenTool], int]:
         tools: list[SeenTool] = []
         ttl_ms = 0
         cursor: str | None = None
@@ -61,17 +61,15 @@ async def list_remote(
             cursor = page.next_cursor
             if cursor is None:
                 break
-        negotiated = client.protocol_version
-        found = client.session.discover_result
-        modern = _is_modern(negotiated)
-        return ListResult(
-            era=negotiated,
-            discover=None if found is None else found.model_dump(mode="json", by_alias=True, exclude_none=True),
-            tools=tools,
-            ttl_s=ttl_ms / 1000 if modern and ttl_ms > 0 else None,
-        )
+        return tools, ttl_ms
 
-    return await _with_client(spec, headers, era, discover, work, phase="list")
+    (tools, ttl_ms), negotiated, found = await _with_client(spec, headers, era, discover, work, phase="list")
+    return ListResult(
+        era=negotiated,
+        discover=found,
+        tools=tools,
+        ttl_s=ttl_ms / 1000 if _is_modern(negotiated) and ttl_ms > 0 else None,
+    )
 
 
 async def call_remote(
@@ -82,13 +80,22 @@ async def call_remote(
     *,
     era: str | None,
     discover: dict[str, Any] | None,
+    on_era: Callable[[str, dict[str, Any] | None], None] | None = None,
 ) -> Any:
-    """Call one tool over one short connection; returns ``map_result`` of the reply."""
+    """Call one tool over one short connection; returns ``map_result`` of the reply.
+
+    A known handshake era connects with ``mode="legacy"`` (no discover probe per call).
+    If the server's era turned out different from ``era`` (e.g. a pinned modern era fell
+    back after a downgrade), ``on_era(new_era, new_discover)`` is called before the result
+    is mapped, so the caller can store it.
+    """
 
     async def work(client: Any) -> Any:
         return await client.call_tool(tool, args)
 
-    result = await _with_client(spec, headers, era, discover, work, phase="call")
+    result, negotiated, found = await _with_client(spec, headers, era, discover, work, phase="call")
+    if on_era is not None and negotiated != era:
+        on_era(negotiated, found)
     return map_result(result)
 
 
@@ -159,12 +166,19 @@ async def _with_client(
     work: Callable[[Any], Awaitable[_T]],
     *,
     phase: str,
-) -> _T:
+) -> tuple[_T, str, dict[str, Any] | None]:
+    """Run ``work`` on a connected client; returns (its value, negotiated era, discover dict).
+
+    A pinned era (modern, or legacy for a known handshake-era call) that fails with a
+    protocol mismatch is retried once in ``mode="auto"`` within the same time budget, so a
+    server that changed era never shows up as a refused tool.
+    """
     if spec.transport not in ("http", "sse") or not spec.url:
         raise McpUnavailable(f"{spec.name} is not a remote server (no url)")
     import anyio
     from mcp import Client
     from mcp_types import DiscoverResult
+    from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS
     from pydantic import ValidationError
 
     mode, prior = "auto", None
@@ -174,21 +188,38 @@ async def _with_client(
             mode = era  # type: ignore[assignment]
         except ValidationError:
             mode, prior = "auto", None  # a stored discover we can't read: learn it again
+    elif phase == "call" and era in HANDSHAKE_PROTOCOL_VERSIONS:
+        mode = "legacy"
 
     status = _HttpStatus()
     connected = False
+
+    async def attempt(mode: str, prior: Any) -> tuple[_T, str, dict[str, Any] | None]:
+        nonlocal connected
+        connected = False
+        status.codes.clear()
+        client = Client(
+            _transport(spec, headers, status),
+            mode=mode,
+            prior_discover=prior,
+            read_timeout_seconds=spec.timeout_s,
+            cache=None,
+        )
+        async with client:
+            connected = True
+            value = await work(client)
+            found = client.session.discover_result
+            dumped = None if found is None else found.model_dump(mode="json", by_alias=True, exclude_none=True)
+            return value, client.protocol_version, dumped
+
     try:
         with anyio.fail_after(spec.timeout_s):
-            client = Client(
-                _transport(spec, headers, status),
-                mode=mode,
-                prior_discover=prior,
-                read_timeout_seconds=spec.timeout_s,
-                cache=None,
-            )
-            async with client:
-                connected = True
-                return await work(client)
+            try:
+                return await attempt(mode, prior)
+            except Exception as exc:
+                if mode == "auto" or not _mismatch(exc, status, phase=phase):
+                    raise
+                return await attempt("auto", None)
     except TimeoutError:
         raise McpUnavailable(f"no answer within {spec.timeout_s:g} s") from None
     except (McpUnavailable, McpToolError):
@@ -301,12 +332,29 @@ def _leaf(exc: BaseException) -> BaseException:
     return exc
 
 
+def _mismatch(exc: BaseException, status: _HttpStatus, *, phase: str) -> bool:
+    """Did a pinned-era attempt fail because the server speaks another era?"""
+    from mcp.shared.exceptions import MCPError
+    from mcp_types import INVALID_REQUEST, METHOD_NOT_FOUND, UNSUPPORTED_PROTOCOL_VERSION
+    from pydantic import ValidationError
+
+    if status.refused is not None:
+        return False
+    leaf = _leaf(exc)
+    if isinstance(leaf, MCPError):
+        return leaf.code in (METHOD_NOT_FOUND, INVALID_REQUEST, UNSUPPORTED_PROTOCOL_VERSION)
+    # A call's reply that fails validation may come from a tool that already ran: no retry.
+    return isinstance(leaf, ValidationError) and phase == "list"
+
+
 def _scrub(text: str, headers: dict[str, str]) -> str:
+    """Hide header values: the whole value always, and its space-separated parts of 4+ chars."""
     secrets: set[str] = set()
     for value in headers.values():
-        secrets.add(value)
-        secrets.update(value.split())
-    for secret in sorted((s for s in secrets if len(s) >= 4), key=len, reverse=True):
+        if value:
+            secrets.add(value)
+        secrets.update(part for part in value.split() if len(part) >= 4)
+    for secret in sorted(secrets, key=len, reverse=True):
         text = text.replace(secret, "***")
     return text
 

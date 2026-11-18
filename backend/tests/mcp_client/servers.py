@@ -185,6 +185,21 @@ def record_requests(app, sink: list):
     return wrapped
 
 
+def echo_header_error(header: str):
+    """An app that answers every POST with a JSON-RPC error quoting ``header``'s value."""
+
+    async def app(scope, receive, send):
+        if scope["type"] != "http":
+            return
+        await _read_body(receive)
+        value = dict(scope["headers"]).get(header.lower().encode(), b"").decode("latin-1")
+        await _send_json(
+            send, 400, {"jsonrpc": "2.0", "id": None, "error": {"code": -32603, "message": f"bad key {value}"}}
+        )
+
+    return app
+
+
 def non_object_root(app):
     """Rewrite tools/list replies: a tool carrying STRING_ROOT_MARK gets ``{"type": "string"}``."""
 
