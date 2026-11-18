@@ -252,3 +252,18 @@ def test_windows_lock_timeout_is_unavailable(store, monkeypatch):
     with pytest.raises(SecretStoreUnavailable, match="busy"):
         with store._locked():
             pass
+
+
+def test_windows_unlock_error_does_not_mask_the_body_error(store, monkeypatch):
+    class UnlockFails(_FakeMsvcrt):
+        def locking(self, fd, mode, nbytes):
+            if mode == self.LK_UNLCK:
+                raise OSError(13, "denied")
+            super().locking(fd, mode, nbytes)
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setitem(sys.modules, "msvcrt", UnlockFails())
+    store.directory.mkdir(parents=True)
+    with pytest.raises(SecretStoreCorrupt):
+        with store._locked():
+            raise SecretStoreCorrupt("body error")

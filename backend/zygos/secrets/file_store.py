@@ -127,7 +127,7 @@ class EncryptedFileStore:
 
                 try:
                     # LK_LOCK retries for about 10 s, then raises.
-                    msvcrt.locking(fd, msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]
+                    msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
                 except OSError as exc:
                     raise SecretStoreUnavailable(
                         f"secrets file is busy ({type(exc).__name__})"
@@ -135,8 +135,10 @@ class EncryptedFileStore:
                 try:
                     yield
                 finally:
-                    os.lseek(fd, 0, os.SEEK_SET)
-                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
+                    # Never mask the body's error; closing the fd below releases it anyway.
+                    with contextlib.suppress(OSError):
+                        os.lseek(fd, 0, os.SEEK_SET)
+                        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
             else:
                 import fcntl
 
