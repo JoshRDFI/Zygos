@@ -32,8 +32,10 @@ server:
   host: 127.0.0.1             # loopback only; change deliberately to expose it
   port: 8000
 
-# Relative data paths (db_path, profiles_dir, ...) resolve against ZYGOS_HOME, or
-# backend/ in a checkout; see docs/adr/ADR-0009-zygos-home-one-root-for-data.md.
+# Relative data paths below (db_path, workspace_root, profiles_dir, download_root)
+# resolve against ZYGOS_HOME (default: backend/ in a checkout, else a per-user
+# folder), not against this file's folder. models.ollama_models_dir is not
+# resolved. See docs/adr/ADR-0009-zygos-home-one-root-for-data.md.
 memory:
   enabled: false              # true = layered memory in a local SQLite file
   db_path: .zygos/memory.db
