@@ -82,3 +82,25 @@ def test_local_providers_live_below_the_catalog():
 
     assert catalog.LOCAL_PROVIDERS is types.LOCAL_PROVIDERS
     assert types.LOCAL_PROVIDERS == frozenset({"ollama", "llamacpp", "vllm", "fake"})
+
+
+def test_build_runtime_does_not_import_secret_libraries():
+    """RFC-0015 phase 0: the optional secrets extra is imported only when used."""
+    import subprocess
+    import sys
+
+    code = (
+        "import sys, tempfile, pathlib\n"
+        "d = pathlib.Path(tempfile.mkdtemp())\n"
+        "c = d / 'c.yaml'\n"
+        "c.write_text(f\"personalization:\\n  db_path: '{d}/p.db'\\n\"\n"
+        "             'providers:\\n  primary: {provider: fake, model: fake-1}\\n')\n"
+        "import asyncio\n"
+        "from zygos.runtime.bootstrap import build_runtime\n"
+        "r = build_runtime(c)\n"
+        "asyncio.run(r.aclose())\n"
+        "print(','.join(m for m in ('keyring', 'cryptography') if m in sys.modules))\n"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         check=True, cwd=PACKAGE_ROOT.parent)
+    assert out.stdout.strip() == ""

@@ -80,3 +80,22 @@ async def test_manifest_thinking_from_cache():
         assert runtime_manifest(runtime).thinking == result
     finally:
         await runtime.aclose()
+
+
+def test_manifest_secrets_entry_has_no_location_or_values(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        f"personalization:\n  db_path: '{tmp_path / '.zygos' / 'p.db'}'\n"
+        "providers:\n  primary: {provider: fake, model: fake-1}\n"
+        "secrets:\n  backend: encrypted_file\n"
+    )
+    runtime = build_runtime(cfg)
+    try:
+        manifest = runtime_manifest(runtime)
+    finally:
+        asyncio.run(runtime.aclose())
+    s = manifest.secrets
+    assert s is not None
+    assert set(type(s).model_fields) == {"backend", "reason", "available"}
+    assert s.backend == "encrypted_file"
+    assert str(tmp_path) not in manifest.model_dump_json()

@@ -7,6 +7,7 @@ primary route. Stability: Experimental.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from zygos.backends.addresses import resolve_address
@@ -105,6 +106,47 @@ def _default_model_check(runtime: RuntimeAssembly) -> DoctorCheck:
     return DoctorCheck("default_model", True, f"{route} ({status.source})")
 
 
+def _secrets_check(runtime: RuntimeAssembly) -> list[DoctorCheck]:
+    """One passive read of the secret store: never writes, never shows a value."""
+    from zygos.secrets import SecretStoreCorrupt, SecretStoreError
+    from zygos.secrets.choice import SqliteChoiceStore
+
+    handle = runtime.secrets
+    status = handle.status()
+    file_store = handle.file_store()
+    try:
+        record = SqliteChoiceStore(Path(runtime.config.personalization.db_path)).read()
+        saved = record is not None or file_store.enc_path.exists()
+    except SecretStoreError:
+        saved = True  # a record exists but can't be read
+    out: list[DoctorCheck] = []
+    if not status.available:
+        why = status.why_unavailable or "no secret store"
+        if saved:
+            out.append(DoctorCheck("secrets", False, why))
+        else:
+            out.append(DoctorCheck("secrets", True, f"not available — {why}", warn=True))
+        return out
+    if status.backend == "encrypted_file" and file_store.enc_path.exists():
+        try:
+            handle.get("provider:doctor-probe")  # read-only integrity check
+        except SecretStoreCorrupt as exc:
+            return [DoctorCheck("secrets", False, str(exc))]
+        except SecretStoreError as exc:
+            return [DoctorCheck("secrets", False, str(exc))]
+    if status.reason == "provisional — nothing saved yet":
+        out.append(DoctorCheck("secrets", True, f"{status.backend} (provisional — nothing saved yet)"))
+    else:
+        out.append(DoctorCheck("secrets", True, f"{status.backend} ({status.reason}) — {status.location}"))
+    if file_store.key_file_loose():
+        key = file_store.key_path
+        out.append(DoctorCheck(
+            "secrets_key_file", True,
+            f"{key} is readable by other users; run chmod 600 {key}", warn=True,
+        ))
+    return out
+
+
 async def _backend_checks(runtime: RuntimeAssembly) -> list[DoctorCheck]:
     """Optional backends (RFC-0014): shown only when set up; problems warn, never fail."""
     settings = runtime.backends.get()
@@ -197,6 +239,7 @@ async def run_doctor(
             f"set (assistant: {prefs.assistant_name or '-'}, user: {prefs.user_name or '-'})",
         ))
 
+    checks.extend(_secrets_check(runtime))
     checks.append(_default_model_check(runtime))
     checks.append(_hardware_check(runtime, gpu_query))
     checks.extend(_voice_device_checks(runtime))

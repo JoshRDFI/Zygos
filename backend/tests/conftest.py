@@ -22,5 +22,11 @@ def _no_real_keychain(monkeypatch):
     if importlib.util.find_spec("keyring") is None:
         return
     import keyring
+    import keyring.core
 
-    monkeypatch.setattr(keyring, "get_keyring", lambda: _NoKeyring())
+    fail = _NoKeyring()
+    # Patch both the public entry point and the one keyring's own helpers call,
+    # and the module-level current backend, so no path reaches the OS keychain.
+    monkeypatch.setattr(keyring, "get_keyring", lambda: fail)
+    monkeypatch.setattr(keyring.core, "get_keyring", lambda: fail)
+    monkeypatch.setattr(keyring.core, "_keyring_backend", fail, raising=False)

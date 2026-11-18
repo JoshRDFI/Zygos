@@ -53,6 +53,16 @@ class VoiceManifest(BaseModel):
     tts: TtsHealth | None = None
 
 
+class SecretsManifest(BaseModel):
+    """Which secret store is in use. No handles, location or values."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    backend: str | None
+    reason: str
+    available: bool
+
+
 class Manifest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -66,6 +76,7 @@ class Manifest(BaseModel):
     voice: VoiceManifest | None = None
     thinking: ThinkingSupport | None = None   # primary route, from the checker cache
     hardware: HardwareSnapshot | None = None   # the last scan; the manifest never scans
+    secrets: SecretsManifest | None = None
 
 
 def _package_version() -> str:
@@ -96,6 +107,7 @@ def runtime_manifest(runtime: "RuntimeAssembly") -> Manifest:
         stt = snap.stt.model_copy(update={"last_error": _scrub_error(snap.stt.last_error)}) if snap.stt else None
         tts = snap.tts.model_copy(update={"last_error": _scrub_error(snap.tts.last_error)}) if snap.tts else None
         voice = VoiceManifest(stt=stt, tts=tts)
+    secrets = runtime.secrets.status()
     return Manifest(
         lifecycle_stage=runtime.lifecycle_stage,
         capabilities=dict(snapshot.bindings),
@@ -113,4 +125,7 @@ def runtime_manifest(runtime: "RuntimeAssembly") -> Manifest:
         voice=voice,
         thinking=runtime.thinking_support.cached(primary_route(config)),
         hardware=runtime.hardware.last(),
+        secrets=SecretsManifest(
+            backend=secrets.backend, reason=secrets.reason, available=secrets.available
+        ),
     )

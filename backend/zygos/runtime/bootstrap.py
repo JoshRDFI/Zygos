@@ -38,6 +38,7 @@ from zygos.models.default import DefaultStatus, can_create, resolve_default
 from zygos.models.residency import ResidencyManager
 from zygos.models.store import ProfileStore
 from zygos.personalization import PreferencesStore, SqlitePreferencesStore
+from zygos.secrets import SecretsHandle, build_secret_store
 from zygos.plugins.resolver import PluginRegistry
 from zygos.providers.base import Provider, ProviderSettings
 from zygos.providers.embedding import Embedder
@@ -91,6 +92,7 @@ class RuntimeAssembly:
     backends: BackendsStore
     address_sources: Mapping[str, AddressSource]
     addresses_at_start: Mapping[str, str]
+    secrets: SecretsHandle
     residency: ResidencyManager | None = None
 
     def new_context(self, *, session_id: str | None = None) -> ExecutionContext:
@@ -388,6 +390,7 @@ def build_runtime(
         memory_service=memory_service,
         voice_service=voice_service,
         preferences=SqlitePreferencesStore(Path(config.personalization.db_path)),
+        secrets=build_secret_store(config),
         http_client=client,
         event_bus=bus,
         capability_registry=registry,
