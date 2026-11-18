@@ -3,16 +3,20 @@
 Resolution runs on every call, because another process may record the choice at
 any time. Order (RFC-0015 phase 0, "How the store is chosen"):
 
-1. Read the recorded choice. An unreadable record makes secrets unavailable — it
+1. ``secrets.backend: encrypted_file`` in config → the file store, always; the
+   record is neither read nor written (the file needs no install id).
+2. Read the recorded choice. An unreadable record makes secrets unavailable — it
    is never treated as "no record".
-2. No record but ``secrets.enc`` exists → adopt it: record ``encrypted_file``.
-3. ``secrets.backend`` set explicitly in config → that store, always.
+3. ``secrets.backend: keyring`` in config → the keychain, with the install id from
+   the record (recorded at the first ``set`` if there is none).
 4. A record → its store, even if unavailable right now. **No fallback.**
-5. Otherwise provisional: keychain if usable, else encrypted file, else none.
+5. No record but ``secrets.enc`` exists → the file store (that file is evidence of
+   saved secrets); recorded at the first ``set``.
+6. Otherwise provisional: keychain if usable, else encrypted file, else none.
 
-The first ``set`` through a provisional store records the choice *before* writing
-the secret; if recording fails nothing is written. A process that loses a
-first-save race follows the winner's record.
+Reads (``status``/``get``/``presence``) never write. The first ``set`` without a
+record records the choice *before* writing the secret; if recording fails nothing
+is written. A process that loses a first-save race follows the winner's record.
 
 Building the handle does no I/O and imports neither ``keyring`` nor
 ``cryptography``. The keychain availability probe is cached for the life of the
@@ -85,8 +89,9 @@ class _Resolution:
     reason: str
     store: SecretStore | None
     why_unavailable: str | None
-    record: ChoiceRecord | None
     location: str | None
+    # Backend to record (before writing) at the first set; None = nothing to record.
+    to_record: str | None = None
 
     @property
     def available(self) -> bool:
@@ -143,10 +148,10 @@ class SecretsHandle:
         validate_handle(handle)
         r = self._resolve()
         store = r.require()
-        if r.record is None and r.backend is not None:
+        if r.to_record is not None:
             record = self._choice.record_if_absent(
                 ChoiceRecord(
-                    backend=r.backend,
+                    backend=r.to_record,
                     chosen_at=self._now().isoformat(),
                     install_id=self._new_id(),
                 )
@@ -159,8 +164,8 @@ class SecretsHandle:
         validate_handle(handle)
         r = self._resolve()
         store = r.require()
-        if r.record is None:
-            return  # nothing has ever been saved
+        if isinstance(store, KeyringStore) and store.service is None:
+            return  # no install id yet: nothing has ever been saved there
         store.delete(handle)
 
     def presence(self, handle: str) -> Presence:
@@ -179,51 +184,34 @@ class SecretsHandle:
     # -- resolution ---------------------------------------------------------
 
     def _resolve(self) -> _Resolution:
-        explicit = self._configured != "auto"
+        if self._configured == ENCRYPTED_FILE:
+            return self._pinned(ENCRYPTED_FILE, REASON_CONFIG, None)
         try:
             record = self._choice.read()
-            reason: str | None = None
-            if record is None and self._file.enc_path.exists():
-                record = self._choice.record_if_absent(
-                    ChoiceRecord(
-                        backend=ENCRYPTED_FILE,
-                        chosen_at=self._now().isoformat(),
-                        install_id=self._new_id(),
-                    )
-                )
-                reason = REASON_ADOPTED
         except SecretStoreUnavailable as exc:
-            return _Resolution(
-                backend=self._configured if explicit else None,
-                reason=REASON_CONFIG if explicit else REASON_UNREADABLE,
-                store=None,
-                why_unavailable=str(exc),
-                record=None,
-                location=None,
-            )
+            if self._configured == KEYRING:
+                why = _pinned_unavailable(
+                    KEYRING, f"this install's id can't be read, so its entries can't be found ({exc})"
+                )
+                return _Resolution(KEYRING, REASON_CONFIG, None, why, None)
+            return _Resolution(None, REASON_UNREADABLE, None, str(exc), None)
 
-        if explicit:
-            return self._pinned(
-                self._configured, record, REASON_CONFIG, record.install_id if record else None
-            )
+        if self._configured == KEYRING:
+            if record is None:
+                return self._pinned(KEYRING, REASON_CONFIG, None, to_record=KEYRING)
+            return self._pinned(KEYRING, REASON_CONFIG, record.install_id)
         if record is not None:
-            return self._pinned(
-                record.backend, record, reason or _chosen_reason(record), record.install_id
-            )
+            return self._pinned(record.backend, _chosen_reason(record), record.install_id)
+        if self._file.enc_path.exists():
+            return self._pinned(ENCRYPTED_FILE, REASON_ADOPTED, None, to_record=ENCRYPTED_FILE)
         return self._provisional()
 
     def _pinned(
-        self, name: str, record: ChoiceRecord | None, reason: str, install_id: str | None
+        self, name: str, reason: str, install_id: str | None, *, to_record: str | None = None
     ) -> _Resolution:
         if name not in _KNOWN:
-            return _Resolution(
-                backend=name,
-                reason=reason,
-                store=None,
-                why_unavailable=f"the record names a store Zygos doesn't know: {name}",
-                record=record,
-                location=None,
-            )
+            why = f"the record names a store Zygos doesn't know: {name}"
+            return _Resolution(name, reason, None, why, None)
         store = self._store(name, install_id)
         why = self._availability(name, store)
         return _Resolution(
@@ -231,8 +219,8 @@ class SecretsHandle:
             reason=reason,
             store=store,
             why_unavailable=None if why is None else _pinned_unavailable(name, why),
-            record=record,
             location=self._location(store),
+            to_record=to_record,
         )
 
     def _provisional(self) -> _Resolution:
@@ -252,7 +240,6 @@ class SecretsHandle:
             reason=REASON_PROVISIONAL,
             store=None,
             why_unavailable=why,
-            record=None,
             location=None,
         )
 
@@ -262,8 +249,8 @@ class SecretsHandle:
             reason=REASON_PROVISIONAL,
             store=store,
             why_unavailable=None,
-            record=None,
             location=self._location(store),
+            to_record=name,
         )
 
     def _pinned_store(self, name: str, install_id: str) -> SecretStore:

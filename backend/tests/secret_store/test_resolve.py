@@ -156,8 +156,7 @@ def test_config_pinned_unavailable_store_does_not_fall_back(tmp_path):
 
 
 def test_unreadable_record_is_unavailable_not_provisional(tmp_path):
-    _db(tmp_path).parent.mkdir(parents=True)
-    _db(tmp_path).write_bytes(b"this is not a sqlite database" * 100)
+    _garbage_db(tmp_path)
     fake = FakeKeyring()
     h = _handle(tmp_path, keyring_backend=fake)
     st = h.status()
@@ -183,13 +182,20 @@ def test_unknown_recorded_backend_is_unavailable(tmp_path):
         h.set(H, "v")
 
 
-def test_existing_enc_without_record_is_adopted(tmp_path):
+def _orphaned_enc(tmp_path):
+    """A file-store secret whose preferences.db was deleted (personalization reset)."""
     first = _handle(tmp_path, keyring_backend=_fail_keyring())
     first.set(H, "v")
     old_id = _read(tmp_path).install_id
     _db(tmp_path).unlink()
+    return old_id
+
+
+def test_existing_enc_without_record_is_adopted(tmp_path):
+    old_id = _orphaned_enc(tmp_path)
+    fake = FakeKeyring()
     h = build_secret_store(
-        _config(tmp_path), keyring_backend=FakeKeyring(), now=lambda: FIXED_NOW, new_id=lambda: "fresh"
+        _config(tmp_path), keyring_backend=fake, now=lambda: FIXED_NOW, new_id=lambda: "fresh"
     )
     st = h.status()
     assert (st.backend, st.reason, st.available) == (
@@ -198,11 +204,77 @@ def test_existing_enc_without_record_is_adopted(tmp_path):
         True,
     )
     assert h.get(H) == "v"
+    assert _read(tmp_path) is None  # reads never record
+    h.set("provider:other", "w")  # first save records the evidence, not the keychain
     rec = _read(tmp_path)
     assert rec.backend == "encrypted_file"
     assert old_id != "fresh"
     assert rec.install_id == "fresh"  # re-recorded with a new install id
+    assert fake.entries == {}
+    assert h.get("provider:other") == "w"
     assert h.status().reason == "chosen 2026-11-17 at first save"
+
+
+def test_reads_on_an_orphaned_enc_never_write(tmp_path):
+    _orphaned_enc(tmp_path)
+    h = _handle(tmp_path, keyring_backend=FakeKeyring())
+    h.status()
+    assert h.get(H) == "v"
+    assert h.presence(H).state == "set"
+    assert h.presence("provider:other").state == "not_set"
+    assert not _db(tmp_path).exists()
+
+
+def test_reads_on_a_fresh_install_never_write(tmp_path):
+    h = _handle(tmp_path, keyring_backend=FakeKeyring())
+    h.status()
+    h.get(H)
+    h.presence(H)
+    h.delete(H)
+    assert not _db(tmp_path).parent.exists()
+
+
+def _garbage_db(root):
+    _db(root).parent.mkdir(parents=True)
+    _db(root).write_bytes(b"this is not a sqlite database" * 100)
+
+
+def test_explicit_file_works_with_an_unreadable_record(tmp_path):
+    _garbage_db(tmp_path)
+    garbage = _db(tmp_path).read_bytes()
+    h = _handle(tmp_path, "encrypted_file", FakeKeyring())
+    st = h.status()
+    assert (st.backend, st.reason, st.available) == ("encrypted_file", "set in config", True)
+    h.set(H, "v")
+    assert h.get(H) == "v"
+    assert h.presence(H).state == "set"
+    assert _db(tmp_path).read_bytes() == garbage  # record ignored, not touched
+
+
+def test_explicit_keyring_with_an_unreadable_record_is_unavailable(tmp_path):
+    _garbage_db(tmp_path)
+    fake = FakeKeyring()
+    h = _handle(tmp_path, "keyring", fake)
+    st = h.status()
+    assert (st.backend, st.reason, st.available) == ("keyring", "set in config", False)
+    assert "install's id can't be read" in st.why_unavailable
+    with pytest.raises(SecretStoreUnavailable, match="install's id can't be read"):
+        h.set(H, "v")
+    with pytest.raises(SecretStoreUnavailable):
+        h.get(H)
+    assert fake.entries == {}
+
+
+def test_explicit_keyring_records_an_install_id_at_first_set(tmp_path):
+    fake = FakeKeyring()
+    h = _handle(tmp_path, "keyring", fake)
+    assert h.get(H) is None
+    assert _read(tmp_path) is None
+    h.set(H, "v")
+    rec = _read(tmp_path)
+    assert rec.backend == "keyring"
+    assert fake.entries == {(f"zygos:{rec.install_id}", H): "v"}
+    assert h.status().location == f"zygos:{rec.install_id}"
 
 
 def test_loser_follows_recorded_store(tmp_path):
