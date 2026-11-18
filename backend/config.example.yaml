@@ -51,3 +51,8 @@ voice:
 # models:
 #   profiles_dir: .zygos/models/profiles   # one hand-editable JSON per model
 #   ollama_models_dir: null                # override the hardware probe's search
+
+# Secret store for API keys and tokens (RFC-0015). Needs the `secrets` extra.
+# secrets:
+#   backend: auto   # auto | keyring | encrypted_file
+#   # encrypted_file keeps secrets.enc + secrets.key beside preferences.db (per install)

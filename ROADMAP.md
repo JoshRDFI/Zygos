@@ -11,7 +11,7 @@ decision requires an accepted RFC before implementation begins.
 
 ## Status
 
-_Last updated 2026-11-03._
+_Last updated 2026-11-17._
 
 | Milestone | Deliverable | Status |
 |---|---|---|
