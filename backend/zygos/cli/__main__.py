@@ -203,6 +203,13 @@ def main(argv: list[str] | None = None) -> int:
                     "to set your name and the assistant's.",
                     file=sys.stderr,
                 )
+            import logging
+
+            from zygos.home import stray_data_dir, stray_message
+
+            stray = stray_data_dir()
+            if stray is not None:
+                logging.getLogger("zygos.home").warning(stray_message(stray))
             host = args.host if args.host is not None else runtime.config.server.host
             port = args.port if args.port is not None else runtime.config.server.port
             run_server(runtime, host=host, port=port)

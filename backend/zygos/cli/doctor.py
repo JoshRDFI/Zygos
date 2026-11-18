@@ -238,6 +238,14 @@ async def run_doctor(
             f"set (assistant: {prefs.assistant_name or '-'}, user: {prefs.user_name or '-'})",
         ))
 
+    from zygos.home import stray_data_dir, stray_message, zygos_home
+
+    home = zygos_home()
+    checks.append(DoctorCheck("zygos_home", True, f"{home.root} ({home.source})"))
+    stray = stray_data_dir()
+    if stray is not None:
+        checks.append(DoctorCheck("stray_data_folder", True, stray_message(stray), warn=True))
+
     checks.extend(_secrets_check(runtime))
     checks.append(_default_model_check(runtime))
     checks.append(_hardware_check(runtime, gpu_query))
