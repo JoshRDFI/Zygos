@@ -125,6 +125,8 @@ python3.12 -m venv .venv
 .venv/bin/python -m zygos.cli serve      # http://127.0.0.1:8000
 ```
 
+The `.[secrets]` extra (OS keychain and encrypted file for saved secrets) is optional for now. It is needed later by MCP servers that use keys: `.venv/bin/pip install -e '.[secrets]'`.
+
 **2. Web UI** (terminal 2):
 
 ```bash

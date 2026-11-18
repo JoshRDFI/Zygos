@@ -10,6 +10,7 @@
   (config-declared plugins) and reinforces
   [RFC-0003](RFC-0003-Capability-Registry-Runtime-Manifest-and-Inspection.md)'s
   "manifest contains no secret material"
+- **Amended:** 2026-11-17 — per-install, sticky secret store (RFC-0015 phase 0; see the block at the start of §2).
 - **Amended by:** [RFC-0015](RFC-0015-MCP-Client-Connecting-to-MCP-Servers.md) (accepted 2026-11-17, additive) — MCP secret handles `mcp:<server>:env:<NAME>` and `mcp:<server>:header:<Name>` beside `provider:<name>`; RFC-0015 phase 0 builds the `SecretStore` part MCP needs (keyring + encrypted_file backends, presence-only reporting).
 - **Implementation status:** tracked in [ROADMAP.md](../../ROADMAP.md); a
   standalone increment, orthogonal to Milestone 3 (not a gate); may ride with the
@@ -88,18 +89,55 @@ enumeration, no value exposure.
 
 ### 2. Backends (all three ship in the first increment)
 
+> **Amended 2026-11-17 (RFC-0015 phase 0).** Phase 0 built the part of the
+> `SecretStore` that MCP needs (spec:
+> `docs/superpowers/specs/2026-11-17-secret-store-phase0-design.md`). Where it
+> differs from the text below, this block wins. What was built:
+>
+> - **Per install.** `secrets.enc` and `secrets.key` sit in the same directory as
+>   `preferences.db`, not in `~/.config/zygos/`. The keychain service name is
+>   `zygos:<install id>`; the id is kept in the choice record.
+> - **Fixed backends.** `secrets.backend: auto | keyring | encrypted_file`. The
+>   backends are a built-in map, not a `plugins.secrets` block.
+> - **The automatic choice is recorded and sticky.** With `auto`, the choice is
+>   written to `preferences.db` at the first save, before the secret is written. It
+>   is never silently switched. If the recorded store is unavailable, there is no
+>   fallback: secrets are unavailable and `zygos doctor` says why.
+> - **Unreadable record.** If the record can't be read, secrets are unavailable
+>   (it is not treated as "no record"). An explicit `encrypted_file` setting still
+>   works, because the file store needs no install id.
+> - **Existing file, no record.** An existing `secrets.enc` is used, and the choice
+>   is recorded at the next save.
+> - **Reads never write.** `get`, presence and `zygos doctor` never create or change
+>   the record, the file or the key.
+> - **Presence is three-way:** set, not set, or unknown (the store can't be read).
+>   Values are never shown.
+> - **Doctor.** The `secrets` line fails only when something was saved (a record or
+>   `secrets.enc` exists) and can't be read. Otherwise an unavailable store is a
+>   warning with the reason.
+> - **Extra.** `pip install -e '.[secrets]'` brings `keyring` and `cryptography`.
+>   Without it a save fails with that instruction; nothing is stored in plain text.
+>
+> **Not built in this phase:** the `env` backend, moving provider keys into the
+> store, `zygos keys`, `SecretStr`, web settings for secrets, and moving secrets
+> between stores. These stay with RFC-0004's own cycle.
+>
+> **Superseded by this block:** the `plugins.secrets` block and the
+> `~/.config/zygos/secrets.enc` path in the config sample below, and the
+> auto-selection that was not recorded.
+
 Declared like any plugin kind, and only the selected backend is imported:
 
 ```yaml
 plugins:
-  secrets:
+  secrets:                 # superseded 2026-11-17: fixed built-in map
     keyring:        "zygos.secrets.keyring:KeyringStore"
     encrypted_file: "zygos.secrets.file:EncryptedFileStore"
     env:            "zygos.secrets.env:EnvStore"
 secrets:
   backend: keyring          # optional; auto-selected if omitted (see below)
   encrypted_file:
-    path: ~/.config/zygos/secrets.enc
+    path: ~/.config/zygos/secrets.enc   # superseded 2026-11-17: beside preferences.db
 ```
 
 - **`keyring`** (desktop default) — OS keychain via the `keyring` library (macOS
