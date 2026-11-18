@@ -1,0 +1,242 @@
+"""SQLite persistence for MCP servers, learned state, trust and on/off.
+
+Same database file as preferences, own tables, one row per item. A short-lived
+connection is opened per call (the CLI and `zygos serve` are separate processes).
+Every write is one IMMEDIATE transaction that touches only its rows and bumps
+``mcp_meta.version``; a busy timeout makes concurrent writers wait, not fail.
+Reading never creates the database file. Only names are stored, never secret values.
+
+Stability: Experimental.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import sqlite3
+from collections.abc import Callable
+from contextlib import closing
+from pathlib import Path
+from typing import Any, Literal, TypeVar
+
+from pydantic import BaseModel, Field, ValidationError
+
+from zygos.mcp.types import SeenTool, ServerSpec
+
+_log = logging.getLogger("zygos.mcp")
+
+_BUSY_TIMEOUT_S = 30.0
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS mcp_servers (name TEXT PRIMARY KEY, spec TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS mcp_state (name TEXT PRIMARY KEY, state TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS mcp_trust (tool TEXT PRIMARY KEY, entry TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS mcp_trust_servers (name TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS mcp_off (key TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS mcp_meta (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    version INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO mcp_meta(id, version) VALUES (1, 0);
+"""
+
+_T = TypeVar("_T")
+
+
+class ServerState(BaseModel):
+    era: str | None = None
+    discover: dict[str, Any] | None = None
+    tools: list[SeenTool] = Field(default_factory=list)
+    listed_at: float | None = None
+    expires_at: float | None = None
+    status: Literal[
+        "not_started", "running", "stopped", "reachable", "unreachable", "failed"
+    ] = "not_started"
+    detail: str | None = None
+    exit_code: int | None = None
+    stderr_tail: str | None = None
+    status_at: float | None = None
+
+
+class TrustEntry(BaseModel):
+    tool: str  # zygos tool name
+    fingerprint: str
+    description: str
+    input_schema: dict[str, Any]
+    via: Literal["tool", "server"]
+
+
+def fingerprint(name: str, description: str, input_schema: dict[str, Any]) -> str:
+    blob = json.dumps([name, description, input_schema], sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+class SqliteMcpStore:
+    def __init__(self, path: str | Path) -> None:
+        self._path = Path(path)
+
+    # -- reads ---------------------------------------------------------------
+
+    def _read(self, fn: Callable[[sqlite3.Connection], _T], default: _T) -> _T:
+        if not self._path.exists():
+            return default
+        try:
+            with closing(sqlite3.connect(self._path, timeout=_BUSY_TIMEOUT_S)) as con:
+                has = con.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='mcp_meta'"
+                ).fetchone()
+                if has is None:
+                    return default
+                return fn(con)
+        except sqlite3.Error as exc:
+            _log.warning("mcp store unreadable (%s); using empty", exc)
+            return default
+
+    def _parse(self, model: type[BaseModel], raw: str, what: str) -> Any:
+        try:
+            return model.model_validate_json(raw)
+        except ValidationError as exc:
+            _log.warning("mcp %s row invalid (%s); skipped", what, exc)
+            return None
+
+    def servers(self) -> dict[str, ServerSpec]:
+        rows = self._read(lambda c: c.execute("SELECT name, spec FROM mcp_servers").fetchall(), [])
+        out: dict[str, ServerSpec] = {}
+        for name, raw in rows:
+            spec = self._parse(ServerSpec, raw, "server")
+            if spec is not None:
+                out[name] = spec
+        return out
+
+    def state(self, name: str) -> ServerState:
+        row = self._read(
+            lambda c: c.execute("SELECT state FROM mcp_state WHERE name=?", (name,)).fetchone(),
+            None,
+        )
+        if row is None:
+            return ServerState()
+        return self._parse(ServerState, row[0], "state") or ServerState()
+
+    def trust_entries(self) -> dict[str, TrustEntry]:
+        rows = self._read(lambda c: c.execute("SELECT tool, entry FROM mcp_trust").fetchall(), [])
+        out: dict[str, TrustEntry] = {}
+        for tool, raw in rows:
+            entry = self._parse(TrustEntry, raw, "trust")
+            if entry is not None:
+                out[tool] = entry
+        return out
+
+    def trusted_servers(self) -> set[str]:
+        rows = self._read(lambda c: c.execute("SELECT name FROM mcp_trust_servers").fetchall(), [])
+        return {r[0] for r in rows}
+
+    def off(self) -> set[str]:
+        rows = self._read(lambda c: c.execute("SELECT key FROM mcp_off").fetchall(), [])
+        return {r[0] for r in rows}
+
+    def version(self) -> int:
+        row = self._read(
+            lambda c: c.execute("SELECT version FROM mcp_meta WHERE id=1").fetchone(), None
+        )
+        return int(row[0]) if row else 0
+
+    # -- writes --------------------------------------------------------------
+
+    def _write(self, fn: Callable[[sqlite3.Connection], None]) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        with closing(
+            sqlite3.connect(self._path, timeout=_BUSY_TIMEOUT_S, isolation_level=None)
+        ) as con:
+            # WAL: readers never block the writer, and commits are one cheap fsync.
+            if con.execute("PRAGMA journal_mode").fetchone()[0] != "wal":
+                con.execute("PRAGMA journal_mode=WAL")
+            con.execute("PRAGMA synchronous=NORMAL")
+            con.execute("BEGIN IMMEDIATE")
+            try:
+                for stmt in _SCHEMA.split(";"):
+                    if stmt.strip():
+                        con.execute(stmt)
+                fn(con)
+                con.execute("UPDATE mcp_meta SET version = version + 1 WHERE id = 1")
+                con.execute("COMMIT")
+            except BaseException:
+                con.execute("ROLLBACK")
+                raise
+
+    def put_server(self, spec: ServerSpec) -> None:
+        self._write(
+            lambda c: c.execute(
+                "INSERT INTO mcp_servers(name, spec) VALUES (?, ?) "
+                "ON CONFLICT(name) DO UPDATE SET spec = excluded.spec",
+                (spec.name, spec.model_dump_json()),
+            )
+        )
+
+    def remove_server(self, name: str) -> None:
+        def go(c: sqlite3.Connection) -> None:
+            c.execute("DELETE FROM mcp_servers WHERE name=?", (name,))
+            c.execute("DELETE FROM mcp_state WHERE name=?", (name,))
+            c.execute("DELETE FROM mcp_trust_servers WHERE name=?", (name,))
+            c.execute("DELETE FROM mcp_off WHERE key=?", (f"server:{name}",))
+            prefix = f"{name}__"
+            for (tool,) in c.execute("SELECT tool FROM mcp_trust").fetchall():
+                if tool.startswith(prefix):
+                    c.execute("DELETE FROM mcp_trust WHERE tool=?", (tool,))
+            for (key,) in c.execute("SELECT key FROM mcp_off WHERE key LIKE 'tool:%'").fetchall():
+                if key[len("tool:") :].startswith(prefix):
+                    c.execute("DELETE FROM mcp_off WHERE key=?", (key,))
+
+        self._write(go)
+
+    def put_state(self, name: str, state: ServerState) -> None:
+        self._write(
+            lambda c: c.execute(
+                "INSERT INTO mcp_state(name, state) VALUES (?, ?) "
+                "ON CONFLICT(name) DO UPDATE SET state = excluded.state",
+                (name, state.model_dump_json()),
+            )
+        )
+
+    @staticmethod
+    def _put_trust(c: sqlite3.Connection, entry: TrustEntry) -> None:
+        c.execute(
+            "INSERT INTO mcp_trust(tool, entry) VALUES (?, ?) "
+            "ON CONFLICT(tool) DO UPDATE SET entry = excluded.entry",
+            (entry.tool, entry.model_dump_json()),
+        )
+
+    def trust_tool(self, entry: TrustEntry) -> None:
+        self._write(lambda c: self._put_trust(c, entry))
+
+    def trust_server(self, name: str, entries: list[TrustEntry]) -> None:
+        def go(c: sqlite3.Connection) -> None:
+            c.execute("INSERT OR IGNORE INTO mcp_trust_servers(name) VALUES (?)", (name,))
+            for e in entries:
+                self._put_trust(c, e)
+
+        self._write(go)
+
+    def untrust_tool(self, tool: str) -> None:
+        self._write(lambda c: c.execute("DELETE FROM mcp_trust WHERE tool=?", (tool,)))
+
+    def untrust_server(self, name: str) -> None:
+        def go(c: sqlite3.Connection) -> None:
+            c.execute("DELETE FROM mcp_trust_servers WHERE name=?", (name,))
+            for tool, raw in c.execute("SELECT tool, entry FROM mcp_trust").fetchall():
+                entry = self._parse(TrustEntry, raw, "trust")
+                if (
+                    entry is not None
+                    and entry.via == "server"
+                    and tool.startswith(f"{name}__")
+                ):
+                    c.execute("DELETE FROM mcp_trust WHERE tool=?", (tool,))
+
+        self._write(go)
+
+    def set_off(self, kind: Literal["server", "tool"], name: str, off: bool) -> None:
+        key = f"{kind}:{name}"
+        if off:
+            self._write(lambda c: c.execute("INSERT OR IGNORE INTO mcp_off(key) VALUES (?)", (key,)))
+        else:
+            self._write(lambda c: c.execute("DELETE FROM mcp_off WHERE key=?", (key,)))
