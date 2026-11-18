@@ -60,3 +60,33 @@ def test_invalid_handle_with_colon_is_shown_truncated():
         validate_handle(long + " ")
     shown = str(ei.value).split("'")[1]
     assert len(shown) <= 40 and shown.endswith("...")
+
+
+# -- follow-ups: boundaries and echo rule ------------------------------------
+
+
+def test_handle_length_boundary():
+    ok = "provider:" + "a" * (256 - len("provider:"))
+    assert len(ok) == 256 and validate_handle(ok) == ok
+    with pytest.raises(InvalidHandle):
+        validate_handle(ok + "a")
+
+
+@pytest.mark.parametrize("h", ["provider:a\x7fb", "provider:a\tb", "mcp:s:env:X:extra"])
+def test_more_invalid_handles(h):
+    with pytest.raises(InvalidHandle):
+        validate_handle(h)
+
+
+def test_input_with_colon_but_no_handle_prefix_is_not_shown():
+    # a swapped-in connection string has a ':' but is not a handle
+    with pytest.raises(InvalidHandle) as ei:
+        validate_handle("postgres://user:SENTINEL@db")
+    assert "SENTINEL" not in str(ei.value) and "(not shown)" in str(ei.value)
+
+
+@pytest.mark.parametrize("bad", [None, 42, b"provider:x"])
+def test_non_string_handle_is_invalid_and_not_shown(bad):
+    with pytest.raises(InvalidHandle) as ei:
+        validate_handle(bad)  # type: ignore[arg-type]
+    assert "(not shown)" in str(ei.value)

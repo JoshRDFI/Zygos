@@ -119,12 +119,24 @@ class EncryptedFileStore:
 
     @contextlib.contextmanager
     def _locked(self) -> Iterator[None]:
+        """Exclusive cross-process lock on ``secrets.lock`` (flock; msvcrt on Windows)."""
         fd = os.open(self._lock_path, os.O_RDWR | os.O_CREAT, 0o600)
         try:
-            if sys.platform == "win32":  # pragma: no cover
-                # Windows: no cross-process lock; atomic os.replace still protects
-                # file integrity, concurrent writers may lose an update.
-                yield
+            if sys.platform == "win32":
+                import msvcrt
+
+                try:
+                    # LK_LOCK retries for about 10 s, then raises.
+                    msvcrt.locking(fd, msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]
+                except OSError as exc:
+                    raise SecretStoreUnavailable(
+                        f"secrets file is busy ({type(exc).__name__})"
+                    ) from None
+                try:
+                    yield
+                finally:
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
             else:
                 import fcntl
 
@@ -202,3 +214,15 @@ class EncryptedFileStore:
             with contextlib.suppress(OSError):
                 tmp.unlink()
             raise
+        self._fsync_directory()
+
+    def _fsync_directory(self) -> None:
+        """Make the rename durable (POSIX; Windows has no directory fsync)."""
+        if sys.platform == "win32":
+            return
+        with contextlib.suppress(OSError):
+            dfd = os.open(self.directory, os.O_RDONLY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)

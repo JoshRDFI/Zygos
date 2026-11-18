@@ -55,12 +55,16 @@ class KeyringStore:
                 result["why"] = why
             except SecretStoreUnavailable as exc:
                 result["why"] = str(exc)
+            except BaseException as exc:  # noqa: BLE001 - only ends this daemon thread
+                result["died"] = type(exc).__name__
 
         thread = threading.Thread(target=probe, daemon=True)
         thread.start()
         thread.join(self._probe_timeout)
-        if thread.is_alive() or "why" not in result:
+        if thread.is_alive():
             return f"keychain didn't answer within {self._probe_timeout:g}s (locked?)"
+        if "why" not in result:
+            return f"keychain probe failed ({result.get('died', 'unknown')})"
         return result["why"]
 
     def get(self, handle: str) -> str | None:

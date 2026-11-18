@@ -115,6 +115,7 @@ def _secrets_check(runtime: RuntimeAssembly) -> list[DoctorCheck]:
 
 def _secrets_lines(runtime: RuntimeAssembly) -> list[DoctorCheck]:
     from zygos.secrets import SecretStoreError
+    from zygos.secrets.file_store import path_exists
     from zygos.secrets.resolve import ENCRYPTED_FILE, REASON_PROVISIONAL
 
     handle = runtime.secrets
@@ -125,9 +126,10 @@ def _secrets_lines(runtime: RuntimeAssembly) -> list[DoctorCheck]:
         if handle.has_saved() is not False:  # None: a record exists but can't be read
             return [DoctorCheck("secrets", False, why)]
         return [DoctorCheck("secrets", True, f"not available — {why}", warn=True)]
-    if status.backend == ENCRYPTED_FILE and file_store.enc_path.exists():
+    if status.backend == ENCRYPTED_FILE:
         try:
-            handle.get("provider:doctor-probe")  # read-only integrity check
+            if path_exists(file_store.enc_path):
+                handle.get("provider:doctor-probe")  # read-only integrity check
         except SecretStoreError as exc:
             return [DoctorCheck("secrets", False, str(exc))]
     out: list[DoctorCheck] = []

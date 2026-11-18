@@ -27,14 +27,14 @@ _RULE = (
 
 
 def validate_handle(handle: str) -> str:
-    if len(handle) <= _MAX_LEN and any(p.fullmatch(handle) for p in _PATTERNS):
+    if isinstance(handle, str) and len(handle) <= _MAX_LEN and any(p.fullmatch(handle) for p in _PATTERNS):
         return handle
     raise InvalidHandle(f"invalid secret handle {_shown(handle)}: {_RULE}")
 
 
 def _shown(handle: str) -> str:
     # Swapped arguments put a secret where the handle goes: only echo input that
-    # looks like a handle (has a ':'), and only its start.
-    if not isinstance(handle, str) or ":" not in handle:
+    # starts like a handle, and only its start.
+    if not isinstance(handle, str) or not handle.startswith(("provider:", "mcp:")):
         return "(not shown)"
     return repr(handle if len(handle) <= _SHOW_MAX else handle[: _SHOW_MAX - 3] + "...")

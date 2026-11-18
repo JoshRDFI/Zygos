@@ -64,8 +64,12 @@ def test_concurrent_record_if_absent_agree(tmp_path):
     path = tmp_path / "preferences.db"
     results: dict[str, ChoiceRecord] = {}
 
+    start = threading.Barrier(2)  # both reach record_if_absent together
+
     def run(name: str) -> None:
-        results[name] = SqliteChoiceStore(path).record_if_absent(_rec(name))
+        store = SqliteChoiceStore(path)
+        start.wait()
+        results[name] = store.record_if_absent(_rec(name))
 
     threads = [threading.Thread(target=run, args=(n,)) for n in ("keyring", "file")]
     for t in threads:

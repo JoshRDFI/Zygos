@@ -180,3 +180,12 @@ def test_chainer_of_low_priority_members_is_unavailable():
     assert "no usable OS keychain" in KeyringStore("x", backend=chainer).availability()
     chainer.backends = [_with_priority(0.5), _with_priority(5)]
     assert KeyringStore("x", backend=chainer).availability() is None
+
+
+def test_probe_thread_dying_is_not_reported_as_a_timeout():
+    class Dies(FakeKeyring):
+        def get_password(self, service, username):
+            raise SystemExit  # a BaseException: ends the probe thread
+
+    why = KeyringStore("abc", backend=Dies(), probe_timeout=2).availability()
+    assert why == "keychain probe failed (SystemExit)"

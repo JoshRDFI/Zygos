@@ -14,6 +14,12 @@ any time. Order (RFC-0015 phase 0, "How the store is chosen"):
    saved secrets); recorded at the first ``set``.
 6. Otherwise provisional: keychain if usable, else encrypted file, else none.
 
+With ``secrets.backend: keyring`` the keychain is used even if the record (for
+example one written by a concurrent first save under ``auto``) names
+``encrypted_file``; only the record's install id is taken. Config wins (rule 1),
+so switching config back to ``auto`` later follows the record, and secrets saved
+in the keychain meanwhile are not seen there.
+
 Reads (``status``/``get``/``presence``) never write. The first ``set`` without a
 record records the choice *before* writing the secret; if recording fails nothing
 is written. A process that loses a first-save race follows the winner's record.
@@ -28,6 +34,7 @@ Stability: Experimental.
 
 from __future__ import annotations
 
+import threading
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -70,8 +77,9 @@ def _chosen_reason(record: ChoiceRecord) -> str:
     return f"chosen {day} at first save"
 
 
-def _pinned_unavailable(name: str, why: str) -> str:
-    return f"secrets are in {name}, which isn't available right now: {why}"
+def _pinned_unavailable(name: str, why: str, reason: str | None = None) -> str:
+    where = f"{name} ({reason})" if reason else name
+    return f"secrets are in {where}, which isn't available right now: {why}"
 
 
 @dataclass(frozen=True)
@@ -124,6 +132,9 @@ class SecretsHandle:
         self._new_id = new_id
         self._keyrings: dict[str | None, KeyringStore] = {}
         self._keyring_why: object = _UNSET
+        # Held across the probe so concurrent callers (GET /runtime runs status()
+        # in worker threads) wait for one probe instead of each starting one.
+        self._keyring_lock = threading.Lock()
 
     def __repr__(self) -> str:
         return f"SecretsHandle({self._configured}, {self._file.directory})"
@@ -205,7 +216,9 @@ class SecretsHandle:
         except SecretStoreUnavailable as exc:
             if self._configured == KEYRING:
                 why = _pinned_unavailable(
-                    KEYRING, f"this install's id can't be read, so its entries can't be found ({exc})"
+                    KEYRING,
+                    f"this install's id can't be read, so its entries can't be found ({exc})",
+                    REASON_CONFIG,
                 )
                 return _Resolution(KEYRING, REASON_CONFIG, None, why, None)
             return _Resolution(None, REASON_UNREADABLE, None, str(exc), None)
@@ -237,7 +250,7 @@ class SecretsHandle:
             backend=name,
             reason=reason,
             store=store,
-            why_unavailable=None if why is None else _pinned_unavailable(name, why),
+            why_unavailable=None if why is None else _pinned_unavailable(name, why, reason),
             location=self._location(store),
             to_record=to_record,
         )
@@ -294,9 +307,10 @@ class SecretsHandle:
     def _availability(self, name: str, store: SecretStore) -> str | None:
         if name == ENCRYPTED_FILE:
             return store.availability()
-        if self._keyring_why is _UNSET:
-            self._keyring_why = store.availability()
-        return self._keyring_why  # type: ignore[return-value]
+        with self._keyring_lock:
+            if self._keyring_why is _UNSET:
+                self._keyring_why = store.availability()
+            return self._keyring_why  # type: ignore[return-value]
 
     @staticmethod
     def _location(store: SecretStore) -> str | None:

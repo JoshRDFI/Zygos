@@ -232,3 +232,38 @@ def test_doctor_does_not_read_the_record_itself(tmp_path, monkeypatch):
     monkeypatch.setattr(choice.SqliteChoiceStore, "__init__", spy)
     _report(_write(tmp_path))
     assert len(made) == 1  # the handle's own, built at build_runtime
+
+
+def test_doctor_stuck_line_names_when_the_store_was_chosen(tmp_path):
+    from zygos.secrets.choice import ChoiceRecord, SqliteChoiceStore
+
+    cfg = _write(tmp_path)
+    SqliteChoiceStore(tmp_path / ".zygos" / "preferences.db").record_if_absent(
+        ChoiceRecord(backend="keyring", chosen_at="2026-11-20T09:00:00+00:00", install_id="abc")
+    )
+    report, _ = _report(cfg)
+    assert _check(report).detail.startswith(
+        "secrets are in keyring (chosen 2026-11-20 at first save), which isn't available right now: "
+    )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_doctor_unstattable_secrets_file_is_a_named_fail(tmp_path, monkeypatch):
+    import pathlib
+
+    cfg = _write(tmp_path, "encrypted_file")
+    real_exists = pathlib.Path.exists
+
+    def exists(self, *a, **k):
+        if self.name == "secrets.enc":
+            raise PermissionError(13, "denied")
+        return real_exists(self, *a, **k)
+
+    def seed(r):
+        monkeypatch.setattr(pathlib.Path, "exists", exists)
+
+    report, _ = _report(cfg, before=seed)
+    c = _check(report)
+    assert not c.ok
+    assert "unexpected error" not in c.detail
+    assert "secrets.enc" in c.detail

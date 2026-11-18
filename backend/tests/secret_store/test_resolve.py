@@ -136,7 +136,9 @@ def test_pinned_unavailable_store_does_not_fall_back(tmp_path):
     h = _handle(tmp_path, keyring_backend=_fail_keyring())
     with pytest.raises(SecretStoreUnavailable) as ei:
         h.set(H, "v")
-    assert str(ei.value).startswith("secrets are in keyring, which isn't available right now: ")
+    assert str(ei.value).startswith(
+        "secrets are in keyring (chosen 2026-11-01 at first save), which isn't available right now: "
+    )
     with pytest.raises(SecretStoreUnavailable):
         h.get(H)
     assert not (_db(tmp_path).parent / "secrets.enc").exists()
@@ -536,3 +538,31 @@ def test_stat_error_on_secrets_file_is_unavailable_not_a_raise(tmp_path, monkeyp
     assert h.presence(H).state == "unknown"
     assert h.has_saved() is None
     assert not _record_path.exists()
+
+
+def test_concurrent_status_calls_probe_the_keychain_once(tmp_path):
+    import threading
+    import time
+
+    probes = []
+
+    class SlowCounting(FakeKeyring):
+        def get_password(self, service, username):
+            if username == "zygos-availability-probe":
+                probes.append(service)
+                time.sleep(0.3)
+            return super().get_password(service, username)
+
+    h = _handle(tmp_path, keyring_backend=SlowCounting())
+    start = threading.Barrier(4)
+
+    def run():
+        start.wait()
+        h.status()
+
+    threads = [threading.Thread(target=run) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(probes) == 1

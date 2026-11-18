@@ -161,3 +161,94 @@ def test_stat_error_is_unavailable(tmp_path, monkeypatch):
         s.get("provider:x")
     assert "PermissionError" in str(ei.value)
     assert "PermissionError" in s.availability()
+
+
+# -- follow-ups ----------------------------------------------------------------
+
+
+def test_tampered_header_is_corrupt(store):
+    store.set(H, "v")
+    data = bytearray(store.enc_path.read_bytes())
+    data[4] = 0x02  # version byte
+    store.enc_path.write_bytes(bytes(data))
+    with pytest.raises(SecretStoreCorrupt):
+        store.get(H)
+
+
+def test_wrong_size_key_is_corrupt(store):
+    store.set(H, "v")
+    store.key_path.write_bytes(b"short")
+    with pytest.raises(SecretStoreCorrupt, match="wrong size"):
+        store.get(H)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_availability_reports_missing_and_unreadable_key(store):
+    store.set(H, "v")
+    os.chmod(store.key_path, 0)
+    try:
+        if os.access(store.key_path, os.R_OK):
+            pytest.skip("running as root")
+        assert store.availability() == "key file not readable"
+    finally:
+        os.chmod(store.key_path, 0o600)
+    store.key_path.unlink()
+    assert store.availability() == "key file missing"
+
+
+def test_write_fsyncs_the_directory(store, monkeypatch):
+    if sys.platform == "win32":
+        pytest.skip("no directory fsync on Windows")
+    synced: list[int] = []
+    real_fsync = os.fsync
+
+    def fsync(fd):
+        synced.append(fd)
+        return real_fsync(fd)
+
+    dir_fds: set[int] = set()
+    real_open = os.open
+
+    def open_(path, flags, *a, **k):
+        fd = real_open(path, flags, *a, **k)
+        if os.fspath(path) == os.fspath(store.directory):
+            dir_fds.add(fd)
+        return fd
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(os, "open", open_)
+    store.set(H, "v")
+    assert dir_fds & set(synced)
+
+
+class _FakeMsvcrt:
+    LK_LOCK = 1
+    LK_UNLCK = 0
+
+    def __init__(self, fail=False):
+        self.calls: list[tuple[int, int]] = []
+        self.fail = fail
+
+    def locking(self, fd, mode, nbytes):
+        if self.fail and mode == self.LK_LOCK:
+            raise OSError(36, "Resource deadlock avoided")
+        self.calls.append((mode, nbytes))
+
+
+def test_windows_takes_a_lock_on_the_lock_file(store, monkeypatch):
+    fake = _FakeMsvcrt()
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setitem(sys.modules, "msvcrt", fake)
+    store.directory.mkdir(parents=True)
+    with store._locked():
+        assert fake.calls == [(fake.LK_LOCK, 1)]
+    assert fake.calls == [(fake.LK_LOCK, 1), (fake.LK_UNLCK, 1)]
+
+
+def test_windows_lock_timeout_is_unavailable(store, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setitem(sys.modules, "msvcrt", _FakeMsvcrt(fail=True))
+    store.directory.mkdir(parents=True)
+    with pytest.raises(SecretStoreUnavailable, match="busy"):
+        with store._locked():
+            pass
