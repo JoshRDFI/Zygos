@@ -116,3 +116,19 @@ def test_live_markers_use_real_root(tmp_path):
     assert _suite_home_env(markers={"live_voice"}) is None
     assert _suite_home_env(markers={"live_gpu"}) is None
     assert _suite_home_env(markers=set(), tmp=tmp_path) == tmp_path / "zygos-home"
+
+
+def test_non_utf8_pyproject_falls_through(tmp_path):
+    d = tmp_path / "ck"
+    d.mkdir()
+    (d / "pyproject.toml").write_bytes(b'[project]\nname = "\xff\xfe"\n')
+    r = _find(tmp_path, package_dir=d)
+    assert r.source == "user data folder"
+
+
+def test_session_guard_comparison():
+    from conftest import _new_files
+
+    assert _new_files({"a"}, {"a"}) == set()
+    assert _new_files({"a"}, {"a", "b"}) == {"b"}
+    assert _new_files({"a", "c"}, {"a"}) == set()

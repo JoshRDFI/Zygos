@@ -57,3 +57,43 @@ def _isolated_zygos_home(request, monkeypatch, tmp_path):
     reset_zygos_home_cache()
     yield
     reset_zygos_home_cache()
+
+
+# --- Session guard: the suite must never write into the real backend/.zygos ---
+
+_REAL_DATA_DIR = Path(__file__).resolve().parents[1] / ".zygos"
+_before_files: set[str] = set()
+_live_ran = False
+
+
+def _snapshot_files(folder: Path) -> set[str]:
+    if not folder.is_dir():
+        return set()
+    return {str(p) for p in folder.rglob("*") if p.is_file()}
+
+
+def _new_files(before: set[str], after: set[str]) -> set[str]:
+    return after - before
+
+
+def pytest_sessionstart(session):
+    global _before_files, _live_ran
+    _live_ran = False
+    _before_files = _snapshot_files(_REAL_DATA_DIR)
+
+
+def pytest_runtest_setup(item):
+    global _live_ran
+    if {m.name for m in item.iter_markers()} & _REAL_ROOT_MARKERS:
+        _live_ran = True
+
+
+def pytest_sessionfinish(session, exitstatus):
+    if _live_ran:
+        return
+    new = _new_files(_before_files, _snapshot_files(_REAL_DATA_DIR))
+    if new:
+        print(f"\nTests wrote into the real {_REAL_DATA_DIR}:")
+        for name in sorted(new):
+            print(f"  {name}")
+        session.exitstatus = 1

@@ -39,7 +39,7 @@ def _is_checkout(package_dir: Path) -> bool:
         with open(package_dir / "pyproject.toml", "rb") as fh:
             data = tomllib.load(fh)
         return data["project"]["name"] == "zygos"
-    except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError):  # TOMLDecodeError is a ValueError
         return False
 
 

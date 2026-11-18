@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from zygos.config.env import resolve_env_placeholders
 from zygos.config.schema import ZygosConfig
 from zygos.errors import ConfigError
+from zygos.home import resolve_path
 
 _LOGGER = logging.getLogger("zygos.config")
 
@@ -21,7 +22,7 @@ def load_config(path: Path | None = None) -> ZygosConfig:
     if path is None:
         config = ZygosConfig()
         _validate_credentials(config)
-        return config
+        return _resolve_paths(config)
 
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     resolved = resolve_env_placeholders(raw)
@@ -34,7 +35,46 @@ def load_config(path: Path | None = None) -> ZygosConfig:
         )
         raise ConfigError(f"Configuration validation failed: {details}") from error
     _validate_credentials(config)
-    return config
+    return _resolve_paths(config)
+
+
+def _resolve_paths(config: ZygosConfig) -> ZygosConfig:
+    """Make data-path settings absolute against the Zygos home root.
+
+    Creates nothing. ``models.ollama_models_dir`` is deliberately left alone.
+    """
+    voice = config.voice
+    stt, tts = voice.stt, voice.tts
+    stt_update = {}
+    if stt.download_root:
+        stt_update["download_root"] = resolve_path(stt.download_root)
+    tts_update = {}
+    if tts.download_root:
+        tts_update["download_root"] = resolve_path(tts.download_root)
+    if tts.worker_python and ("/" in tts.worker_python or "\\" in tts.worker_python):
+        tts_update["worker_python"] = resolve_path(tts.worker_python)
+    return config.model_copy(
+        update={
+            "memory": config.memory.model_copy(
+                update={"db_path": resolve_path(config.memory.db_path)}
+            ),
+            "personalization": config.personalization.model_copy(
+                update={"db_path": resolve_path(config.personalization.db_path)}
+            ),
+            "tools": config.tools.model_copy(
+                update={"workspace_root": resolve_path(config.tools.workspace_root)}
+            ),
+            "models": config.models.model_copy(
+                update={"profiles_dir": resolve_path(config.models.profiles_dir)}
+            ),
+            "voice": voice.model_copy(
+                update={
+                    "stt": stt.model_copy(update=stt_update),
+                    "tts": tts.model_copy(update=tts_update),
+                }
+            ),
+        }
+    )
 
 
 def _validate_credentials(config: ZygosConfig) -> None:
