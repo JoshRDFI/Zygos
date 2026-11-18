@@ -18,7 +18,7 @@
   `build_messages()` system-message seam, left deliberately empty in M8 C2, that this
   RFC fills).
 - **Relates to:**
-  [RFC-0009](RFC-0009-Model-Routing-and-Multimodal-Capabilities.md) (not required, but
+  [RFC-0009](RFC-0009-Vision-Input-Images-and-PDFs.md) (not required, but
   synergistic: because the identity lives in `build_messages`, it applies to whichever
   per-turn authoring model writes the turn — B works standalone with a single model),
   [RFC-0005](RFC-0005-Voice-Interaction-STT-and-TTS.md) (TTS greeting/address is a

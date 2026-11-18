@@ -22,7 +22,7 @@
   preferences store the saved default lives in), and
   [RFC-0012](RFC-0012-Native-Thinking-Controls.md) (the re-ask pattern the
   suggestion reuses, and the Ollama `/api/show` probe).
-- **Takes over from** [RFC-0009](RFC-0009-Model-Routing-and-Multimodal-Capabilities.md)
+- **Takes over from** [RFC-0009](RFC-0009-Vision-Input-Images-and-PDFs.md)
   (still a Draft): its §1 (the session is the context; the authoring model is per
   turn), §2 (load-bearing `ModelService` selection), §4 Path C (text-specialist
   routing), §6 (model residency) and §7 (context fit), and the hardware-feasibility

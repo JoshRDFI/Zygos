@@ -65,3 +65,6 @@ __pycache__/
 # Local voice source clips (root-anchored so committed test fixtures under
 # backend/tests/voice/fixtures/*.wav are unaffected)
 /TTS-test.wav
+
+# Local research snapshot, not for the public repo
+docs/nvidia-voice-comparison.md

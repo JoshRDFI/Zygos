@@ -21,7 +21,7 @@
   and WebSocket frame envelope the client speaks), and
   [RFC-0008](RFC-0008-Tool-Calling-Protocol-and-Tool-Authoring.md) (the
   tools/permission channel the chat surface renders).
-- **Relates to:** [RFC-0009](RFC-0009-Model-Routing-and-Multimodal-Capabilities.md)
+- **Relates to:** [RFC-0009](RFC-0009-Vision-Input-Images-and-PDFs.md)
   (the Models surface will grow selection + hardware gating when that lands) and
   [RFC-0010](RFC-0010-User-Personalization-and-Assistant-Identity.md) (theme and
   preference persistence migrate from `localStorage` to the backend store).
