@@ -15,10 +15,17 @@ from zygos.providers.types import ToolSchema
 from zygos.tools.types import Tool, ToolMeta
 
 
+_REF_PREFIXES = ("#/$defs/", "#/definitions/")
+
+
 def _inline(node: Any, defs: dict[str, Any], seen: frozenset[str]) -> Any:
     if isinstance(node, dict):
         if "$ref" in node:
-            name = node["$ref"].split("/")[-1]
+            ref = node["$ref"]
+            prefix = next((p for p in _REF_PREFIXES if isinstance(ref, str) and ref.startswith(p)), None)
+            if prefix is None:
+                raise ValueError(f"unsupported $ref: {ref!r}")
+            name = ref[len(prefix):]
             if name in seen:
                 raise ValueError(f"cyclic $ref in tool input model: {name!r}")
             if name not in defs:
@@ -36,19 +43,21 @@ def _inline(node: Any, defs: dict[str, Any], seen: frozenset[str]) -> Any:
 
 def _flatten(raw: dict[str, Any]) -> dict[str, Any]:
     """Inline `$defs` and draft-07 `definitions` ($ref targets) into one flat schema."""
-    defs = {**raw.get("definitions", {}), **raw.get("$defs", {})}
+    defs = {**raw.get("definitions", {}), **raw.get("$defs", {})}   # non-dict -> TypeError/ValueError
     body = {k: v for k, v in raw.items() if k not in ("$defs", "definitions")}
     return _inline(body, defs, frozenset())
 
 
 def check_input_schema(schema: dict[str, Any]) -> str | None:
     """Reason a server-supplied input schema can't be offered to a model, else None."""
-    if schema.get("type") != "object":
+    if not isinstance(schema, dict) or schema.get("type") != "object":
         return "input schema root must be an object schema"
     try:
         _flatten(schema)
-    except ValueError as exc:
-        return str(exc)
+    except RecursionError:
+        return "input schema is nested too deeply"
+    except (ValueError, TypeError, AttributeError, KeyError) as exc:
+        return f"malformed input schema: {exc}"
     return None
 
 

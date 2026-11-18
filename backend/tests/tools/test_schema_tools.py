@@ -89,3 +89,19 @@ def test_unregister_and_dynamic_tools():
     assert names() == {"builtin", "c"}
     assert svc._registry.get("builtin").meta.description == "builtin"  # built-in kept
     svc._registry.unregister("absent")  # no error
+
+
+@pytest.mark.parametrize("ref", [5, None, ["#/$defs/A"], "http://x/y#/$defs/A", "#/properties/q",
+                                 "A", "#/$defs/A/properties/x"])
+def test_check_input_schema_bad_refs_give_reason(ref):
+    schema = {"type": "object", "properties": {"a": {"$ref": ref}},
+              "$defs": {"A": {"type": "string"}}}
+    assert isinstance(check_input_schema(schema), str)
+
+
+def test_check_input_schema_malformed_never_raises():
+    assert check_input_schema("nope") is not None
+    assert check_input_schema({"type": "object", "$defs": 5, "properties": {}}) is not None
+    # a non-dict definition body must not raise either (reason or None, both acceptable)
+    check_input_schema({"type": "object", "properties": {"a": {"$ref": "#/$defs/A"}},
+                        "$defs": {"A": 7}})
