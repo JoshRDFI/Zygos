@@ -139,6 +139,17 @@ class ModelLoaded(EventPayload):
     evicted: tuple[str, ...]
 
 
+class McpServerEvent(EventPayload):
+    """An MCP server's lifecycle change (RFC-0015). Supervisor events carry a sessionless
+    context; a failure during a turn carries that turn's ``run_id``. Never secret values."""
+
+    type: Literal["mcp.server"] = "mcp.server"
+    server: str
+    kind: Literal["started", "stopped", "restarted", "failed", "listed", "unreachable"]
+    detail: str | None = None
+    tools: int | None = None
+
+
 AnyPayload = Annotated[
     Union[
         RouteClaimed,
@@ -155,6 +166,7 @@ AnyPayload = Annotated[
         SpeechTiming,
         ModelFit,
         ModelLoaded,
+        McpServerEvent,
     ],
     Field(discriminator="type"),
 ]

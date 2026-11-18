@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from typing import AsyncIterator, Awaitable, Callable, Sequence
+from typing import AsyncIterator, Awaitable, Callable, Literal, Sequence
 
 from pydantic import BaseModel, ConfigDict
 
@@ -28,6 +28,9 @@ from zygos.tools.types import Tool, ToolCall, ToolChunk, ToolContext, ToolMeta, 
 
 
 logger = logging.getLogger(__name__)
+
+McpDecision = Literal["allow", "deny", "not_trusted"]
+McpGate = Callable[[ToolMeta], McpDecision]
 
 
 class ToolServiceSnapshot(BaseModel):
@@ -51,12 +54,14 @@ class ToolService:
         policy: PermissionPolicy | None = None,
         resolver: PermissionResolver | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        mcp_gate: McpGate | None = None,
     ) -> None:
         self._registry = registry if registry is not None else ToolRegistry()
         self._policy = policy if policy is not None else PermissionPolicy()   # all-allow
         self._resolver = resolver if resolver is not None else DenyingResolver()
         self._sleep = sleep
         self._dynamic: list[str] = []
+        self._mcp_gate = mcp_gate   # None: every MCP tool is "not trusted"
 
     def register(self, tool: Tool) -> None:
         self._registry.register(tool)
@@ -81,6 +86,10 @@ class ToolService:
         layer binds a live resolver at wiring time (permissions.py seam).
         """
         self._resolver = resolver
+
+    def bind_mcp_gate(self, gate: McpGate) -> None:
+        """Late-bind the MCP permission decision (the supervisor is built after this service)."""
+        self._mcp_gate = gate
 
     async def execute(self, call: ToolCall, ctx: ExecutionContext) -> ToolResult:
         tool = self._registry.get(call.tool)
@@ -130,6 +139,8 @@ class ToolService:
     async def _check_permission(
         self, tool: Tool, call: ToolCall, ctx: ExecutionContext
     ) -> ToolResult | None:
+        if tool.meta.server is not None:
+            return self._check_mcp(tool.meta, call)
         decision = self._policy.decide(tool.meta)
         if decision == "ask":
             tctx = ToolContext(
@@ -145,6 +156,29 @@ class ToolService:
         return ToolResult.failed(
             tool=tool.meta.name, call_id=call.call_id,
             error_code="tool_permission_denied", error_message="permission denied",
+        )
+
+    def _check_mcp(self, meta: ToolMeta, call: ToolCall) -> ToolResult | None:
+        """MCP tools: config deny -> denied; not trusted -> refused at once (1a has no prompt).
+
+        Never reaches the resolver: in 1a nobody can answer it, so asking would only
+        freeze the turn until the resolver's timeout.
+        """
+        decision: McpDecision = "not_trusted"
+        if self._mcp_gate is not None:
+            try:
+                decision = self._mcp_gate(meta)
+            except Exception:  # noqa: BLE001 - a broken gate must refuse, never allow
+                logger.exception("mcp permission gate failed for %r; refusing", meta.name)
+        if decision == "allow":
+            return None
+        message = (
+            "permission denied" if decision == "deny"
+            else f"not trusted yet — run: zygos mcp trust {meta.server}/{meta.server_tool}"
+        )
+        return ToolResult.failed(
+            tool=meta.name, call_id=call.call_id,
+            error_code="tool_permission_denied", error_message=message,
         )
 
     async def _run_with_fallback(
