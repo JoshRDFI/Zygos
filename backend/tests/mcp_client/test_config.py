@@ -92,3 +92,12 @@ def test_cleaned_collision_reported():
 def test_describe_quotes_command():
     (p,) = parse_servers(json.dumps({"a": {"command": "node", "args": ["my file.js"]}}))
     assert describe(p.spec) == "This runs `node 'my file.js'` on this machine as you"
+
+
+def test_parse_rejects_double_underscore_server_name():
+    with pytest.raises(McpConfigError, match=r"a__b.*'__'"):
+        parse_servers('{"a__b": {"command": "x"}}')
+    with pytest.raises(McpConfigError, match="reserved"):
+        parse_servers('{"a.b": {"command": "x"}, "c__d": {"command": "x"}}')
+    with pytest.raises(McpConfigError, match="reserved"):
+        parse_servers('{"a_.b": {"command": "x"}}')  # cleans to a__b

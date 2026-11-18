@@ -93,6 +93,10 @@ def _handle(server: str, kind: str, name: str) -> str:
 
 
 def _parse_one(name: str, cfg: Any) -> ParsedServer:
+    if "__" in clean_part(name):
+        raise McpConfigError(
+            f"server {name!r}: '__' is reserved as the server/tool separator; rename the server"
+        )
     if not isinstance(cfg, dict):
         raise McpConfigError(f"server {name!r}: settings must be a mapping")
     command, url, kind = cfg.get("command"), cfg.get("url"), cfg.get("type")

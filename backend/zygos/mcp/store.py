@@ -22,6 +22,7 @@ from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, Field, ValidationError
 
+from zygos.mcp.config import clean_part
 from zygos.mcp.types import SeenTool, ServerSpec
 
 _log = logging.getLogger("zygos.mcp")
@@ -93,18 +94,19 @@ class SqliteMcpStore:
             _log.warning("mcp store unreadable (%s); using empty", exc)
             return default
 
-    def _parse(self, model: type[BaseModel], raw: str, what: str) -> Any:
+    def _parse(self, model: type[BaseModel], raw: str, table: str, key: str) -> Any:
         try:
             return model.model_validate_json(raw)
         except ValidationError as exc:
-            _log.warning("mcp %s row invalid (%s); skipped", what, exc)
+            # Never log exc text: pydantic errors echo the stored values.
+            _log.warning("mcp row invalid (%s, key %r: %s); skipped", table, key, type(exc).__name__)
             return None
 
     def servers(self) -> dict[str, ServerSpec]:
         rows = self._read(lambda c: c.execute("SELECT name, spec FROM mcp_servers").fetchall(), [])
         out: dict[str, ServerSpec] = {}
         for name, raw in rows:
-            spec = self._parse(ServerSpec, raw, "server")
+            spec = self._parse(ServerSpec, raw, "mcp_servers", name)
             if spec is not None:
                 out[name] = spec
         return out
@@ -116,13 +118,13 @@ class SqliteMcpStore:
         )
         if row is None:
             return ServerState()
-        return self._parse(ServerState, row[0], "state") or ServerState()
+        return self._parse(ServerState, row[0], "mcp_state", name) or ServerState()
 
     def trust_entries(self) -> dict[str, TrustEntry]:
         rows = self._read(lambda c: c.execute("SELECT tool, entry FROM mcp_trust").fetchall(), [])
         out: dict[str, TrustEntry] = {}
         for tool, raw in rows:
-            entry = self._parse(TrustEntry, raw, "trust")
+            entry = self._parse(TrustEntry, raw, "mcp_trust", tool)
             if entry is not None:
                 out[tool] = entry
         return out
@@ -148,10 +150,6 @@ class SqliteMcpStore:
         with closing(
             sqlite3.connect(self._path, timeout=_BUSY_TIMEOUT_S, isolation_level=None)
         ) as con:
-            # WAL: readers never block the writer, and commits are one cheap fsync.
-            if con.execute("PRAGMA journal_mode").fetchone()[0] != "wal":
-                con.execute("PRAGMA journal_mode=WAL")
-            con.execute("PRAGMA synchronous=NORMAL")
             con.execute("BEGIN IMMEDIATE")
             try:
                 for stmt in _SCHEMA.split(";"):
@@ -165,6 +163,10 @@ class SqliteMcpStore:
                 raise
 
     def put_server(self, spec: ServerSpec) -> None:
+        if "__" in clean_part(spec.name):
+            raise ValueError(
+                f"server name {spec.name!r}: '__' is reserved as the server/tool separator"
+            )
         self._write(
             lambda c: c.execute(
                 "INSERT INTO mcp_servers(name, spec) VALUES (?, ?) "
@@ -224,7 +226,7 @@ class SqliteMcpStore:
         def go(c: sqlite3.Connection) -> None:
             c.execute("DELETE FROM mcp_trust_servers WHERE name=?", (name,))
             for tool, raw in c.execute("SELECT tool, entry FROM mcp_trust").fetchall():
-                entry = self._parse(TrustEntry, raw, "trust")
+                entry = self._parse(TrustEntry, raw, "mcp_trust", tool)
                 if (
                     entry is not None
                     and entry.via == "server"

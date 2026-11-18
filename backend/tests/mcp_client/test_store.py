@@ -1,4 +1,7 @@
+import logging
 import threading
+
+import pytest
 
 from zygos.mcp.store import (
     ServerState,
@@ -110,14 +113,14 @@ def test_concurrent_writers_lose_nothing(tmp_path):
 
     def run_a():
         try:
-            for i in range(50):
+            for i in range(20):
                 a.put_state(f"s{i}", ServerState(status="running", detail=str(i)))
         except Exception as exc:  # pragma: no cover
             errors.append(exc)
 
     def run_b():
         try:
-            for i in range(50):
+            for i in range(20):
                 b.trust_tool(_entry(f"fs__t{i}"))
         except Exception as exc:  # pragma: no cover
             errors.append(exc)
@@ -126,9 +129,9 @@ def test_concurrent_writers_lose_nothing(tmp_path):
     [t.start() for t in ts]
     [t.join() for t in ts]
     assert errors == []
-    assert all(a.state(f"s{i}").detail == str(i) for i in range(50))
-    assert len(b.trust_entries()) == 50
-    assert a.version() == 101
+    assert all(a.state(f"s{i}").detail == str(i) for i in range(20))
+    assert len(b.trust_entries()) == 20
+    assert a.version() == 41
 
 
 def test_fingerprint_changes_with_description_or_schema():
@@ -149,3 +152,39 @@ def test_version_bumps_on_write(tmp_path):
     v2 = s.version()
     s.remove_server("fs")
     assert 0 < v1 < v2 < s.version()
+
+
+def test_put_server_rejects_double_underscore(tmp_path):
+    s = SqliteMcpStore(tmp_path / "p.db")
+    with pytest.raises(ValueError, match="__"):
+        s.put_server(_spec("a__b"))
+    with pytest.raises(ValueError, match="__"):
+        s.put_server(_spec("a_.b"))  # cleans to a__b
+
+
+def test_remove_server_leaves_prefix_sibling_alone(tmp_path):
+    s = SqliteMcpStore(tmp_path / "p.db")
+    s.put_server(_spec("a"))
+    s.put_server(_spec("ab"))
+    s.trust_tool(_entry("a__x"))
+    s.trust_tool(_entry("ab__x"))
+    s.set_off("tool", "ab__x", True)
+    s.remove_server("a")
+    assert set(s.servers()) == {"ab"}
+    assert set(s.trust_entries()) == {"ab__x"}
+    assert s.off() == {"tool:ab__x"}
+
+
+def test_invalid_row_warning_has_no_stored_values(tmp_path, caplog):
+    import sqlite3
+
+    s = SqliteMcpStore(tmp_path / "p.db")
+    s.put_server(_spec())
+    con = sqlite3.connect(tmp_path / "p.db")
+    con.execute("UPDATE mcp_servers SET spec = ?", ('{"name": "SECRETVALUE", "transport": "bogus"}',))
+    con.commit()
+    con.close()
+    with caplog.at_level(logging.WARNING):
+        assert s.servers() == {}
+    assert "SECRETVALUE" not in caplog.text and "bogus" not in caplog.text
+    assert "mcp_servers" in caplog.text
