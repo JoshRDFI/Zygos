@@ -14,6 +14,10 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
 ]
+secrets = [
+    "keyring>=25",
+    "cryptography>=42",
+]
 embeddings = [
     "fastembed>=0.3",
     "numpy>=1.26",
