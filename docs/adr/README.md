@@ -32,3 +32,4 @@ ADRs are numbered sequentially using the format `ADR-NNNN`, zero-padded to four 
 | [ADR-0006](ADR-0006-provider-class-token-limits.md) | Provider-Class-Aware Token Limits | Accepted |
 | [ADR-0007](ADR-0007-native-thinking-off-by-default.md) | Native Model Thinking Off by Default | Accepted |
 | [ADR-0008](ADR-0008-opt-in-client-rate-limiting.md) | Client-Side Rate Limiting Is Opt-In | Accepted |
+| [ADR-0009](ADR-0009-zygos-home-one-root-for-data.md) | One Root for Zygos Data (`ZYGOS_HOME`) | Accepted |

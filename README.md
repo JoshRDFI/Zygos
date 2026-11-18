@@ -138,6 +138,8 @@ npm run preview                          # open http://localhost:5173
 
 The UI proxies to the backend on port 8000; if that port is taken, start `serve` with
 `--port 8010` and the UI with `ZYGOS_BACKEND=http://127.0.0.1:8010 npm run preview`.
+
+**Where your data lives.** In a checkout, Zygos keeps its data in `backend/.zygos`, wherever you start it from. Set `ZYGOS_HOME` to move it; the data is then in `$ZYGOS_HOME/.zygos`. Relative paths in a config file resolve against that folder too. `zygos doctor` shows the folder and warns if it finds a `.zygos` folder that is not used. See [ADR-0009](docs/adr/ADR-0009-zygos-home-one-root-for-data.md).
 `npm run dev` also works for UI work, but voice needs the built app (`build` + `preview`),
 because the dev server won't serve the speech-detection model files.
 
