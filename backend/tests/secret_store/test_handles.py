@@ -38,3 +38,25 @@ def test_package_import_pulls_no_optional_libraries():
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == ""
+
+
+# -- M8: the error never echoes something that may be a secret ---------------
+
+
+def test_invalid_handle_without_colon_is_not_shown():
+    # e.g. set(value, handle) with the arguments swapped
+    with pytest.raises(InvalidHandle) as ei:
+        validate_handle("sk-ant-SENTINEL-123")
+    assert "SENTINEL" not in str(ei.value)
+    assert "(not shown)" in str(ei.value)
+
+
+def test_invalid_handle_with_colon_is_shown_truncated():
+    with pytest.raises(InvalidHandle) as ei:
+        validate_handle("provider:has space")
+    assert "'provider:has space'" in str(ei.value)
+    long = "mcp:" + "x" * 100
+    with pytest.raises(InvalidHandle) as ei:
+        validate_handle(long + " ")
+    shown = str(ei.value).split("'")[1]
+    assert len(shown) <= 40 and shown.endswith("...")

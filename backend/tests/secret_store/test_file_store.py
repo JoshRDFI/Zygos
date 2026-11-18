@@ -131,3 +131,33 @@ def test_unreadable_enc_is_unavailable(store):
             store.set(H, "w")
     finally:
         os.chmod(store.enc_path, 0o600)
+
+
+def test_key_file_loose_is_false_on_windows(tmp_path, monkeypatch):
+    import zygos.secrets.file_store as fs
+
+    s = fs.EncryptedFileStore(tmp_path)
+    s.key_path.write_bytes(b"k" * 32)
+    s.key_path.chmod(0o644)
+    assert s.key_file_loose() is True
+    monkeypatch.setattr(fs.sys, "platform", "win32")
+    assert s.key_file_loose() is False
+
+
+def test_stat_error_is_unavailable(tmp_path, monkeypatch):
+    pytest.importorskip("cryptography")
+    from pathlib import Path
+
+    import zygos.secrets.file_store as fs
+    from zygos.secrets import SecretStoreUnavailable
+
+    s = fs.EncryptedFileStore(tmp_path)
+
+    def denied(self, *a, **k):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "exists", denied)
+    with pytest.raises(SecretStoreUnavailable) as ei:
+        s.get("provider:x")
+    assert "PermissionError" in str(ei.value)
+    assert "PermissionError" in s.availability()

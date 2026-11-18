@@ -36,7 +36,7 @@ from pathlib import Path
 
 from zygos.config.schema import ZygosConfig
 from zygos.secrets.choice import ChoiceRecord, SqliteChoiceStore
-from zygos.secrets.file_store import EncryptedFileStore
+from zygos.secrets.file_store import EncryptedFileStore, path_exists
 from zygos.secrets.handles import validate_handle
 from zygos.secrets.keyring_store import KeyringStore
 from zygos.secrets.types import (
@@ -181,6 +181,20 @@ class SecretsHandle:
     def file_store(self) -> EncryptedFileStore:
         return self._file
 
+    def has_saved(self) -> bool | None:
+        """Whether anything was ever saved: a record or ``secrets.enc`` exists.
+
+        Under explicit ``encrypted_file`` only the file counts (the record is
+        ignored). ``None`` = can't tell (the record or the file can't be read).
+        Never writes.
+        """
+        try:
+            if self._configured == ENCRYPTED_FILE:
+                return path_exists(self._file.enc_path)
+            return self._choice.read() is not None or path_exists(self._file.enc_path)
+        except SecretStoreError:
+            return None
+
     # -- resolution ---------------------------------------------------------
 
     def _resolve(self) -> _Resolution:
@@ -202,7 +216,12 @@ class SecretsHandle:
             return self._pinned(KEYRING, REASON_CONFIG, record.install_id)
         if record is not None:
             return self._pinned(record.backend, _chosen_reason(record), record.install_id)
-        if self._file.enc_path.exists():
+        try:
+            adopt = path_exists(self._file.enc_path)
+        except SecretStoreUnavailable as exc:
+            # Can't tell whether secrets were saved: never guess "nothing saved".
+            return _Resolution(None, REASON_UNREADABLE, None, str(exc), None)
+        if adopt:
             return self._pinned(ENCRYPTED_FILE, REASON_ADOPTED, None, to_record=ENCRYPTED_FILE)
         return self._provisional()
 

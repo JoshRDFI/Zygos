@@ -14,7 +14,7 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from zygos.secrets.types import SecretStoreUnavailable
 
@@ -28,9 +28,9 @@ _UNREADABLE = "can't read which store holds your secrets"
 class ChoiceRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    backend: str
-    chosen_at: str  # ISO-8601 UTC
-    install_id: str
+    backend: str = Field(min_length=1)
+    chosen_at: str = Field(min_length=1)  # ISO-8601 UTC
+    install_id: str = Field(min_length=1)
 
 
 def _unavailable(exc: Exception) -> SecretStoreUnavailable:
@@ -49,8 +49,11 @@ class SqliteChoiceStore:
         self._path = Path(path)
 
     def read(self) -> ChoiceRecord | None:
-        if not self._path.exists():
-            return None
+        try:
+            if not self._path.exists():
+                return None
+        except OSError as exc:
+            raise _unavailable(exc) from None
         try:
             with closing(sqlite3.connect(self._path, timeout=5)) as con:
                 has_table = con.execute(
@@ -67,7 +70,12 @@ class SqliteChoiceStore:
         return None if row is None else _parse(row[0])
 
     def record_if_absent(self, record: ChoiceRecord) -> ChoiceRecord:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise SecretStoreUnavailable(
+                f"can't create the preferences directory ({type(exc).__name__})"
+            ) from None
         try:
             con = sqlite3.connect(self._path, timeout=5, isolation_level=None)
             with closing(con):

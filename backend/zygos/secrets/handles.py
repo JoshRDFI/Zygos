@@ -19,6 +19,7 @@ _PATTERNS = (
     re.compile(rf"mcp:{_SEG}:(?:env|header):{_SEG}"),
 )
 _MAX_LEN = 256
+_SHOW_MAX = 40
 _RULE = (
     "expected provider:<name>, mcp:<server>:env:<NAME> or mcp:<server>:header:<Name>; "
     "segments non-empty without ':', whitespace or control characters; max 256 chars"
@@ -28,5 +29,12 @@ _RULE = (
 def validate_handle(handle: str) -> str:
     if len(handle) <= _MAX_LEN and any(p.fullmatch(handle) for p in _PATTERNS):
         return handle
-    shown = handle if len(handle) <= 80 else handle[:77] + "..."
-    raise InvalidHandle(f"invalid secret handle {shown!r}: {_RULE}")
+    raise InvalidHandle(f"invalid secret handle {_shown(handle)}: {_RULE}")
+
+
+def _shown(handle: str) -> str:
+    # Swapped arguments put a secret where the handle goes: only echo input that
+    # looks like a handle (has a ':'), and only its start.
+    if not isinstance(handle, str) or ":" not in handle:
+        return "(not shown)"
+    return repr(handle if len(handle) <= _SHOW_MAX else handle[: _SHOW_MAX - 3] + "...")

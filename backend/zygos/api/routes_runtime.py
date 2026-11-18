@@ -7,6 +7,8 @@ Stability: Experimental.
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Request
 
 from zygos.api.health import RuntimeHealth, build_runtime_health
@@ -21,7 +23,9 @@ async def get_runtime(request: Request) -> Manifest:
     runtime = request.app.state.runtime
     # Warm the support cache for the config primary route (what the manifest reads).
     await check_selected(runtime.thinking_support, lambda: primary_route(runtime.config))
-    return runtime_manifest(runtime)
+    # The keychain probe can block for seconds: run it off the event loop.
+    secrets_status = await asyncio.to_thread(runtime.secrets.status)
+    return runtime_manifest(runtime, secrets_status=secrets_status)
 
 
 @router.get("/runtime/health", response_model=RuntimeHealth)

@@ -87,3 +87,96 @@ def test_no_install_id_reads_none_and_refuses_writes():
         s.set(H, "v")
     with pytest.raises(SecretStoreUnavailable, match="no install id"):
         s.delete(H)
+
+
+# -- I1: backend discovery failures are mapped, and bounded by the probe -----
+
+
+def _discovery_raises(monkeypatch, exc):
+    import keyring
+
+    def boom():
+        raise exc
+
+    monkeypatch.setattr(keyring, "get_keyring", boom)
+
+
+@pytest.mark.parametrize(
+    "exc", [ModuleNotFoundError("nonexistent.mod"), RuntimeError("dbus SENTINEL-88"), ValueError("x")]
+)
+def test_discovery_error_is_a_reason_not_a_raise(monkeypatch, exc):
+    pytest.importorskip("keyring")
+    _discovery_raises(monkeypatch, exc)
+    s = KeyringStore("x", backend=None)
+    reason = s.availability()
+    assert reason == f"keychain error ({type(exc).__name__})"
+    for op in (lambda: s.get(H), lambda: s.set(H, "v"), lambda: s.delete(H)):
+        with pytest.raises(SecretStoreUnavailable) as ei:
+            op()
+        assert str(ei.value) == f"keychain error ({type(exc).__name__})"
+        assert "SENTINEL-88" not in repr(ei.value.__cause__)
+
+
+def test_discovery_is_bounded_by_probe_timeout(monkeypatch):
+    pytest.importorskip("keyring")
+    import threading
+    import time
+
+    import keyring
+
+    release = threading.Event()
+
+    def slow():
+        release.wait(5)
+        return FakeKeyring()
+
+    monkeypatch.setattr(keyring, "get_keyring", slow)
+    s = KeyringStore("x", backend=None, probe_timeout=0.1)
+    t0 = time.monotonic()
+    try:
+        assert "didn't answer" in s.availability()
+    finally:
+        release.set()
+    assert time.monotonic() - t0 < 2
+
+
+# -- M1: low-priority (plain-text) backends are not a keychain ---------------
+
+
+def _with_priority(priority, module="keyrings.alt.file"):
+    cls = type("PlaintextKeyring", (FakeKeyring,), {"__module__": module, "priority": priority})
+    return cls()
+
+
+def test_low_priority_backend_is_unavailable():
+    s = KeyringStore("x", backend=_with_priority(0.5))
+    reason = s.availability()
+    assert reason == "no usable OS keychain (PlaintextKeyring, priority 0.5)"
+    with pytest.raises(SecretStoreUnavailable):
+        s.set(H, "v")
+
+
+def test_priority_one_backend_is_available():
+    assert KeyringStore("x", backend=_with_priority(1)).availability() is None
+
+
+def test_backend_without_priority_is_unavailable():
+    plain = type("Odd", (FakeKeyring,), {"priority": None})()
+    assert isinstance(KeyringStore("x", backend=plain).availability(), str)
+
+
+def test_priority_that_raises_is_unavailable():
+    class Broken(FakeKeyring):
+        @property
+        def priority(self):
+            raise RuntimeError("not viable")
+
+    assert isinstance(KeyringStore("x", backend=Broken()).availability(), str)
+
+
+def test_chainer_of_low_priority_members_is_unavailable():
+    chainer = type("ChainerBackend", (FakeKeyring,), {"__module__": "keyring.backends.chainer", "priority": 10})()
+    chainer.backends = [_with_priority(0.5), _with_priority(0.2)]
+    assert "no usable OS keychain" in KeyringStore("x", backend=chainer).availability()
+    chainer.backends = [_with_priority(0.5), _with_priority(5)]
+    assert KeyringStore("x", backend=chainer).availability() is None

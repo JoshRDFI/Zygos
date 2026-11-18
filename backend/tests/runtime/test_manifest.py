@@ -99,3 +99,40 @@ def test_manifest_secrets_entry_has_no_location_or_values(tmp_path):
     assert set(type(s).model_fields) == {"backend", "reason", "available"}
     assert s.backend == "encrypted_file"
     assert str(tmp_path) not in manifest.model_dump_json()
+
+
+def test_manifest_survives_keyring_discovery_error(tmp_path, monkeypatch):
+    import pytest
+
+    keyring = pytest.importorskip("keyring")
+
+    def boom():
+        raise ModuleNotFoundError("nonexistent.mod")
+
+    monkeypatch.setattr(keyring, "get_keyring", boom)
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        f"personalization:\n  db_path: '{tmp_path / '.zygos' / 'p.db'}'\n"
+        "providers:\n  primary: {provider: fake, model: fake-1}\n"
+    )
+    runtime = build_runtime(cfg)
+    try:
+        manifest = runtime_manifest(runtime)
+    finally:
+        asyncio.run(runtime.aclose())
+    assert manifest.secrets is not None
+
+
+def test_manifest_accepts_a_precomputed_secrets_status(tmp_path):
+    from zygos.secrets.resolve import SecretsStatus
+
+    runtime = build_runtime()
+    calls = []
+    runtime.secrets.status = lambda: calls.append(1)  # must not be called
+    status = SecretsStatus("keyring", "set in config", False, "why", None)
+    try:
+        manifest = runtime_manifest(runtime, secrets_status=status)
+    finally:
+        asyncio.run(runtime.aclose())
+    assert calls == []
+    assert (manifest.secrets.backend, manifest.secrets.available) == ("keyring", False)

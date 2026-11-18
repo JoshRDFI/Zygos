@@ -21,6 +21,7 @@ from zygos.voice.contract import SttHealth, TtsHealth
 
 if TYPE_CHECKING:
     from zygos.runtime.bootstrap import RuntimeAssembly
+    from zygos.secrets.resolve import SecretsStatus
 
 _ABS_PATH = re.compile(r"(?:(?<=\s)|^)(?:[A-Za-z]:\\|/)[^\s]*")
 
@@ -93,7 +94,11 @@ def primary_route(config) -> RouteChoice:
                        model=config.providers.primary.model)
 
 
-def runtime_manifest(runtime: "RuntimeAssembly") -> Manifest:
+def runtime_manifest(
+    runtime: "RuntimeAssembly", *, secrets_status: "SecretsStatus | None" = None
+) -> Manifest:
+    """``secrets_status``: pass one computed off the event loop (the keychain probe
+    can block); by default it is read here."""
     config = runtime.config
     snapshot = runtime.capability_registry.snapshot()
     plugins = tuple(
@@ -107,7 +112,7 @@ def runtime_manifest(runtime: "RuntimeAssembly") -> Manifest:
         stt = snap.stt.model_copy(update={"last_error": _scrub_error(snap.stt.last_error)}) if snap.stt else None
         tts = snap.tts.model_copy(update={"last_error": _scrub_error(snap.tts.last_error)}) if snap.tts else None
         voice = VoiceManifest(stt=stt, tts=tts)
-    secrets = runtime.secrets.status()
+    secrets = secrets_status if secrets_status is not None else runtime.secrets.status()
     return Manifest(
         lifecycle_stage=runtime.lifecycle_stage,
         capabilities=dict(snapshot.bindings),

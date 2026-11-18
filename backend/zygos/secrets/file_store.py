@@ -37,6 +37,14 @@ def _aesgcm() -> Any:
     return AESGCM
 
 
+def path_exists(path: Path) -> bool:
+    """``path.exists()`` with OSError (e.g. permission denied) as SecretStoreUnavailable."""
+    try:
+        return path.exists()
+    except OSError as exc:
+        raise SecretStoreUnavailable(f"can't check {path.name} ({type(exc).__name__})") from None
+
+
 class EncryptedFileStore:
     name = "encrypted_file"
 
@@ -54,16 +62,20 @@ class EncryptedFileStore:
     def availability(self) -> str | None:
         try:
             _aesgcm()
+            enc_exists = path_exists(self.enc_path)
+            key_exists = enc_exists and path_exists(self.key_path)
         except SecretStoreUnavailable as exc:
             return str(exc)
-        if self.enc_path.exists():
-            if not self.key_path.exists():
+        if enc_exists:
+            if not key_exists:
                 return "key file missing"
             if not os.access(self.key_path, os.R_OK):
                 return "key file not readable"
         return None
 
     def key_file_loose(self) -> bool:
+        if sys.platform == "win32":
+            return False  # st_mode permission bits mean nothing there
         try:
             mode = stat.S_IMODE(os.stat(self.key_path).st_mode)
         except OSError:
@@ -72,26 +84,31 @@ class EncryptedFileStore:
 
     def get(self, handle: str) -> str | None:
         validate_handle(handle)
-        if not self.enc_path.exists():
+        if not path_exists(self.enc_path):
             return None
         return self._read(_aesgcm()).get(handle)
 
     def set(self, handle: str, value: str) -> None:
         validate_handle(handle)
         aes = _aesgcm()
-        self.directory.mkdir(parents=True, exist_ok=True)
+        try:
+            self.directory.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise SecretStoreUnavailable(
+                f"can't create the secrets directory ({type(exc).__name__})"
+            ) from None
         with self._locked():
-            data = self._read(aes) if self.enc_path.exists() else {}
+            data = self._read(aes) if path_exists(self.enc_path) else {}
             data[handle] = value
             self._write(aes, data)
 
     def delete(self, handle: str) -> None:
         validate_handle(handle)
-        if not self.enc_path.exists():
+        if not path_exists(self.enc_path):
             return
         aes = _aesgcm()
         with self._locked():
-            if not self.enc_path.exists():
+            if not path_exists(self.enc_path):
                 return
             data = self._read(aes)
             if handle in data:
@@ -170,7 +187,7 @@ class EncryptedFileStore:
         return data
 
     def _write(self, aes: Any, data: dict[str, str]) -> None:
-        key = self._read_key(create=not self.enc_path.exists())
+        key = self._read_key(create=not path_exists(self.enc_path))
         nonce = os.urandom(_NONCE_LEN)
         ct = aes(key).encrypt(nonce, json.dumps(data).encode("utf-8"), _HEADER)
         fd, tmp_name = tempfile.mkstemp(dir=self.directory, prefix="secrets.enc.", suffix=".tmp")

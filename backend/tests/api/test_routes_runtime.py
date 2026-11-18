@@ -151,3 +151,27 @@ async def test_get_runtime_carries_last_hardware_scan_without_scanning():
         await runtime.aclose()
     assert calls == [1]  # only the explicit scan; GET /runtime never scans
     assert after["hardware"]["gpus"][0]["name"] == "RTX"
+
+
+@pytest.mark.asyncio
+async def test_get_runtime_reads_secrets_status_off_the_event_loop():
+    import threading
+
+    runtime = build_runtime()
+    loop_thread = threading.get_ident()
+    seen = []
+    real = runtime.secrets.status
+
+    def status():
+        seen.append(threading.get_ident())
+        return real()
+
+    runtime.secrets.status = status
+    try:
+        app = _mount(runtime)
+        async with _client(app) as client:
+            resp = await client.get("/runtime")
+    finally:
+        await runtime.aclose()
+    assert resp.status_code == 200
+    assert seen and all(t != loop_thread for t in seen)

@@ -7,7 +7,6 @@ primary route. Stability: Experimental.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable
 
 from zygos.backends.addresses import resolve_address
@@ -108,34 +107,32 @@ def _default_model_check(runtime: RuntimeAssembly) -> DoctorCheck:
 
 def _secrets_check(runtime: RuntimeAssembly) -> list[DoctorCheck]:
     """One passive read of the secret store: never writes, never shows a value."""
-    from zygos.secrets import SecretStoreCorrupt, SecretStoreError
-    from zygos.secrets.choice import SqliteChoiceStore
+    try:
+        return _secrets_lines(runtime)
+    except Exception as exc:  # noqa: BLE001 - never abort the report; never str(exc)
+        return [DoctorCheck("secrets", False, f"unexpected error ({type(exc).__name__})")]
+
+
+def _secrets_lines(runtime: RuntimeAssembly) -> list[DoctorCheck]:
+    from zygos.secrets import SecretStoreError
+    from zygos.secrets.resolve import ENCRYPTED_FILE, REASON_PROVISIONAL
 
     handle = runtime.secrets
     status = handle.status()
     file_store = handle.file_store()
-    try:
-        record = SqliteChoiceStore(Path(runtime.config.personalization.db_path)).read()
-        saved = record is not None or file_store.enc_path.exists()
-    except SecretStoreError:
-        saved = True  # a record exists but can't be read
-    out: list[DoctorCheck] = []
     if not status.available:
         why = status.why_unavailable or "no secret store"
-        if saved:
-            out.append(DoctorCheck("secrets", False, why))
-        else:
-            out.append(DoctorCheck("secrets", True, f"not available — {why}", warn=True))
-        return out
-    if status.backend == "encrypted_file" and file_store.enc_path.exists():
+        if handle.has_saved() is not False:  # None: a record exists but can't be read
+            return [DoctorCheck("secrets", False, why)]
+        return [DoctorCheck("secrets", True, f"not available — {why}", warn=True)]
+    if status.backend == ENCRYPTED_FILE and file_store.enc_path.exists():
         try:
             handle.get("provider:doctor-probe")  # read-only integrity check
-        except SecretStoreCorrupt as exc:
-            return [DoctorCheck("secrets", False, str(exc))]
         except SecretStoreError as exc:
             return [DoctorCheck("secrets", False, str(exc))]
-    if status.reason == "provisional — nothing saved yet":
-        out.append(DoctorCheck("secrets", True, f"{status.backend} (provisional — nothing saved yet)"))
+    out: list[DoctorCheck] = []
+    if status.reason == REASON_PROVISIONAL:
+        out.append(DoctorCheck("secrets", True, f"{status.backend} ({REASON_PROVISIONAL})"))
     else:
         out.append(DoctorCheck("secrets", True, f"{status.backend} ({status.reason}) — {status.location}"))
     if file_store.key_file_loose():

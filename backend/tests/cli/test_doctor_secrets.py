@@ -149,3 +149,86 @@ def test_doctor_never_writes_secrets(tmp_path):
     from zygos.secrets.choice import SqliteChoiceStore
 
     assert SqliteChoiceStore(z / "preferences.db").read() is None
+
+
+def test_doctor_completes_when_keyring_discovery_raises(tmp_path, monkeypatch):
+    keyring = pytest.importorskip("keyring")
+
+    def boom():
+        raise ModuleNotFoundError("nonexistent.mod")
+
+    monkeypatch.setattr(keyring, "get_keyring", boom)
+    report, _ = _report(_write(tmp_path))
+    assert _check(report) is not None
+
+
+def test_doctor_unexpected_secrets_error_is_a_fail_line(tmp_path):
+    def broken(runtime):
+        def status():
+            raise RuntimeError("boom SENTINEL-99")
+
+        runtime.secrets.status = status
+
+    report, _ = _report(_write(tmp_path), before=broken)
+    c = _check(report)
+    assert not c.ok
+    assert c.detail == "unexpected error (RuntimeError)"
+    assert _check(report, "default_model") is not None  # the report went on
+
+
+def _garbage_record(tmp_path):
+    import sqlite3
+
+    db = tmp_path / ".zygos" / "preferences.db"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE secrets_backend (id INTEGER PRIMARY KEY, data TEXT NOT NULL)")
+    con.execute("INSERT INTO secrets_backend VALUES (1, 'not json')")
+    con.commit()
+    con.close()
+
+
+def test_doctor_explicit_file_ignores_unreadable_record_nothing_saved_is_warn(tmp_path, monkeypatch):
+    # Ruling 5: explicit encrypted_file ignores the record, so "saved" is the file only.
+    monkeypatch.setitem(sys.modules, "cryptography.hazmat.primitives.ciphers.aead", None)
+    _garbage_record(tmp_path)
+    report, _ = _report(_write(tmp_path, "encrypted_file"))
+    c = _check(report)
+    assert c.ok and c.warn
+
+
+def test_doctor_missing_key_with_file_present_fails(tmp_path):
+    pytest.importorskip("cryptography")
+
+    def seed(r):
+        r.secrets.set("provider:x", "v")
+        r.secrets.file_store().key_path.unlink()
+
+    report, _ = _report(_write(tmp_path, "encrypted_file"), before=seed)
+    c = _check(report)
+    assert not c.ok
+    assert "key file missing" in c.detail
+
+
+def test_doctor_tight_key_has_no_key_file_line(tmp_path):
+    pytest.importorskip("cryptography")
+    report, _ = _report(
+        _write(tmp_path, "encrypted_file"), before=lambda r: r.secrets.set("provider:x", "v")
+    )
+    assert _check(report, "secrets_key_file") is None
+
+
+def test_doctor_does_not_read_the_record_itself(tmp_path, monkeypatch):
+    # The "saved" question goes through the handle (one read), not a second SqliteChoiceStore.
+    import zygos.secrets.choice as choice
+
+    made = []
+    real_init = choice.SqliteChoiceStore.__init__
+
+    def spy(self, path):
+        made.append(path)
+        real_init(self, path)
+
+    monkeypatch.setattr(choice.SqliteChoiceStore, "__init__", spy)
+    _report(_write(tmp_path))
+    assert len(made) == 1  # the handle's own, built at build_runtime

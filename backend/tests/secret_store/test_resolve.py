@@ -448,3 +448,91 @@ def test_build_does_no_io_and_no_optional_imports(tmp_path):
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+# -- I1: a keyring whose discovery raises never escapes the handle -----------
+
+
+def _discovery_raises(monkeypatch):
+    keyring = pytest.importorskip("keyring")
+
+    def boom():
+        raise ModuleNotFoundError("nonexistent.mod")
+
+    monkeypatch.setattr(keyring, "get_keyring", boom)
+
+
+def test_discovery_error_auto_falls_to_provisional_file(tmp_path, monkeypatch):
+    pytest.importorskip("cryptography")
+    _discovery_raises(monkeypatch)
+    st = _handle(tmp_path).status()
+    assert (st.backend, st.reason, st.available) == ("encrypted_file", PROVISIONAL, True)
+
+
+def test_discovery_error_explicit_keyring_is_unavailable_and_unknown(tmp_path, monkeypatch):
+    _discovery_raises(monkeypatch)
+    h = _handle(tmp_path, "keyring")
+    st = h.status()
+    assert not st.available
+    assert "keychain error (ModuleNotFoundError)" in st.why_unavailable
+    assert h.presence(H).state == "unknown"
+
+
+# -- has_saved: whether anything was ever saved (doctor's question) ----------
+
+
+def test_has_saved_nothing(tmp_path):
+    assert _handle(tmp_path).has_saved() is False
+
+
+def test_has_saved_with_record(tmp_path):
+    _record(tmp_path, "keyring")
+    assert _handle(tmp_path).has_saved() is True
+
+
+def test_has_saved_with_file_only(tmp_path):
+    (tmp_path / ".zygos").mkdir()
+    (tmp_path / ".zygos" / "secrets.enc").write_bytes(b"x")
+    assert _handle(tmp_path).has_saved() is True
+
+
+def _garbage(root):
+    import sqlite3
+
+    _db(root).parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(_db(root))
+    con.execute("CREATE TABLE secrets_backend (id INTEGER PRIMARY KEY, data TEXT NOT NULL)")
+    con.execute("INSERT INTO secrets_backend VALUES (1, 'not json')")
+    con.commit()
+    con.close()
+
+
+def test_has_saved_unreadable_record_is_none(tmp_path):
+    _garbage(tmp_path)
+    assert _handle(tmp_path).has_saved() is None
+
+
+def test_has_saved_explicit_file_ignores_record(tmp_path):
+    _garbage(tmp_path)
+    assert _handle(tmp_path, "encrypted_file").has_saved() is False
+
+
+def test_stat_error_on_secrets_file_is_unavailable_not_a_raise(tmp_path, monkeypatch):
+    # M7: no record, and secrets.enc can't be checked → unavailable, never a raise.
+    _record_path = _db(tmp_path)
+    h = _handle(tmp_path, keyring_backend=_fail_keyring())
+    from pathlib import Path
+
+    real = Path.exists
+
+    def exists(self, *a, **k):
+        if self.name == "secrets.enc":
+            raise PermissionError("denied")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(Path, "exists", exists)
+    st = h.status()
+    assert not st.available and "PermissionError" in st.why_unavailable
+    assert h.presence(H).state == "unknown"
+    assert h.has_saved() is None
+    assert not _record_path.exists()

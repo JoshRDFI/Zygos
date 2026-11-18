@@ -73,3 +73,57 @@ def test_concurrent_record_if_absent_agree(tmp_path):
     for t in threads:
         t.join()
     assert results["keyring"] == results["file"]
+
+
+# -- M4: empty fields are invalid --------------------------------------------
+
+
+@pytest.mark.parametrize("field", ["backend", "chosen_at", "install_id"])
+def test_choice_record_fields_must_be_non_empty(field):
+    from pydantic import ValidationError
+
+    data = {"backend": "keyring", "chosen_at": "2026-11-17T00:00:00+00:00", "install_id": "abc"}
+    data[field] = ""
+    with pytest.raises(ValidationError):
+        ChoiceRecord(**data)
+
+
+def test_stored_record_with_empty_install_id_is_unreadable(tmp_path):
+    import sqlite3
+
+    db = tmp_path / "p.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE secrets_backend (id INTEGER PRIMARY KEY, data TEXT NOT NULL)")
+    con.execute(
+        "INSERT INTO secrets_backend VALUES (1, ?)",
+        ('{"backend": "keyring", "chosen_at": "2026-11-17", "install_id": ""}',),
+    )
+    con.commit()
+    con.close()
+    with pytest.raises(SecretStoreUnavailable):
+        SqliteChoiceStore(db).read()
+
+
+# -- M7: filesystem errors are SecretStoreUnavailable ------------------------
+
+
+def test_record_mkdir_error_is_unavailable(tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    store = SqliteChoiceStore(blocker / "sub" / "p.db")
+    rec = ChoiceRecord(backend="keyring", chosen_at="2026-11-17T00:00:00+00:00", install_id="a")
+    with pytest.raises(SecretStoreUnavailable) as ei:
+        store.record_if_absent(rec)
+    assert "Error" in str(ei.value)  # names the exception type
+
+
+def test_read_stat_error_is_unavailable(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    def denied(self, *a, **k):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "exists", denied)
+    with pytest.raises(SecretStoreUnavailable) as ei:
+        SqliteChoiceStore(tmp_path / "p.db").read()
+    assert "PermissionError" in str(ei.value)

@@ -4,6 +4,8 @@ import time
 
 
 class FakeKeyring:
+    priority = 1  # a real keychain (keyring backends below 1 are not)
+
     def __init__(self):
         self.entries = {}
 
