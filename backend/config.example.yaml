@@ -32,10 +32,12 @@ server:
   host: 127.0.0.1             # loopback only; change deliberately to expose it
   port: 8000
 
-# Relative data paths below (db_path, workspace_root, profiles_dir, download_root)
-# resolve against ZYGOS_HOME (default: backend/ in a checkout, else a per-user
-# folder), not against this file's folder. models.ollama_models_dir is not
-# resolved. See docs/adr/ADR-0009-zygos-home-one-root-for-data.md.
+# Relative data paths (memory.db_path, personalization.db_path, tools.workspace_root,
+# models.profiles_dir, voice.stt.download_root, voice.tts.download_root, and
+# voice.tts.worker_python when it contains a path separator; a bare name like
+# python3 is looked up on PATH) resolve against ZYGOS_HOME (default: backend/ in
+# a checkout, else a per-user folder), not against this file's folder.
+# models.ollama_models_dir is not resolved. See docs/adr/ADR-0009-zygos-home-one-root-for-data.md.
 memory:
   enabled: false              # true = layered memory in a local SQLite file
   db_path: .zygos/memory.db

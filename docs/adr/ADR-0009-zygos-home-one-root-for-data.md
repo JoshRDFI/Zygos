@@ -21,7 +21,7 @@ Path rule: an absolute value is unchanged, `~` is expanded, anything else become
 
 Not resolved: `models.ollama_models_dir`, URLs, and the `--config` argument itself. Sidecar processes get absolute `ZYGOS_*_DOWNLOAD_ROOT` values; `ZYGOS_HOME` is not passed to them.
 
-Finding the root, loading config, `zygos doctor` and starting the server create nothing. `zygos doctor` reports the root and where it came from (`zygos_home` line, source `ZYGOS_HOME`, `checkout` or `user data folder`).
+Finding the root, loading config and `zygos doctor` create nothing. `zygos serve` creates the tools workspace when tools are enabled, as it did before. `zygos doctor` reports the root and where it came from (`zygos_home` line, source `ZYGOS_HOME`, `checkout` or `user data folder`).
 
 ## Consequences
 
@@ -33,5 +33,7 @@ Finding the root, loading config, `zygos doctor` and starting the server create 
 
 ## Alternatives considered
 
-- **B: Keep paths relative to the start folder and document "always start from `backend/`".** No code change, but it leaves the split-install trap in place and gives non-checkout installs nowhere sensible to write.
-- **C: Always use a per-user folder.** Simple and predictable, but it would move existing data out of `backend/.zygos` for everyone on the README workflow and would make a checkout share state with every other checkout on the machine.
+- **B: Per-user data folder always.** Conventional and survives deleting the checkout, but the existing models, profiles and GPU venv would have to move once, and every dev checkout would share one install.
+- **C: The config file's folder when `--config` is given, else A.** Two config files mean two installs, but it adds a rule to remember and `zygos mcp add` would need the same `--config` as the server.
+
+(Also considered and dropped: keeping paths relative to the start folder and documenting "always start from `backend/`" leaves the split-install trap in place.)
