@@ -16,6 +16,9 @@ class ToolRegistry:
             raise ToolError(f"tool {name!r} is already registered")
         self._by_name[name] = tool
 
+    def unregister(self, name: str) -> None:
+        self._by_name.pop(name, None)
+
     def get(self, name: str) -> Tool | None:
         return self._by_name.get(name)
 

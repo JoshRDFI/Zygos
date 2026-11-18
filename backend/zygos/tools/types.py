@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Literal, Protocol, runtime
 if TYPE_CHECKING:
     from zygos.tools.build import ToolBuildContext
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from zygos.runtime.context import ExecutionContext
 from zygos.runtime.events import EventPayload
@@ -33,12 +33,21 @@ class ToolMeta(BaseModel):
 
     name: str
     description: str
-    input_model: type[BaseModel]
+    input_model: type[BaseModel] | None = None
+    input_schema: dict[str, Any] | None = None   # JSON Schema (e.g. MCP); args reach the tool unvalidated
+    server: str | None = None         # MCP server key; None for built-ins
+    server_tool: str | None = None    # the server's own tool name; None for built-ins
     output_model: type[BaseModel] | None = None
     retry: RetryPolicy = RetryPolicy()
     timeout_s: float | None = None
     permission: PermissionDecision = "allow"
     fallback: str | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_input_kind(self) -> "ToolMeta":
+        if (self.input_model is None) == (self.input_schema is None):
+            raise ValueError("exactly one of input_model / input_schema must be set")
+        return self
 
 
 class ToolCall(BaseModel):
@@ -125,10 +134,10 @@ class Tool(Protocol):
     meta: ToolMeta
 
     def prepare(self, ctx: ToolContext) -> None: ...
-    async def execute(self, input: BaseModel, ctx: ToolContext) -> Any: ...
+    async def execute(self, input: Any, ctx: ToolContext) -> Any: ...
     def verify(self, output: Any, ctx: ToolContext) -> VerifyResult: ...
     def cleanup(self, ctx: ToolContext) -> None: ...
-    def execute_stream(self, input: BaseModel, ctx: ToolContext) -> AsyncIterator[Any]: ...
+    def execute_stream(self, input: Any, ctx: ToolContext) -> AsyncIterator[Any]: ...
 
 
 class BaseTool:
@@ -156,6 +165,6 @@ class BaseTool:
     def cleanup(self, ctx: ToolContext) -> None:
         return None
 
-    async def execute_stream(self, input: BaseModel, ctx: ToolContext) -> AsyncIterator[Any]:
+    async def execute_stream(self, input: Any, ctx: ToolContext) -> AsyncIterator[Any]:
         """Default: wrap `execute` as a single-value stream so every tool is streamable."""
         yield await self.execute(input, ctx)

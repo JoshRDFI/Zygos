@@ -76,6 +76,13 @@ async def _one_attempt(
     return result, is_ok, retryable
 
 
+def _prepare_input(tool: Tool, call: ToolCall) -> Any:
+    """Pydantic tools validate; JSON-Schema tools get the raw args (the server validates)."""
+    if tool.meta.input_schema is not None:
+        return call.args
+    return tool.meta.input_model.model_validate(call.args)
+
+
 async def execute_tool(
     tool: Tool,
     call: ToolCall,
@@ -89,7 +96,7 @@ async def execute_tool(
 
     # Input validation — before any attempt; no phase acquired anything yet.
     try:
-        input_obj = tool.meta.input_model.model_validate(call.args)
+        input_obj = _prepare_input(tool, call)
     except ValidationError as exc:
         return ToolResult.failed(
             tool=name, call_id=call_id, error_code="tool_input_invalid", error_message=str(exc)
@@ -150,7 +157,7 @@ async def execute_tool_stream(
     tctx = ToolContext(exec=ctx.child(span_id=call_id), tool=name, call_id=call_id)
 
     try:
-        input_obj = tool.meta.input_model.model_validate(call.args)
+        input_obj = _prepare_input(tool, call)
     except ValidationError as exc:
         yield ToolChunk(kind="result", result=ToolResult.failed(
             tool=name, call_id=call_id, error_code="tool_input_invalid", error_message=str(exc)))

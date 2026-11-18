@@ -18,6 +18,9 @@ secrets = [
     "keyring>=25",
     "cryptography>=42",
 ]
+mcp = [
+    "mcp>=2,<3",
+]
 embeddings = [
     "fastembed>=0.3",
     "numpy>=1.26",
@@ -49,5 +52,6 @@ markers = [
     "live: hits a real local Ollama server; excluded by default",
     "live_voice: loads a real faster-whisper model; excluded by default",
     "live_gpu: real CUDA synthesis through the GPU sidecar venv; excluded by default",
+    "live_mcp: talks to a real local MCP server (Archon); excluded by default",
 ]
-addopts = "-m 'not live and not live_voice and not live_gpu'"
+addopts = "-m 'not live and not live_voice and not live_gpu and not live_mcp'"

@@ -34,9 +34,26 @@ def _inline(node: Any, defs: dict[str, Any], seen: frozenset[str]) -> Any:
     return node
 
 
+def _flatten(raw: dict[str, Any]) -> dict[str, Any]:
+    """Inline `$defs` and draft-07 `definitions` ($ref targets) into one flat schema."""
+    defs = {**raw.get("definitions", {}), **raw.get("$defs", {})}
+    body = {k: v for k, v in raw.items() if k not in ("$defs", "definitions")}
+    return _inline(body, defs, frozenset())
+
+
+def check_input_schema(schema: dict[str, Any]) -> str | None:
+    """Reason a server-supplied input schema can't be offered to a model, else None."""
+    if schema.get("type") != "object":
+        return "input schema root must be an object schema"
+    try:
+        _flatten(schema)
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
 def tool_schema(tool: Tool | ToolMeta) -> ToolSchema:
     meta = tool if isinstance(tool, ToolMeta) else tool.meta
-    raw = meta.input_model.model_json_schema()
-    defs = raw.get("$defs", {})
-    parameters = _inline({k: v for k, v in raw.items() if k != "$defs"}, defs, frozenset())
+    raw = meta.input_schema if meta.input_schema is not None else meta.input_model.model_json_schema()
+    parameters = _flatten(raw)
     return ToolSchema(name=meta.name, description=meta.description, parameters=parameters)

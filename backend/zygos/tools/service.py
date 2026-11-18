@@ -8,8 +8,9 @@ resolve a fallback tool by name). Stability: Experimental.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
-from typing import AsyncIterator, Awaitable, Callable
+from typing import AsyncIterator, Awaitable, Callable, Sequence
 
 from pydantic import BaseModel, ConfigDict
 
@@ -24,6 +25,9 @@ from zygos.tools.permissions import (
 )
 from zygos.tools.registry import ToolRegistry
 from zygos.tools.types import Tool, ToolCall, ToolChunk, ToolContext, ToolMeta, ToolResult
+
+
+logger = logging.getLogger(__name__)
 
 
 class ToolServiceSnapshot(BaseModel):
@@ -52,9 +56,23 @@ class ToolService:
         self._policy = policy if policy is not None else PermissionPolicy()   # all-allow
         self._resolver = resolver if resolver is not None else DenyingResolver()
         self._sleep = sleep
+        self._dynamic: list[str] = []
 
     def register(self, tool: Tool) -> None:
         self._registry.register(tool)
+
+    def set_dynamic_tools(self, tools: Sequence[Tool]) -> None:
+        """Replace the previously set dynamic (e.g. MCP) tools. Built-in names win collisions."""
+        for name in self._dynamic:
+            self._registry.unregister(name)
+        self._dynamic = []
+        for tool in tools:
+            name = tool.meta.name
+            if self._registry.get(name) is not None:
+                logger.warning("dynamic tool %r collides with an existing tool; skipped", name)
+                continue
+            self._registry.register(tool)
+            self._dynamic.append(name)
 
     def bind_resolver(self, resolver: PermissionResolver) -> None:
         """Late-bind the interactive permission resolver (the server wires the WS one).
