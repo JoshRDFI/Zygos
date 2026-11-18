@@ -7,7 +7,7 @@ from zygos.config.schema import SttConfig, TtsConfig
 from zygos.runtime.context import root_context
 from zygos.runtime.events import InProcessEventBus
 from zygos.voice.contract import SpeechToText
-from zygos.voice.device import DEFAULT_GPU_VENV, SETUP_HINT, venv_python
+from zygos.voice.device import SETUP_HINT, default_gpu_venv, venv_python
 from zygos.voice.service import VoiceService, build_stt_plugin, build_tts_plugin
 
 
@@ -169,8 +169,8 @@ def test_build_tts_plugin_kokoro_cuda_with_venv_uses_it_and_has_cpu_fallback(tmp
     assert fb.env["ZYGOS_TTS_VOICE"] == plugin._spec.env["ZYGOS_TTS_VOICE"]
 
 
-def test_build_tts_plugin_kokoro_cuda_without_venv_runs_cpu_with_reason(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)   # no .zygos/venvs/voice-gpu here
+def test_build_tts_plugin_kokoro_cuda_without_venv_runs_cpu_with_reason():
+    # the autouse temp ZYGOS_HOME has no .zygos/venvs/voice-gpu
     plugin = build_tts_plugin(TtsConfig(engine="kokoro", device="cuda"))
     assert plugin._spec.argv[0] == sys.executable and plugin._spec.device == "cpu"
     assert plugin._fallback_spec is None
@@ -178,12 +178,11 @@ def test_build_tts_plugin_kokoro_cuda_without_venv_runs_cpu_with_reason(tmp_path
     assert h.requested_device == "cuda" and "setup-gpu" in h.fallback_reason
 
 
-def test_build_tts_plugin_kokoro_managed_venv_cuda_sets_retry_hint(tmp_path, monkeypatch):
+def test_build_tts_plugin_kokoro_managed_venv_cuda_sets_retry_hint():
     # A broken/half-built managed venv fails readiness at start(); the retry
     # reason should point at the fix (setup-gpu) since this launch used the
     # managed venv (worker_python not overridden).
-    monkeypatch.chdir(tmp_path)
-    managed_py = Path(venv_python(DEFAULT_GPU_VENV))
+    managed_py = Path(venv_python(default_gpu_venv()))
     managed_py.parent.mkdir(parents=True)
     managed_py.write_text("")
     plugin = build_tts_plugin(TtsConfig(engine="kokoro", device="cuda"))

@@ -5,13 +5,15 @@ from pathlib import Path
 import pytest
 
 import zygos.voice.kokoro_assets as ka
+from zygos.home import zygos_home
 from zygos.voice.kokoro_assets import MODEL, VOICES, ensure_assets, resolve_paths, verify_sha256
 
 
 def test_resolve_paths_defaults_and_override():
     onnx_d, voices_d = resolve_paths(None)
-    assert onnx_d == Path(".zygos/models/kokoro") / MODEL.filename
-    assert voices_d == Path(".zygos/models/kokoro") / VOICES.filename
+    root = zygos_home().root / ".zygos/models/kokoro"
+    assert onnx_d == root / MODEL.filename
+    assert voices_d == root / VOICES.filename
 
     onnx_o, voices_o = resolve_paths("/tmp/models")
     assert onnx_o == Path("/tmp/models") / MODEL.filename

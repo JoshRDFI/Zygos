@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Callable
 
 import zygos
-from zygos.voice.device import DEFAULT_GPU_VENV, venv_python
+from zygos.voice.device import default_gpu_venv, venv_python
 
 # Minimum onnxruntime-gpu with Blackwell (sm_120) CUDA kernels; verified on RTX 5080
 # (pip installed 1.30.0 at pin time).
@@ -35,13 +35,14 @@ def backend_dir() -> Path:
 
 def setup_gpu(
     *,
-    venv_dir: str = DEFAULT_GPU_VENV,
+    venv_dir: str | None = None,
     force: bool = False,
     run: Runner = _subprocess_run,
     exists: Callable[[str], bool] = os.path.exists,
     remove: Callable[[str], None] = shutil.rmtree,
     out: Callable[[str], None] = print,
 ) -> int:
+    venv_dir = venv_dir or default_gpu_venv()
     py = venv_python(venv_dir)
     abs_venv_dir = os.path.abspath(venv_dir)
     steps: list[tuple[str, list[str], dict[str, str] | None]] = []

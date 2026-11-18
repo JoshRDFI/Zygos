@@ -14,7 +14,16 @@ from dataclasses import dataclass
 from pathlib import PureWindowsPath, PurePosixPath
 from typing import Callable
 
+from zygos.home import resolve_path
+
 DEFAULT_GPU_VENV = ".zygos/venvs/voice-gpu"
+
+
+def default_gpu_venv() -> str:
+    """The managed GPU venv, resolved against the Zygos data root."""
+    return resolve_path(DEFAULT_GPU_VENV)
+
+
 SETUP_HINT = "run: zygos voice setup-gpu"
 
 _CUDA = "CUDAExecutionProvider"

@@ -15,6 +15,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from zygos.home import resolve_path
+
 DEFAULT_DOWNLOAD_ROOT = ".zygos/models/kokoro"
 
 
@@ -42,7 +44,7 @@ VOICES = Asset(
 
 
 def resolve_paths(download_root: str | None) -> tuple[Path, Path]:
-    root = Path(download_root or DEFAULT_DOWNLOAD_ROOT)
+    root = Path(download_root or resolve_path(DEFAULT_DOWNLOAD_ROOT))
     return root / MODEL.filename, root / VOICES.filename
 
 

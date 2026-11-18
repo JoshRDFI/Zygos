@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from zygos.runtime.context import ExecutionContext
 from zygos.voice.contract import SttHealth, TtsHealth
-from zygos.voice.device import DEFAULT_GPU_VENV, SETUP_HINT, resolve_worker_launch, venv_python
+from zygos.voice.device import SETUP_HINT, default_gpu_venv, resolve_worker_launch, venv_python
+from zygos.home import resolve_path
 from zygos.voice.errors import VoiceError
 from zygos.voice.plugin import SttPlugin, Transcription, TtsPlugin
 from zygos.voice.types import AudioFormat, SttEngineSpec, TtsEngineSpec
@@ -30,7 +30,7 @@ def build_stt_plugin(stt: SttConfig) -> SttPlugin:
     if stt.engine == "fake":
         return SttPlugin(_STT_ENGINES["fake"], readiness_timeout_s=stt.readiness_timeout_s)
     if stt.engine == "faster_whisper":
-        download_root = stt.download_root or str(Path(_DEFAULT_FW_DOWNLOAD_ROOT))
+        download_root = stt.download_root or resolve_path(_DEFAULT_FW_DOWNLOAD_ROOT)
         spec = SttEngineSpec(
             name="faster_whisper",
             argv=(sys.executable, "-m", "zygos.voice.sidecar.faster_whisper"),
@@ -57,9 +57,9 @@ def build_tts_plugin(tts: TtsConfig) -> TtsPlugin:
     if tts.engine == "fake":
         return TtsPlugin(_TTS_ENGINES["fake"], readiness_timeout_s=tts.readiness_timeout_s)
     if tts.engine == "kokoro":
-        download_root = tts.download_root or str(Path(_DEFAULT_KOKORO_DOWNLOAD_ROOT))
+        download_root = tts.download_root or resolve_path(_DEFAULT_KOKORO_DOWNLOAD_ROOT)
         launch = resolve_worker_launch(tts.device, tts.worker_python,
-                                       venv_python(DEFAULT_GPU_VENV))
+                                       venv_python(default_gpu_venv()))
         base_env = {
             "ZYGOS_TTS_VOICE": tts.voice,
             "ZYGOS_TTS_LANG": tts.lang,
