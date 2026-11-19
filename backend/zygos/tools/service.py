@@ -130,6 +130,10 @@ class ToolService:
             fb = self._registry.get(tool.meta.fallback)
             if fb is not None:
                 fb_call = call.model_copy(update={"tool": fb.meta.name})
+                denied = self._check_mcp(fb.meta, fb_call) if fb.meta.server is not None else None
+                if denied is not None:
+                    yield ToolChunk(kind="result", result=denied)
+                    return
                 async for chunk in execute_tool_stream(fb, fb_call, ctx, sleep=self._sleep):
                     yield chunk
                 return
@@ -186,10 +190,11 @@ class ToolService:
     ) -> ToolResult:
         """Run `tool`, recursing one level into its fallback on failure.
 
-        NOTE: the fallback tool is intentionally NOT re-gated through the permission
+        NOTE: a built-in fallback is intentionally NOT re-gated through the permission
         check — the primary's gate covers the call (spec §7, maintainer-approved). A
         fallback configured with `permission="deny"`/`"ask"` is a config smell that
-        would surface in review, not something this layer defends against.
+        would surface in review, not something this layer defends against. An MCP
+        fallback (``meta.server`` set) is gated like any MCP call: trust is per tool.
         """
         result = await execute_tool(tool, call, ctx, sleep=self._sleep)
         if result.ok or depth == 1 or not tool.meta.fallback:
@@ -198,6 +203,8 @@ class ToolService:
         if fb is None:
             return result   # missing fallback: primary failure stands
         fb_call = call.model_copy(update={"tool": fb.meta.name})   # keep call_id for correlation
+        if fb.meta.server is not None and (denied := self._check_mcp(fb.meta, fb_call)) is not None:
+            return denied
         return await self._run_with_fallback(fb, fb_call, ctx, depth=1)   # one level only
 
     def snapshot(self) -> ToolServiceSnapshot:

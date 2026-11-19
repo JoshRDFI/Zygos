@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import shlex
 from typing import Any
+
+from pydantic import ValidationError
 
 from zygos.mcp.types import ParsedServer, ServerSpec
 from zygos.secrets.handles import validate_handle
@@ -15,6 +18,7 @@ from zygos.secrets.types import InvalidHandle
 _UNSAFE = re.compile(r"[^A-Za-z0-9_-]")
 _MAX_NAME = 64
 _KNOWN = {"command", "args", "cwd", "url", "type", "env", "headers", "timeout_s"}
+_MAX_TIMEOUT_S = 600.0
 
 
 class McpConfigError(ValueError):
@@ -58,6 +62,13 @@ def address(spec: ServerSpec) -> str:
     if spec.transport == "stdio":
         return " ".join(shlex.quote(p) for p in [spec.command or "", *spec.args])
     return spec.url or ""
+
+
+def status_word(transport: str, status: str) -> str:
+    """A recorded server status in words — the same in ``zygos mcp list``, doctor and inspect."""
+    if status == "not_started":
+        return "not started — zygos serve starts it" if transport == "stdio" else "not contacted yet"
+    return status.replace("_", " ")
 
 
 def describe(spec: ServerSpec) -> str:
@@ -135,9 +146,32 @@ def _parse_one(name: str, cfg: Any) -> ParsedServer:
     extra = {k: v for k, v in cfg.items() if k not in _KNOWN}
     kwargs: dict[str, Any] = {}
     if "timeout_s" in cfg:
-        kwargs["timeout_s"] = cfg["timeout_s"]
-    spec = ServerSpec(
-        name=name, transport=transport, command=command or None, args=args, cwd=cwd,
-        url=url or None, env_names=list(env), header_names=list(headers), extra=extra, **kwargs,
-    )
+        kwargs["timeout_s"] = _timeout(name, cfg["timeout_s"])
+    try:
+        spec = ServerSpec(
+            name=name, transport=transport, command=command or None, args=args, cwd=cwd,
+            url=url or None, env_names=list(env), header_names=list(headers), extra=extra, **kwargs,
+        )
+    except ValidationError as exc:
+        raise McpConfigError(f"server {name!r}: {validation_reason(exc)}") from None
     return ParsedServer(spec=spec, secrets=secrets)
+
+
+def _timeout(server: str, value: Any) -> float:
+    """A per-call timeout: a finite number of seconds, above 0 and at most 600."""
+    ok = (
+        isinstance(value, (int, float)) and not isinstance(value, bool)
+        and math.isfinite(value) and 0 < value <= _MAX_TIMEOUT_S
+    )
+    if not ok:
+        raise McpConfigError(
+            f"server {server!r}: timeout_s must be a number of seconds above 0 and at most {_MAX_TIMEOUT_S:g}"
+        )
+    return float(value)
+
+
+def validation_reason(exc: ValidationError) -> str:
+    """The first problem as ``field: message`` — never the rejected value (it may be a secret)."""
+    first = exc.errors()[0]
+    field = ".".join(str(part) for part in first["loc"]) or "value"
+    return f"{field}: {first['msg']}"

@@ -135,7 +135,7 @@ The `.[secrets]` extra (OS keychain and encrypted file for saved secrets) is opt
 .venv/bin/python -m zygos.cli mcp trust archon/find_tasks
 ```
 
-A tool the model hasn't been trusted for is refused until you trust it; the in-chat approval prompt arrives with the web UI part (phase 1b). Keys and tokens in a server's `env` or `headers` go to the secret store, never into the saved record. A local server (a command) runs on this machine as you, so add only ones you trust. Small local models choose tools less reliably beyond about 20, so switch some off (`zygos mcp off SERVER/TOOL`). `zygos doctor` shows each server's status.
+A tool the model hasn't been trusted for is refused until you trust it; the in-chat approval prompt arrives with the web UI part (phase 1b). Keys and tokens in a server's `env` or `headers` go to the secret store, never into the saved record — so put keys there, not in the `url` or the `command`/`args`, which are shown as-is by `zygos mcp list`, `zygos doctor` and `zygos inspect`. After changing a local server's `env` secret (by adding it again), switch it off and on so the running process picks it up: `zygos mcp off NAME`, let `zygos serve` take one turn (it applies changes per turn), then `zygos mcp on NAME`. A local server (a command) runs on this machine as you, so add only ones you trust. Small local models choose tools less reliably beyond about 20, so switch some off (`zygos mcp off SERVER/TOOL`). `zygos doctor` shows each server's status.
 
 **2. Web UI** (terminal 2):
 

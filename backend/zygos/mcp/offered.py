@@ -17,7 +17,7 @@ from zygos.mcp.config import zygos_tool_name
 from zygos.mcp.tool import McpTool
 from zygos.mcp.types import SeenTool, ServerSpec
 
-__all__ = ["CLASH", "build_offered", "checked", "with_clashes"]
+__all__ = ["CLASH", "build_offered", "checked", "noted", "with_clashes"]
 
 CLASH = "name clash: "
 
@@ -56,6 +56,18 @@ def with_clashes(tools_by_server: Mapping[str, list[SeenTool]]) -> dict[str, lis
         if differs:
             changed[name] = out
     return changed
+
+
+def noted(tools_by_server: Mapping[str, list[SeenTool]], on: set[str]) -> dict[str, list[SeenTool]]:
+    """Every server's tools with clash notes as the supervisor keeps them: clashes count
+    only among servers that are on (it runs only those); an off server's tools are
+    checked against each other alone."""
+    out = dict(tools_by_server)
+    out.update(with_clashes({n: t for n, t in tools_by_server.items() if n in on}))
+    for name, tools in tools_by_server.items():
+        if name not in on:
+            out.update(with_clashes({name: tools}))
+    return out
 
 
 def build_offered(

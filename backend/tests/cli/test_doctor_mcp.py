@@ -277,3 +277,32 @@ def test_short_trims_at_word_boundary():
     out = _short("word " * 40)
     assert len(out) <= 80 and out.endswith("…") and not out.endswith(" …")
     assert _short("x" * 200) == "x" * 79 + "…"
+
+
+def test_local_warns_only_on_failure_or_a_real_exit(tmp_path):
+    cfg, db = _write(tmp_path)
+    store = SqliteMcpStore(db)
+    for name, state in (
+        ("off", ServerState(status="stopped", detail="switched off")),
+        ("bye", ServerState(status="stopped")),  # stopped without an exit code
+        ("down", ServerState(status="failed", detail="could not start")),
+        ("exited", ServerState(status="stopped", exit_code=0)),
+        ("fresh", ServerState()),
+    ):
+        store.put_server(_spec(name))
+        store.put_state(name, state)
+    lines = {c.name: c for c in _mcp(_doctor(cfg))}
+    assert not lines["mcp:off"].warn and not lines["mcp:bye"].warn and not lines["mcp:fresh"].warn
+    assert lines["mcp:down"].warn and lines["mcp:exited"].warn
+
+
+def test_clashes_count_only_servers_that_are_on(tmp_path):
+    cfg, db = _write(tmp_path)
+    store = SqliteMcpStore(db)
+    store.put_server(_spec("a", url=URL))
+    store.put_server(_spec("a_", url=URL))
+    store.put_state("a", ServerState(tools=[_tool("_x"), _tool("ok")]))
+    store.put_state("a_", ServerState(tools=[_tool("x")]))  # a/_x and a_/x both become a___x
+    store.set_off("server", "a_", True)
+    lines = {c.name: c for c in _mcp(_doctor(cfg))}
+    assert lines["mcp_tools"].detail == "2 on"

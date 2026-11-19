@@ -21,3 +21,19 @@ def test_inspect_shows_mcp_servers():
     assert "mcp servers:" in text
     assert "archon" in text and "http://x/mcp" in text and "reachable" in text
     assert "2025-06-18" in text and "1/2 on" in text and "1 trusted" in text
+
+
+def test_inspect_status_words_match_zygos_mcp_list():
+    runtime = build_runtime()
+    try:
+        m = runtime_manifest(runtime)
+    finally:
+        asyncio.run(runtime.aclose())
+    servers = tuple(
+        McpServerManifest(name=name, transport=transport, address="a", enabled=True,
+                          status="not_started", era=None, tools=())
+        for name, transport in (("rem", "http"), ("loc", "stdio"))
+    )
+    text = render_manifest(m.model_copy(update={"mcp_servers": servers}))
+    assert "rem (http, on): a — not contacted yet," in text
+    assert "loc (stdio, on): a — not started — zygos serve starts it," in text

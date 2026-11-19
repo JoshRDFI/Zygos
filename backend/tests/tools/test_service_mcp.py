@@ -117,3 +117,27 @@ async def test_builtin_permission_unchanged():
     denied.register(Builtin())
     res = await denied.execute(ToolCall(tool="builtin"), _ctx())
     assert res.error_code == "tool_permission_denied" and res.error_message == "permission denied"
+
+
+class FailsWithMcpFallback(BaseTool):
+    meta = ToolMeta(name="primary", description="d", input_model=_In, fallback="archon__find_tasks")
+
+    async def execute(self, input, ctx: ToolContext):
+        raise RuntimeError("primary broke")
+
+
+async def test_mcp_fallback_goes_through_the_mcp_gate():
+    for gate, allowed in ((lambda meta: "not_trusted", False), (lambda meta: "allow", True)):
+        mcp = FakeMcp()
+        svc = ToolService(mcp_gate=gate)
+        svc.register(FailsWithMcpFallback())
+        svc.register(mcp)
+        res = await svc.execute(ToolCall(tool="primary", args={"x": 1}), _ctx())
+        chunks = [c async for c in svc.execute_stream(ToolCall(tool="primary", args={"x": 1}), _ctx())]
+        if allowed:
+            assert res.ok and mcp.calls == 2
+            assert chunks[-1].result.ok
+        else:
+            assert mcp.calls == 0
+            assert res.error_message == "not trusted yet — run: zygos mcp trust archon/find_tasks"
+            assert chunks[-1].result.error_message == res.error_message

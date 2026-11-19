@@ -607,3 +607,59 @@ def test_add_hints_trust_and_warns_over_20(setup):
     assert ("trust the ones you want: zygos mcp trust archon/TOOL (or archon for all 21)"
             " — see zygos mcp list") in out
     assert TOOL_COUNT_WARNING in out
+
+
+@pytest.mark.parametrize("raw", ['"abc"', "0", "true", "NaN", "1e309"])
+def test_add_bad_timeout_is_a_readable_error(setup, raw):
+    bad = setup.tmp / "bad.json"
+    bad.write_text('{"mcpServers": {"slowsrv": {"command": "x", "timeout_s": ' + raw + "}}}")
+    code, out = _run(setup, "add", str(bad), "--yes")
+    assert code == 1
+    assert out.startswith("zygos mcp: server 'slowsrv': timeout_s") and "Traceback" not in out
+    assert _store(setup).servers() == {}
+
+
+def test_add_turns_a_spec_validation_error_into_a_readable_one(setup, monkeypatch):
+    import zygos.mcp.config as config_mod
+    from zygos.mcp.types import ServerSpec
+
+    def broken(**kwargs):
+        return ServerSpec(**{**kwargs, "args": 5})  # a field pydantic rejects
+
+    monkeypatch.setattr(config_mod, "ServerSpec", broken)
+    path = _file(setup.tmp, {"odd": {"command": "x"}})
+    code, out = _run(setup, "add", path, "--yes")
+    assert code == 1 and out.startswith("zygos mcp: server 'odd': ")
+
+
+def test_switching_a_server_back_on_clears_switched_off(setup):
+    from zygos.mcp.store import ServerState
+
+    path = _file(setup.tmp, {"rem": {"url": "http://127.0.0.1:9/mcp"}, "loc": {"command": "x"}})
+    assert _run(setup, "add", path, "--yes", list_remote=ListSpy())[0] == 0
+    store = _store(setup)
+    for name in ("rem", "loc"):
+        store.put_state(name, store.state(name).model_copy(
+            update={"status": "stopped", "detail": "switched off"}))  # as zygos serve records it
+        assert _run(setup, "on", name)[0] == 0
+    _, out = _run(setup, "list")
+    assert "switched off" not in out
+    assert "status: not contacted yet" in out
+    assert "status: not started — zygos serve starts it" in out
+    assert store.state("rem").tools  # the tools last seen stay
+
+
+def test_list_notes_clashes_only_among_servers_that_are_on(setup):
+    store = _store(setup)
+    from zygos.mcp.store import ServerState
+    from zygos.mcp.types import ServerSpec
+
+    for name, tools in (("a", [_tool("_x"), _tool("ok")]), ("a_", [_tool("x")])):
+        store.put_server(ServerSpec(name=name, transport="http", url="http://127.0.0.1:9/mcp"))
+        store.put_state(name, ServerState(tools=tools))
+    _, out = _run(setup, "list")
+    assert out.count("left out: name clash") == 2
+    store.set_off("server", "a_", True)
+    _, out = _run(setup, "list")
+    assert "name clash" not in out
+    assert "_x — on, not trusted" in out and "2 tools on" in out

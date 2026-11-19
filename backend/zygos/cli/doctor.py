@@ -177,12 +177,14 @@ def _with_secret_hint(detail: str, state: Any, name: str) -> str:
 
 
 def _local_detail(state: Any) -> str:
+    from zygos.mcp.config import status_word
+
     when = ""
     if state.status_at is not None:
         when = f" (as of {datetime.fromtimestamp(state.status_at).strftime('%H:%M')}, from zygos serve)"
     if state.status == "not_started":
-        return "not started — zygos serve starts it"
-    text = state.status.replace("_", " ") + when
+        return status_word("stdio", state.status)
+    text = status_word("stdio", state.status) + when
     if state.status == "stopped" and state.exit_code is not None:
         text = f"stopped — exit {state.exit_code}"
         last = (state.stderr_tail or "").strip().splitlines()
@@ -245,7 +247,7 @@ async def _mcp_checks(
 ) -> list[DoctorCheck]:
     """MCP servers as recorded; connects only with ``probe``. Never raises."""
     from zygos.mcp.config import address, describe, zygos_tool_name
-    from zygos.mcp.offered import checked, with_clashes
+    from zygos.mcp.offered import checked, noted
     from zygos.mcp.store import McpStoreUnavailable
     from zygos.mcp.supervisor import NO_MCP, TOOL_COUNT_WARNING
 
@@ -272,7 +274,9 @@ async def _mcp_checks(
     for name in sorted(servers):
         spec, state = servers[name], states[name]
         if spec.transport == "stdio":
-            detail, warn = _local_detail(state), state.status in ("stopped", "failed")
+            # warn on a failure or a real exit; not on a normal stop (switched off, shutdown)
+            warn = state.status == "failed" or (state.status == "stopped" and state.exit_code is not None)
+            detail = _local_detail(state)
         elif probe and (installed or list_remote is not None):
             note, warn = await _probe_remote(spec, state, connect, probe_timeout_s, runtime.secrets)
             detail = f"{spec.url} (protocol {state.era or 'not known yet'}) — {note}"
@@ -283,8 +287,8 @@ async def _mcp_checks(
                 detail += f" — {state.status}: {state.detail}"
         detail = _with_secret_hint(detail, state, name)
         out.append(DoctorCheck(f"mcp:{name}", True, detail, warn=warn))
-    tools_by = {n: checked(s.tools) for n, s in states.items()}
-    tools_by.update(with_clashes(tools_by))
+    on = {n for n in servers if f"server:{n}" not in off}
+    tools_by = noted({n: checked(s.tools) for n, s in states.items()}, on)
     count = sum(
         1 for n in servers if f"server:{n}" not in off
         for t in tools_by.get(n, [])

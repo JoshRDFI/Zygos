@@ -101,3 +101,16 @@ def test_parse_rejects_double_underscore_server_name():
         parse_servers('{"a.b": {"command": "x"}, "c__d": {"command": "x"}}')
     with pytest.raises(McpConfigError, match="reserved"):
         parse_servers('{"a_.b": {"command": "x"}}')  # cleans to a__b
+
+
+@pytest.mark.parametrize("raw", ['"abc"', "0", "-1", "true", "NaN", "1e309", "-Infinity", "601", "[5]", "null"])
+def test_bad_timeout_rejected_naming_the_server(raw):
+    text = '{"slowsrv": {"command": "x", "timeout_s": ' + raw + "}}"
+    with pytest.raises(McpConfigError, match="slowsrv.*timeout_s"):
+        parse_servers(text)
+
+
+@pytest.mark.parametrize(("raw", "want"), [("30", 30.0), ("0.5", 0.5), ("600", 600.0)])
+def test_good_timeout_kept(raw, want):
+    [parsed] = parse_servers('{"a": {"url": "http://h/mcp", "timeout_s": ' + raw + "}}")
+    assert parsed.spec.timeout_s == want

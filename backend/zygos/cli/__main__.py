@@ -21,6 +21,7 @@ from zygos.cli.doctor import DoctorReport, run_doctor
 from zygos.cli.mcp import add_parser as add_mcp_parser, run_mcp
 from zygos.config.loader import load_config
 from zygos.hardware.describe import describe_hardware
+from zygos.mcp.config import status_word
 from zygos.errors import ConfigError
 from zygos.personalization import PERSONALIZATION_FIELDS, Personalization
 from zygos.personalization.onboarding import run_onboarding
@@ -165,7 +166,7 @@ def render_manifest(manifest: Manifest) -> str:
             trusted = sum(1 for t in server.tools if t.trust == "trusted")
             lines.append(
                 f"    {server.name} ({server.transport}, {'on' if server.enabled else 'off'}): "
-                f"{server.address} — {server.status.replace('_', ' ')}, "
+                f"{server.address} — {status_word(server.transport, server.status)}, "
                 f"protocol {server.era or 'not known yet'}, "
                 f"{on}/{len(server.tools)} on, {trusted} trusted")
     return "\n".join(lines)

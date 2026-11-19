@@ -48,17 +48,22 @@ from zygos.tools.permissions import Rule
 from zygos.tools.service import ToolService
 from zygos.tools.types import Tool, ToolMeta
 
-__all__ = ["Connectors", "McpSupervisor", "NO_MCP", "SECRET_FAILURE", "TOOL_COUNT_WARNING"]
+__all__ = [
+    "Connectors", "McpSupervisor", "NO_MCP", "SECRET_FAILURE", "SECRET_SLOW", "SWITCHED_OFF", "TOOL_COUNT_WARNING",
+]
 
 logger = logging.getLogger("zygos.mcp")
 
 SECRET_FAILURE = "secret store: "  # starts the detail of a server failed for secret reasons (doctor hints on it)
+SECRET_SLOW = "secret store didn't answer in time"  # not a SECRET_FAILURE: it is tried again by itself
+SWITCHED_OFF = "switched off"  # the detail of a server stopped because it was switched off
 NO_MCP = "MCP support isn't installed: pip install -e '.[mcp]'"
 TOOL_COUNT_WARNING = "small local models choose tools less reliably beyond about 20 — consider switching some off"
 _DEFAULT_TTL_S = 300.0
 _RETRY_S = 30.0  # a failed listing is tried again after this
 _TOOL_WARN_OVER = 20
 _READ_BUSY_S = 0.2  # a turn waits at most this long for a store writer
+_SECRET_READ_S = 5.0  # a secret-store read (a locked keychain may never answer) waits at most this long
 
 
 class LocalLike(Protocol):
@@ -107,11 +112,13 @@ class _Server:
     state: ServerState
     local: LocalLike | None = None
     attempted: bool = False  # local: started once for this spec; reconcile never starts it again
+    start_after: float = 0.0  # local: not (re)started before this (a slow secret store)
     current: bool = False  # local: tools listed from the process now running
     failed: bool = False  # could not be used at all (secrets, no SDK) until replaced or off/on
     next_check: float = 0.0  # when the tool list is due again
     start_task: asyncio.Task[None] | None = None
     list_task: asyncio.Task[None] | None = None
+    relist: bool = False  # a new listing was asked for while one was in flight
     dirty: bool = False  # state changed since last written
 
     @property
@@ -150,6 +157,7 @@ class McpSupervisor:
         self._work: set[asyncio.Task[Any]] = set()  # starts and listings: cancelled on close
         self._chores: set[asyncio.Task[Any]] = set()  # writes, events, stops: finished on close
         self._write_lock = asyncio.Lock()
+        self._secret_reads: dict[tuple[str, str, tuple[str, ...]], asyncio.Future[dict[str, str]]] = {}
         self._closed = False
 
     @property
@@ -223,7 +231,7 @@ class McpSupervisor:
                 spec, headers, tool, args, era=entry.state.era, discover=entry.state.discover, on_era=on_era
             )
         except McpUnavailable:
-            entry.next_check = 0.0  # list it again (in the background) to see whether it's down
+            self._list_again(entry, now=False)  # list it again (in the background) to see whether it's down
             raise
 
     async def aclose(self) -> None:
@@ -236,7 +244,13 @@ class McpSupervisor:
             task.cancel()
         await asyncio.gather(*work, return_exceptions=True)
         locals_ = [entry.local for entry in self._servers.values() if entry.local is not None]
+        stopping = [
+            entry for entry in self._servers.values()
+            if entry.local is not None and entry.local.status in ("starting", "running")
+        ]
         await asyncio.gather(*(local.stop() for local in locals_), return_exceptions=True)
+        for entry in stopping:  # stopped by this shutdown, not by a fault: zygos serve starts it again
+            self._update(entry, status="not_started", detail=None, exit_code=None, stderr_tail=None)
         while self._chores:  # a finished chore may have queued another (a write after an event)
             batch = set(self._chores)
             await asyncio.gather(*batch, return_exceptions=True)
@@ -289,6 +303,8 @@ class McpSupervisor:
             entry = _Server(spec=spec, state=state.model_copy(update={"tools": checked(state.tools)}))
             entry.next_check = state.expires_at or 0.0
             self._servers[name] = entry
+            if state.status == "stopped" and state.detail == SWITCHED_OFF:  # it is on again
+                self._update(entry, status="not_started", detail=None)
             if self._mcp_ok is None:
                 self._mcp_ok = _mcp_installed()
             if not self._mcp_ok:
@@ -305,10 +321,10 @@ class McpSupervisor:
             self._spawn(entry.local.stop(), chore=True)
         if switched_off:
             entry.state = entry.state.model_copy(
-                update={"status": "stopped", "detail": "switched off", "status_at": self._clock()}
+                update={"status": "stopped", "detail": SWITCHED_OFF, "status_at": self._clock()}
             )
             self._save(entry, retired_ok=True)
-            self._publish(name, "stopped", "switched off")
+            self._publish(name, "stopped", SWITCHED_OFF)
 
     def _reconcile(self) -> None:
         now = self._clock()
@@ -317,6 +333,8 @@ class McpSupervisor:
                 continue
             if entry.is_local:
                 if not entry.attempted:
+                    if now < entry.start_after:
+                        continue
                     entry.attempted = True
                     entry.start_task = self._spawn(self._start_local(entry))
                 elif (
@@ -331,6 +349,30 @@ class McpSupervisor:
     def _schedule_list(self, entry: _Server) -> None:
         if entry.list_task is None or entry.list_task.done():
             entry.list_task = self._spawn(self._list(entry))
+            if entry.list_task is not None:
+                entry.list_task.add_done_callback(lambda _task: self._after_list(entry))
+
+    def _list_again(self, entry: _Server, *, now: bool) -> None:
+        """A fresh listing is wanted (the tools changed, or a call found the server down):
+        right away with ``now``, else on the next turn — and if a listing is already in
+        flight (it may have started before the change), once more after it."""
+        entry.next_check = 0.0
+        if entry.list_task is not None and not entry.list_task.done():
+            entry.relist = True
+        elif now and not self._closed and (not entry.is_local or self._running(entry)):
+            self._schedule_list(entry)
+
+    def _after_list(self, entry: _Server) -> None:
+        if not entry.relist:
+            return
+        entry.relist = False
+        if self._closed or entry.failed or self._servers.get(entry.spec.name) is not entry:
+            return
+        self._list_again(entry, now=True)
+
+    @staticmethod
+    def _running(entry: _Server) -> bool:
+        return entry.local is not None and entry.local.status == "running"
 
     # ---- background work -----------------------------------------------------------
 
@@ -340,6 +382,12 @@ class McpSupervisor:
             env = await self._secret_values(spec, "env", spec.env_names)
         except SecretStoreError as exc:
             self._fail(entry, SECRET_FAILURE + str(exc))
+            return
+        except McpUnavailable as exc:  # the secret store didn't answer in time: start it later
+            entry.attempted = False
+            entry.start_after = self._clock() + _RETRY_S
+            self._update(entry, status="failed", detail=str(exc))
+            self._publish(spec.name, "failed", str(exc))
             return
         try:
             local = self.connectors.local(spec, env, on_event=lambda kind, detail: self._on_local(entry, kind, detail))
@@ -357,9 +405,7 @@ class McpSupervisor:
         if self._servers.get(name) is not entry or local is None:
             return  # a server already dropped (removed, off, replaced)
         if kind == "tools_changed":
-            entry.next_check = 0.0
-            if not self._closed and local.status == "running":
-                self._schedule_list(entry)
+            self._list_again(entry, now=True)
             return
         entry.current = False
         ended = {"exit_code": local.exit_code, "stderr_tail": local.stderr_tail or None}
@@ -419,7 +465,11 @@ class McpSupervisor:
         self._publish(spec.name, "listed", tools=len(result.tools))
 
     async def _secret_values(self, spec: ServerSpec, kind: str, names: list[str]) -> dict[str, str]:
-        """Values for a server's env or header names, read in a thread (the store may block)."""
+        """Values for a server's env or header names, read in a thread (the store may block).
+
+        Waits at most ``min(timeout_s, 5 s)``, then raises ``McpUnavailable(SECRET_SLOW)``
+        (a locked keychain may never answer). A read still hanging is waited on again by
+        the next attempt rather than started anew, so stuck threads don't pile up."""
         if not names:
             return {}
 
@@ -433,7 +483,21 @@ class McpSupervisor:
                     values[item] = value
             return values
 
-        return await asyncio.to_thread(read)
+        key = (spec.name, kind, tuple(names))
+        pending = self._secret_reads.get(key)
+        if pending is None or pending.done():
+            pending = asyncio.ensure_future(asyncio.to_thread(read))
+            pending.add_done_callback(_retrieve)
+            pending.add_done_callback(lambda done: self._forget_read(key, done))  # values aren't kept
+            self._secret_reads[key] = pending
+        try:
+            return await asyncio.wait_for(asyncio.shield(pending), min(spec.timeout_s, _SECRET_READ_S))
+        except TimeoutError:
+            raise McpUnavailable(SECRET_SLOW) from None
+
+    def _forget_read(self, key: tuple[str, str, tuple[str, ...]], done: asyncio.Future[Any]) -> None:
+        if self._secret_reads.get(key) is done:
+            del self._secret_reads[key]
 
     # ---- offered tools ------------------------------------------------------------
 
@@ -506,6 +570,12 @@ class McpSupervisor:
         task.add_done_callback(bucket.discard)
         task.add_done_callback(_report_crash)
         return task
+
+
+def _retrieve(future: asyncio.Future[Any]) -> None:
+    """Mark a shared secret read's outcome as seen (its waiters may have timed out)."""
+    if not future.cancelled():
+        future.exception()
 
 
 def _report_crash(task: asyncio.Task[Any]) -> None:

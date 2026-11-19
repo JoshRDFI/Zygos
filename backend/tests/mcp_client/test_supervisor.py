@@ -109,7 +109,12 @@ class FakeLocal:
             self.on_event("stopped", None)
 
     async def list_tools(self) -> ListResult:
-        return ListResult(era=ERA, discover=None, tools=list(self.fakes.local_tools[self.spec.name]), ttl_s=None)
+        tools = list(self.fakes.local_tools[self.spec.name])  # what the server has as the listing starts
+        self.fakes.list_count[self.spec.name] = self.fakes.list_count.get(self.spec.name, 0) + 1
+        gate = self.fakes.list_gate.get(self.spec.name)
+        if gate is not None:
+            await gate.wait()
+        return ListResult(era=ERA, discover=None, tools=tools, ttl_s=None)
 
     async def call(self, tool: str, args: dict, timeout_s: float) -> Any:
         return f"{self.spec.name}/{tool}:{args}"
@@ -126,6 +131,8 @@ class Fakes:
         self.remote_tools: dict[str, list[SeenTool] | Exception] = {}
         self.local_tools: dict[str, list[SeenTool]] = {}
         self.local_delay: dict[str, float] = {}
+        self.list_gate: dict[str, asyncio.Event] = {}  # a listing waits for this (local and remote)
+        self.list_count: dict[str, int] = {}
         self.locals: list[FakeLocal] = []
         self.list_calls: list[str] = []
         self.headers_seen: list[dict[str, str]] = []
@@ -137,6 +144,9 @@ class Fakes:
             self.list_calls.append(spec.name)
             self.headers_seen.append(dict(headers))
             found = self.remote_tools[spec.name]
+            gate = self.list_gate.get(spec.name)
+            if gate is not None:
+                await gate.wait()
             if isinstance(found, Exception):
                 raise found
             return ListResult(era=ERA, discover=None, tools=list(found), ttl_s=None)
@@ -165,6 +175,20 @@ class FakeSecrets:
     def get(self, handle: str) -> str | None:
         if handle.split(":")[1] in self.locked:
             raise SecretStoreUnavailable("the keychain is locked")
+        return self.values.get(handle)
+
+
+class BlockingSecrets:
+    """A secret store that doesn't answer (a locked keychain prompt) until released."""
+
+    def __init__(self, values: dict[str, str]) -> None:
+        self.values = values
+        self.release = threading.Event()
+        self.reads = 0
+
+    def get(self, handle: str) -> str | None:
+        self.reads += 1
+        self.release.wait(10)
         return self.values.get(handle)
 
 
@@ -510,7 +534,7 @@ async def test_aclose_stops_local(h, tmp_path):
     await sup.aclose()
     await _until(lambda: not _alive(pid), timeout=5)
     assert sup.before_turn() == ()
-    assert h.store.state("loc").status == "stopped"
+    assert h.store.state("loc").status == "not_started"  # a normal shutdown, not a failure
 
 
 async def test_real_remote_listed_trusted_and_called(h):
@@ -606,3 +630,147 @@ async def test_late_state_write_skips_a_replaced_server(h):
     sup._update(entry, detail="late, for the old spec")
     await _until(lambda: not sup._chores)
     assert h.store.state("r") == ServerState()
+
+
+# ---- final-review fixes ---------------------------------------------------------------
+
+SECRET_SLOW = "secret store didn't answer in time"
+
+
+@pytest.fixture
+def quick_secrets(monkeypatch):
+    import zygos.mcp.supervisor as sup_mod
+
+    monkeypatch.setattr(sup_mod, "_SECRET_READ_S", 0.2)
+    monkeypatch.setattr(sup_mod, "_RETRY_S", 0.1)
+
+
+async def test_hanging_secret_store_makes_remote_unreachable_then_retries(h, quick_secrets):
+    h.store.put_server(_remote("r", header_names=["Authorization"]))
+    h.fakes.remote_tools["r"] = [_tool("t")]
+    secrets = BlockingSecrets({"mcp:r:header:Authorization": "tok"})
+    try:
+        sup = h.make(secrets=secrets)
+        await sup.start()
+        sup.before_turn()
+        await _until(lambda: h.store.state("r").status == "unreachable", timeout=3)
+        state = h.store.state("r")
+        assert state.detail == SECRET_SLOW and not state.detail.startswith(SECRET_FAILURE)
+        assert h.fakes.list_calls == []
+        assert not sup._servers["r"].failed  # tried again, unlike a secret-store failure
+        reads = secrets.reads
+        for _ in range(5):
+            sup.before_turn()
+            await asyncio.sleep(0.15)
+        assert secrets.reads == reads  # the hung read is waited on again, not piled up
+        secrets.release.set()
+        for _ in range(50):
+            if _names(sup.before_turn()) == ["r__t"]:
+                break
+            await asyncio.sleep(0.05)
+        assert _names(sup.before_turn()) == ["r__t"]
+        assert h.fakes.headers_seen[-1] == {"Authorization": "tok"}
+    finally:
+        secrets.release.set()
+
+
+async def test_hanging_secret_store_fails_local_start_then_retries(h, quick_secrets):
+    h.store.put_server(_local("loc", env_names=["KEY"]))
+    h.fakes.local_tools["loc"] = [_tool("echo")]
+    secrets = BlockingSecrets({"mcp:loc:env:KEY": "v"})
+    try:
+        sup = h.make(secrets=secrets)
+        await sup.start()
+        await _until(lambda: h.store.state("loc").status == "failed", timeout=3)
+        assert h.store.state("loc").detail == SECRET_SLOW
+        assert h.fakes.locals == []
+        secrets.release.set()
+        for _ in range(50):
+            if _names(sup.before_turn()) == ["loc__echo"]:
+                break
+            await asyncio.sleep(0.05)
+        assert _names(sup.before_turn()) == ["loc__echo"]
+        assert len(h.fakes.locals) == 1 and h.fakes.locals[0].env == {"KEY": "v"}
+    finally:
+        secrets.release.set()
+
+
+async def test_hanging_secret_store_makes_call_unavailable_quickly(h, quick_secrets):
+    h.store.put_server(_remote("r", header_names=["Authorization"]))
+    _seed(h.store, "r", [_tool("t")])
+    secrets = BlockingSecrets({})
+    try:
+        sup = h.make(secrets=secrets)
+        assert _names(sup.before_turn()) == ["r__t"]
+        t0 = time.monotonic()
+        with pytest.raises(McpUnavailable, match=SECRET_SLOW):
+            await sup.call("r", "t", {})
+        assert time.monotonic() - t0 < 2
+    finally:
+        secrets.release.set()
+
+
+async def test_normal_shutdown_records_local_as_not_started(h):
+    from zygos.cli.doctor import _local_detail
+    from zygos.cli.mcp import _status
+
+    h.store.put_server(_local("loc"))
+    h.store.put_server(_local("dead"))
+    h.fakes.local_tools["loc"] = [_tool("echo")]
+    h.fakes.local_tools["dead"] = [_tool("echo")]
+    sup = h.make()
+    await sup.start()
+    await _until(lambda: _names(sup.before_turn()) == ["dead__echo", "loc__echo"])
+    next(f for f in h.fakes.locals if f.spec.name == "dead").die(3)
+    await _until(lambda: h.store.state("dead").status == "stopped")
+    await sup.aclose()
+    state = h.store.state("loc")
+    assert state.status == "not_started" and state.exit_code is None
+    assert state.tools  # the tools last seen stay on record
+    assert _status(_local("loc"), state) == "not started — zygos serve starts it"
+    assert _local_detail(state) == "not started — zygos serve starts it"
+    dead = h.store.state("dead")
+    assert dead.status == "stopped" and dead.exit_code == 3  # a real exit still shows (and warns)
+
+
+async def test_switched_on_remote_no_longer_shows_switched_off(h):
+    h.store.put_server(_remote("r"))
+    h.store.put_state("r", ServerState(status="stopped", detail="switched off", status_at=time.time()))
+    h.fakes.remote_tools["r"] = [_tool("t")]
+    h.fakes.list_gate["r"] = asyncio.Event()  # the listing hangs: only the reset can change the state
+    sup = h.make()
+    await sup.start()
+    sup.before_turn()
+    await _until(lambda: h.store.state("r").status == "not_started")
+    assert h.store.state("r").detail is None
+    h.fakes.list_gate["r"].set()
+
+
+async def test_tools_changed_during_a_listing_lists_again(h):
+    h.store.put_server(_local("loc"))
+    h.fakes.local_tools["loc"] = [_tool("echo")]
+    gate = h.fakes.list_gate["loc"] = asyncio.Event()
+    sup = h.make()
+    await sup.start()
+    await _until(lambda: h.fakes.list_count.get("loc") == 1)
+    h.fakes.local_tools["loc"] = [_tool("echo"), _tool("grown")]
+    h.fakes.locals[0].on_event("tools_changed", None)  # arrives while the listing is in flight
+    gate.set()
+    await _until(lambda: _names(sup.before_turn()) == ["loc__echo", "loc__grown"], timeout=3)
+    assert h.fakes.list_count["loc"] == 2
+
+
+async def test_failed_call_during_a_listing_lists_again(h):
+    h.store.put_server(_remote("r"))
+    _seed(h.store, "r", [_tool("t")], expires_in=-1)
+    h.fakes.remote_tools["r"] = [_tool("t")]
+    gate = h.fakes.list_gate["r"] = asyncio.Event()
+    h.fakes.call_result = McpUnavailable("could not connect")
+    sup = h.make()
+    await sup.start()
+    sup.before_turn()
+    await _until(lambda: h.fakes.list_calls == ["r"])
+    with pytest.raises(McpUnavailable):
+        await sup.call("r", "t", {})
+    gate.set()
+    await _until(lambda: len(h.fakes.list_calls) == 2, timeout=3)

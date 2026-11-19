@@ -28,13 +28,18 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, TextIO
 
+from pydantic import ValidationError
+
 from zygos.config.schema import ZygosConfig
-from zygos.mcp.config import McpConfigError, check_server_names, describe, parse_servers, zygos_tool_name
-from zygos.mcp.offered import checked, with_clashes
+from zygos.mcp.config import (
+    McpConfigError, check_server_names, describe, parse_servers, status_word, validation_reason,
+    zygos_tool_name,
+)
+from zygos.mcp.offered import checked, noted
 from zygos.mcp.permission import seen_fingerprint, trust_state
 from zygos.mcp.results import McpToolError, McpUnavailable
 from zygos.mcp.store import McpStoreUnavailable, ServerState, SqliteMcpStore, TrustEntry
-from zygos.mcp.supervisor import NO_MCP, TOOL_COUNT_WARNING
+from zygos.mcp.supervisor import NO_MCP, SWITCHED_OFF, TOOL_COUNT_WARNING
 from zygos.mcp.types import ParsedServer, SeenTool, ServerSpec
 from zygos.secrets import SecretStoreError, build_secret_store
 
@@ -153,6 +158,8 @@ class _Cli:
             parsed = parse_servers(text)
         except McpConfigError as exc:
             return self.error(str(exc))
+        except ValidationError as exc:  # parse_servers turns these into McpConfigError; belt and braces
+            return self.error(f"invalid server settings: {validation_reason(exc)}")
         existing = self.store.servers()
         problems = check_server_names([p.spec.name for p in parsed], list(existing))
         if problems:
@@ -223,6 +230,7 @@ class _Cli:
             self.say(f"{name}: not added — its secrets can't be stored: {status.why_unavailable}")
             return False
         written: list[str] = []
+        previous: dict[str, str | None] = {}
         try:
             previous = {handle: self.secrets.get(handle) for handle in item.secrets}
             for handle, value in item.secrets.items():
@@ -230,7 +238,7 @@ class _Cli:
                 written.append(handle)
         except SecretStoreError as exc:
             self.say(f"{name}: not added — its secrets can't be stored: {exc}")
-            self._undo_secrets(name, previous if written else {}, written)
+            self._undo_secrets(name, previous, written)
             return False
         return True
 
@@ -311,7 +319,7 @@ class _Cli:
         off = self.store.off()
         trust = self.store.trust_entries()
         states = {name: self.store.state(name) for name in servers}
-        tools_by = _tools_by(states)
+        tools_by = _tools_by(servers, states, off)
         for name in sorted(servers):
             spec, state = servers[name], states[name]
             server_on = f"server:{name}" not in off
@@ -347,7 +355,8 @@ class _Cli:
 
     def _tools_on(self) -> int:
         servers = self.store.servers()
-        return _count_on(servers, self.store.off(), _tools_by({n: self.store.state(n) for n in servers}))
+        off = self.store.off()
+        return _count_on(servers, off, _tools_by(servers, {n: self.store.state(n) for n in servers}, off))
 
     def _presence(self, handle: str) -> str:
         try:
@@ -414,6 +423,11 @@ class _Cli:
         word = "on" if on else "off"
         if tool is None:
             self.store.set_off("server", spec.name, not on)
+            state = self.store.state(spec.name)
+            if on and state.status == "stopped" and state.detail == SWITCHED_OFF:
+                # zygos serve stopped it for being off; it isn't any more
+                self.store.put_state(spec.name, state.model_copy(
+                    update={"status": "not_started", "detail": None, "status_at": self.clock()}))
             self.say(f"{spec.name} is {word}.")
             return 0
         zname = zygos_tool_name(spec.name, tool)
@@ -471,11 +485,12 @@ def _secret_name(handle: str) -> str:
     return handle.rsplit(":", 1)[-1]
 
 
-def _tools_by(states: dict[str, ServerState]) -> dict[str, list[SeenTool]]:
-    """Each server's tools with schema problems and cross-server name clashes noted."""
-    tools_by = {name: checked(state.tools) for name, state in states.items()}
-    tools_by.update(with_clashes(tools_by))
-    return tools_by
+def _tools_by(
+    servers: dict[str, ServerSpec], states: dict[str, ServerState], off: set[str]
+) -> dict[str, list[SeenTool]]:
+    """Each server's tools with schema problems and name clashes (among servers on) noted."""
+    on = {name for name in servers if f"server:{name}" not in off}
+    return noted({name: checked(state.tools) for name, state in states.items()}, on)
 
 
 def _count_on(servers: dict[str, ServerSpec], off: set[str], tools_by: dict[str, list[SeenTool]]) -> int:
@@ -503,9 +518,9 @@ def _entry(server: str, seen: SeenTool, via: str) -> TrustEntry:
 
 
 def _status(spec: ServerSpec, state: ServerState) -> str:
+    text = status_word(spec.transport, state.status)
     if state.status == "not_started":
-        return "not started — zygos serve starts it" if spec.transport == "stdio" else "not contacted yet"
-    text = state.status.replace("_", " ")
+        return text
     if state.status_at is not None:
         text += f" (as of {datetime.fromtimestamp(state.status_at).strftime('%Y-%m-%d %H:%M')})"
     if state.status == "stopped" and state.exit_code is not None:
