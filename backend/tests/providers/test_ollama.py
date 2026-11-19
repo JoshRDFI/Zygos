@@ -112,11 +112,24 @@ async def test_parses_tool_calls_with_synthesized_ids():
             {"function": {"name": "read_file", "arguments": {"path": "b.txt"}}}]}})
 
     result = await _make(make_client(handler)).generate(_tools_request())
-    assert result.tool_calls == (
-        ToolInvocation(id="call_0", name="read_file", arguments={"path": "a.txt"}),
-        ToolInvocation(id="call_1", name="read_file", arguments={"path": "b.txt"}),
-    )
+    assert [(t.name, t.arguments) for t in result.tool_calls] == [
+        ("read_file", {"path": "a.txt"}), ("read_file", {"path": "b.txt"})]
+    ids = [t.id for t in result.tool_calls]
+    assert all(i.startswith("call_") for i in ids) and len(set(ids)) == 2
     assert result.finish_reason == "tool_calls"
+
+
+async def test_tool_call_ids_are_unique_across_responses():
+    # The agent loop calls generate once per step; the ids name calls across the
+    # whole turn (chat cards, pending prompts), so they must not repeat per response.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"message": {"content": "", "tool_calls": [
+            {"function": {"name": "read_file", "arguments": {"path": "a.txt"}}}]}})
+
+    provider = _make(make_client(handler))
+    first = await provider.generate(_tools_request())
+    second = await provider.generate(_tools_request())
+    assert first.tool_calls[0].id != second.tool_calls[0].id
 
 
 async def test_text_only_response_unchanged():

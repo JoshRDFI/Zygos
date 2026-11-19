@@ -4,6 +4,7 @@ Stability: Experimental.
 """
 
 import json
+import uuid
 from typing import AsyncIterator
 
 import httpx
@@ -79,7 +80,7 @@ class OllamaProvider:
             text = message.get("content") or ""
             thinking = message.get("thinking") or None
             tool_calls = tuple(
-                ToolInvocation(id=f"call_{i}", name=tc["function"]["name"],
+                ToolInvocation(id=f"call_{uuid.uuid4().hex[:12]}_{i}", name=tc["function"]["name"],
                                arguments=tc["function"].get("arguments", {}))
                 for i, tc in enumerate(message.get("tool_calls") or [])
             )
