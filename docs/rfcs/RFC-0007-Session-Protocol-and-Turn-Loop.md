@@ -267,7 +267,10 @@ denies any pending permission prompt.
     `claims` (the server's own annotations), `can_trust` (`false` with a
     `rule_note` when a config `ask` rule forces the prompt), and `changed`
     (`{old_description, new_description, old_schema, new_schema}`) for a tool that
-    changed since it was trusted.
+    changed since it was trusted. It also carries `fingerprint`, a hash of the
+    tool's name, description and schema as shown (not a secret): trust from the
+    prompt is saved only while the tool still matches it, otherwise the outcome is
+    `trust_failed`.
   - `tools:permission_response` takes an optional `trust: "tool" | "server"`. It
     counts only with `decision: "allow"` and only when the prompt offered
     `can_trust`; any other value is dropped. An answer for a `call_id` that is not
@@ -280,7 +283,12 @@ denies any pending permission prompt.
     `timed_out`, `cancelled` or `trust_failed` (the call ran but trust was not
     saved: "couldn't save trust — it will ask again").
   - When the session is speaking, the server says once per prompt "I need your OK
-    on screen to use <name>." Nothing listens for a spoken yes.
+    on screen to use <name>." Nothing listens for a spoken yes. A session plays one
+    spoken line at a time, so two prompts, or a prompt during the turn's own speech,
+    are spoken one after the other.
+  - A provider's `call_id` is unique within a turn; a client should still treat a
+    `call` or `permission` for an id whose card has finished (or whose prompt was
+    answered) as a new card.
 
 - **Wiring.** Bootstrap builds `ToolService` and exposes it on `RuntimeAssembly`.
   A new **`ToolsConfig`** (§9) declares which in-tree tools are enabled and
@@ -359,6 +367,17 @@ added later without a wire change, but building real auth (token issuance, TLS,
 secret provisioning via RFC-0004) is **deferred to the Deployment/Installer RFC**,
 which owns droplet exposure. Binding to a non-loopback interface without that work
 is out of scope and should be gated behind explicit configuration when it lands.
+
+*Additive, with RFC-0015 phase 1b.* **Origin check.** A browser page on another
+site can reach a loopback server, so state-changing requests carry an Origin
+check. A REST write (`POST`, `PUT`, `PATCH`, `DELETE`) whose `Origin` header is
+not allowed is refused with `403 {"detail": "origin not allowed"}`, and a
+WebSocket upgrade with such an `Origin` is closed with code `4403` (before the
+session lookup, which closes an unknown session with `4404`). An origin is allowed
+when its host is loopback (`localhost`, `127.0.0.1` or `[::1]`, over `http` or
+`https`, any port) or when it is listed in `server.allowed_origins`. A request
+without an `Origin` header (curl, the CLI, non-browser clients) is allowed. `GET`
+requests are not checked.
 
 ## Alternatives Considered
 
