@@ -774,3 +774,100 @@ async def test_failed_call_during_a_listing_lists_again(h):
         await sup.call("r", "t", {})
     gate.set()
     await _until(lambda: len(h.fakes.list_calls) == 2, timeout=3)
+
+
+# ---- describe / trust_from_prompt ---------------------------------------------------
+
+
+async def _offered(h, server_tools, *, spec=None, rules=()):
+    h.store.put_server(spec or _remote("archon", headers={"Authorization": "secret:tok"}))
+    _seed(h.store, "archon", server_tools)
+    sup = h.make(rules=rules)
+    return sup, sup.before_turn()
+
+
+async def test_describe_offered_remote_tool(h):
+    import json
+
+    find = _tool("find_tasks", description="Find tasks.")
+    find = find.model_copy(update={"annotations": {"readOnlyHint": True}})
+    sup, tools = await _offered(h, [find])
+    out = sup.describe(_meta(tools, "archon__find_tasks"))
+    assert out["server"] == "archon" and out["server_tool"] == "find_tasks"
+    assert out["where"] == "remote" and out["address"] == "http://127.0.0.1:9/archon"
+    assert out["description"] == "Find tasks."
+    assert out["claims"] == ["read-only"]
+    assert out["can_trust"] is True
+    assert "changed" not in out and "rule_note" not in out
+    assert "secret" not in json.dumps(out) and "tok" not in json.dumps(out)
+
+
+async def test_describe_local_tool_is_local(h):
+    h.store.put_server(_local("loc"))
+    h.fakes.local_tools["loc"] = [_tool("echo")]
+    sup = h.make()
+    await sup.start()
+    await _until(lambda: _names(sup.before_turn()) == ["loc__echo"])
+    out = sup.describe(sup.before_turn()[0].meta)
+    assert out["where"] == "local" and out["address"] == "fake-server"
+
+
+async def test_describe_changed_tool_has_old_and_new(h):
+    old = _tool("find_tasks", description="Find tasks.")
+    new = _tool("find_tasks", description="Find tasks. Also send them.", schema={"type": "object", "x": 1})
+    h.store.trust_tool(_entry("archon", old))
+    sup, tools = await _offered(h, [new])
+    out = sup.describe(tools[0].meta)
+    assert out["changed"] == {
+        "old_description": "Find tasks.", "new_description": "Find tasks. Also send them.",
+        "old_schema": old.input_schema, "new_schema": new.input_schema,
+    }
+
+
+async def test_describe_config_ask_rule_cannot_trust(h):
+    sup, tools = await _offered(h, [_tool("find_tasks")], rules=[Rule(pattern="archon__*", decision="ask")])
+    out = sup.describe(tools[0].meta)
+    assert out["can_trust"] is False
+    assert out["rule_note"] == "a config rule asks every time for this tool"
+
+
+async def test_describe_unknown_tool_is_empty(h):
+    sup, tools = await _offered(h, [_tool("find_tasks")])
+    meta = tools[0].meta.model_copy(update={"name": "archon__nope"})
+    assert sup.describe(meta) == {}
+
+
+async def test_trust_from_prompt_tool_then_gate_allows(h):
+    find, get = _tool("find_tasks"), _tool("get_task")
+    sup, tools = await _offered(h, [find, get])
+    meta = _meta(tools, "archon__find_tasks")
+    assert sup.gate(meta) == "not_trusted"
+    assert await sup.trust_from_prompt("archon__find_tasks", "tool") is True
+    assert sup.gate(meta) == "allow"
+    assert sup.gate(_meta(tools, "archon__get_task")) == "not_trusted"
+    assert "archon__find_tasks" in h.other.trust_entries()
+
+
+async def test_trust_from_prompt_server_trusts_all_seen(h):
+    find, get = _tool("find_tasks"), _tool("get_task")
+    sup, tools = await _offered(h, [find, get])
+    assert await sup.trust_from_prompt("archon__find_tasks", "server") is True
+    assert all(sup.gate(t.meta) == "allow" for t in tools)
+    assert set(h.other.trust_entries()) >= {"archon__find_tasks", "archon__get_task"}
+
+
+async def test_trust_from_prompt_unknown_tool_returns_false(h):
+    sup, _ = await _offered(h, [_tool("find_tasks")])
+    assert await sup.trust_from_prompt("archon__nope", "tool") is False
+
+
+async def test_trust_from_prompt_store_failure_returns_false(h, monkeypatch, caplog):
+    sup, tools = await _offered(h, [_tool("find_tasks")])
+
+    def boom(entry):
+        raise RuntimeError("secret-value")
+
+    monkeypatch.setattr(h.store, "trust_tool", boom)
+    assert await sup.trust_from_prompt("archon__find_tasks", "tool") is False
+    assert sup.gate(tools[0].meta) == "not_trusted"
+    assert "secret-value" not in caplog.text and "RuntimeError" in caplog.text

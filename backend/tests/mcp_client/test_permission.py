@@ -51,3 +51,27 @@ def test_trust_state_changed():
 
 def test_seen_fingerprint_uses_server_tool_name():
     assert seen_fingerprint(SEEN) == fingerprint("find_tasks", "Find tasks.", {"type": "object"})
+
+
+def test_rule_forces_ask_true_for_ask_rule():
+    from zygos.mcp.permission import rule_forces_ask
+
+    assert rule_forces_ask(TOOL, [Rule(pattern="archon__*", decision="ask")]) is True
+    assert rule_forces_ask(TOOL, [Rule(pattern="other__*", decision="ask")]) is False
+    assert rule_forces_ask(TOOL, []) is False
+
+
+def test_rule_forces_ask_false_when_deny_also_matches():
+    from zygos.mcp.permission import rule_forces_ask
+
+    rules = [Rule(pattern="*", decision="ask"), Rule(pattern=TOOL, decision="deny")]
+    assert rule_forces_ask(TOOL, rules) is False
+
+
+def test_claims_maps_known_hints():
+    from zygos.mcp.permission import claims
+
+    assert claims({"readOnlyHint": True, "title": "x", "destructiveHint": False}) == ["read-only"]
+    every = {"openWorldHint": True, "idempotentHint": True, "destructiveHint": True, "readOnlyHint": True}
+    assert claims(every) == ["read-only", "destructive", "idempotent", "reaches outside this machine"]
+    assert claims({}) == []

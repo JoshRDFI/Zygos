@@ -32,9 +32,11 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
-from zygos.mcp.permission import McpDecision, mcp_decision, trust_state
+from zygos.mcp.config import address
+from zygos.mcp.manage import trust_all, trust_one
+from zygos.mcp.permission import McpDecision, claims, mcp_decision, rule_forces_ask, trust_state
 from zygos.mcp.results import McpToolError, McpUnavailable
 from zygos.mcp.offered import build_offered, checked, with_clashes
 from zygos.mcp.store import McpStoreUnavailable, ServerState, SqliteMcpStore, TrustEntry
@@ -207,6 +209,56 @@ class McpSupervisor:
             and trust_state(meta.name, tool.seen, self._trust) == "trusted"
         )
         return mcp_decision(meta.name, self._rules, trusted)
+
+    def describe(self, meta: ToolMeta) -> dict[str, Any]:
+        """What a permission prompt shows about an offered tool; ``{}`` if not offered.
+        Never includes header or env values."""
+        tool = self._offered.get(meta.name)
+        if tool is None:
+            return {}
+        spec, seen = tool.spec, tool.seen
+        forced = rule_forces_ask(meta.name, self._rules)
+        out: dict[str, Any] = {
+            "server": spec.name,
+            "server_tool": seen.name,
+            "where": "local" if spec.transport == "stdio" else "remote",
+            "address": address(spec),
+            "description": seen.description,
+            "claims": claims(seen.annotations),
+            "can_trust": not forced,
+        }
+        if forced:
+            out["rule_note"] = "a config rule asks every time for this tool"
+        entry = self._trust.get(meta.name)
+        if entry is not None and trust_state(meta.name, seen, self._trust) == "changed":
+            out["changed"] = {
+                "old_description": entry.description,
+                "new_description": seen.description,
+                "old_schema": entry.input_schema,
+                "new_schema": seen.input_schema,
+            }
+        return out
+
+    async def trust_from_prompt(self, tool: str, scope: Literal["tool", "server"]) -> bool:
+        """Trust one offered tool, or every tool its server currently shows. Takes effect
+        at once (no reload), so the same turn can go on. False if nothing was recorded."""
+        offered = self._offered.get(tool)
+        if offered is None:
+            return False
+        server = offered.spec.name
+        try:
+            async with self._write_lock:
+                if scope == "tool":
+                    entries = [await asyncio.to_thread(trust_one, self._store, server, offered.seen)]
+                else:
+                    running = self._servers.get(server)
+                    seen = running.state.tools if running is not None else [offered.seen]
+                    entries = await asyncio.to_thread(trust_all, self._store, server, seen)
+        except Exception as exc:  # noqa: BLE001 - the prompt falls back to "not trusted"
+            logger.warning("mcp server %s: could not record trust (%s)", server, type(exc).__name__)
+            return False
+        self._trust.update({e.tool: e for e in entries})
+        return True
 
     async def call(self, server: str, tool: str, args: dict[str, Any]) -> Any:
         entry = self._servers.get(server)

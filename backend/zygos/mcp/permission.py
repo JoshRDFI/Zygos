@@ -10,14 +10,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from fnmatch import fnmatch
-from typing import Literal
+from typing import Any, Literal
 
 from zygos.mcp.store import TrustEntry, fingerprint
 from zygos.mcp.types import SeenTool
 from zygos.tools.permissions import Rule
 from zygos.tools.service import McpDecision
 
-__all__ = ["McpDecision", "mcp_decision", "seen_fingerprint", "trust_state"]
+__all__ = ["McpDecision", "claims", "mcp_decision", "rule_forces_ask", "seen_fingerprint", "trust_state"]
 
 TrustState = Literal["trusted", "not_trusted", "changed"]
 
@@ -29,6 +29,27 @@ def mcp_decision(tool_name: str, rules: Sequence[Rule], trusted: bool) -> McpDec
     if "ask" in matching:
         return "not_trusted"  # 1b: the prompt
     return "allow" if trusted else "not_trusted"
+
+
+def rule_forces_ask(tool_name: str, rules: Sequence[Rule]) -> bool:
+    """True when an ``ask`` rule matches the tool and no ``deny`` rule does: trusting it
+    would change nothing, since the rule asks every time."""
+    matching = {rule.decision for rule in rules if fnmatch(tool_name, rule.pattern)}
+    return "ask" in matching and "deny" not in matching
+
+
+_CLAIMS = (
+    ("readOnlyHint", "read-only"),
+    ("destructiveHint", "destructive"),
+    ("idempotentHint", "idempotent"),
+    ("openWorldHint", "reaches outside this machine"),
+)
+
+
+def claims(annotations: Mapping[str, Any]) -> list[str]:
+    """What the server says about a tool, in plain words. Hints are the server's own
+    claims, never verified."""
+    return [word for key, word in _CLAIMS if annotations.get(key) is True]
 
 
 def seen_fingerprint(seen: SeenTool) -> str:
