@@ -24,20 +24,23 @@ drains the transcription) with `8735b78` (a blank transcript no longer starts a 
 
 ## Why every safety net missed it
 
-- **Unit tests** used a fresh fake STT per test, so state could never leak between
-  sessions. The bug needed a *shared* sidecar plus a disconnect mid-utterance.
+- **Tests** covered disconnect cleanup of the audio tasks, but none checked that the
+  STT request itself was cancelled, and none crossed a session boundary on a shared
+  sidecar. That combination was the only way to see the bug.
 - **Reviews** read the teardown as complete: cancelling the tasks looked like cleanup.
   Nothing showed that the sidecar held per-utterance state outside those tasks.
 - **Manual testing** mostly used one session per backend start, which never triggers it.
 - A plausible wrong theory (the audio worklet failing to load from a data URI) was
-  chased first; it was disproved by running the real code path headless.
+  chased first; it was disproved by running the real code path in a headless browser.
 
 ## The guard that now catches it
 
-- A regression test drives two sessions against one shared fake sidecar: disconnect
-  mid-utterance, reconnect, speak again, and assert the second turn gets its own
-  transcript. It fails with the cancel-and-drain removed.
-- A headless browser harness with a fake microphone (Playwright with Chromium's
-  fake-media flags and a WAV file) reproduces live voice without a person.
+- `backend/tests/api/test_voice_ws.py::test_disconnect_mid_utterance_cancels_and_drains_transcription`
+  disconnects mid-utterance and asserts the in-flight transcription is cancelled and
+  drained.
+- The live check that found it used a headless browser with a fake microphone
+  (Playwright with Chromium's fake-media flags and a WAV file). It is not part of the
+  test suite.
 - Lesson: any resource shared across sessions (sidecars, pools, caches) needs a
-  teardown test that crosses a session boundary.
+  teardown test that proves its per-request state is released, ideally across a
+  session boundary.
