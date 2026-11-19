@@ -101,6 +101,26 @@ out to be wrong, write a new RFC that supersedes it.
 5. **One logical change per PR.** Combining an RFC with its implementation, or
    bundling unrelated fixes, makes review harder and history harder to read.
 
+## Review and Testing Rules
+
+These apply to human and AI contributors alike.
+
+- **Check the result, not the report.** A "done" or "approved" claim is backed by a
+  test command actually run, quoted with its collected/passed counts. Read
+  `git diff --stat` before committing: files outside the change stay untouched, and
+  no test file loses tests. The pre-commit hook enforces the second (README,
+  "Development").
+- **A guard only guards if the regression fails it.** For each new safety test (deny
+  paths, secret-free output, permission and origin checks), break the guarded line,
+  watch the test fail, and restore it exactly. A guard test that can't fail is a
+  defect.
+- **No planning leftovers.** Code, comments, docstrings, test names and docs must make
+  sense to a reader with no plan or session in hand: no "Task 3", "decision 7",
+  "spec §A2", "this PR", "used to / no longer". Citing a committed RFC or ADR is fine.
+  The pre-commit hook warns about the common forms.
+- **Hard bugs get a postmortem** in [`docs/postmortems/`](docs/postmortems/README.md):
+  when a bug was subtle, systemic and costly to rediscover.
+
 ## Proposing Ideas
 
 If you have an idea but are not yet ready to write an RFC, open an issue describing
