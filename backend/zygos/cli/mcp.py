@@ -35,11 +35,12 @@ from zygos.mcp.config import (
     McpConfigError, check_server_names, describe, parse_servers, status_word, validation_reason,
     zygos_tool_name,
 )
+from zygos.mcp import manage
 from zygos.mcp.offered import checked, noted
-from zygos.mcp.permission import seen_fingerprint, trust_state
+from zygos.mcp.permission import trust_state
 from zygos.mcp.results import McpToolError, McpUnavailable
 from zygos.mcp.store import McpStoreUnavailable, ServerState, SqliteMcpStore, TrustEntry
-from zygos.mcp.supervisor import NO_MCP, SWITCHED_OFF, TOOL_COUNT_WARNING
+from zygos.mcp.supervisor import NO_MCP, TOOL_COUNT_WARNING
 from zygos.mcp.types import ParsedServer, SeenTool, ServerSpec
 from zygos.secrets import SecretStoreError, build_secret_store
 
@@ -422,12 +423,8 @@ class _Cli:
         spec, tool = found
         word = "on" if on else "off"
         if tool is None:
-            self.store.set_off("server", spec.name, not on)
-            state = self.store.state(spec.name)
-            if on and state.status == "stopped" and state.detail == SWITCHED_OFF:
-                # zygos serve stopped it for being off; it isn't any more
-                self.store.put_state(spec.name, state.model_copy(
-                    update={"status": "not_started", "detail": None, "status_at": self.clock()}))
+            # also clears the "switched off" stop zygos serve recorded, atomically
+            self.store.set_server_on(spec.name, on, now=self.clock())
             self.say(f"{spec.name} is {word}.")
             return 0
         zname = zygos_tool_name(spec.name, tool)
@@ -446,13 +443,11 @@ class _Cli:
         tools = self._seen(spec, tool)
         if tools is None:
             return 1
-        via = "tool" if tool is not None else "server"
-        entries = [_entry(spec.name, seen, via) for seen in tools]
         if tool is not None:
-            self.store.trust_tool(entries[0])
+            manage.trust_one(self.store, spec.name, tools[0])
             self.say(f"Trusted {spec.name}/{tool}.")
         else:
-            self.store.trust_server(spec.name, entries)
+            entries = manage.trust_all(self.store, spec.name, tools)
             self.say(f"Trusted the {len(entries)} tool{'s' if len(entries) != 1 else ''} {spec.name} has now.")
             self.say("Tools it adds later need trusting on their own.")
         return 0
@@ -507,14 +502,6 @@ def _handles(spec: ServerSpec) -> set[str]:
     return {f"mcp:{spec.name}:env:{n}" for n in spec.env_names} | {
         f"mcp:{spec.name}:header:{n}" for n in spec.header_names
     }
-
-
-def _entry(server: str, seen: SeenTool, via: str) -> TrustEntry:
-    """Pinned the way the supervisor's gate checks it: the server's own tool name."""
-    return TrustEntry(
-        server=server, tool=zygos_tool_name(server, seen.name), fingerprint=seen_fingerprint(seen),
-        description=seen.description, input_schema=seen.input_schema, via=via,  # type: ignore[arg-type]
-    )
 
 
 def _status(spec: ServerSpec, state: ServerState) -> str:

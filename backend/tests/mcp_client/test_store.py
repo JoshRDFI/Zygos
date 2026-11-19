@@ -294,3 +294,33 @@ def test_put_state_with_spec_skips_a_replaced_server(tmp_path):
     assert s.state("fs") == ServerState()
     s.put_state("fs", ServerState(status="running", detail="current"), spec=new)
     assert s.state("fs").detail == "current"
+
+
+def test_set_server_on_resets_switched_off_state_atomically(tmp_path):
+    from zygos.mcp.supervisor import SWITCHED_OFF
+
+    s = SqliteMcpStore(tmp_path / "p.db")
+    s.put_server(_spec("s"))
+    s.put_state("s", ServerState(status="stopped", detail=SWITCHED_OFF, status_at=1.0))
+    s.set_off("server", "s", True)
+    s.set_server_on("s", True, now=5.0)
+    assert "server:s" not in s.off()
+    st = s.state("s")
+    assert st.status == "not_started" and st.detail is None and st.status_at == 5.0
+
+
+def test_set_server_on_rolls_back_on_failure(tmp_path, monkeypatch):
+    from zygos.mcp.supervisor import SWITCHED_OFF
+
+    s = SqliteMcpStore(tmp_path / "p.db")
+    s.put_server(_spec("s"))
+    s.put_state("s", ServerState(status="stopped", detail=SWITCHED_OFF, status_at=1.0))
+    s.set_off("server", "s", True)
+
+    def boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(SqliteMcpStore, "_put_state_row", boom)
+    with pytest.raises(RuntimeError):
+        s.set_server_on("s", True, now=5.0)
+    assert "server:s" in s.off()

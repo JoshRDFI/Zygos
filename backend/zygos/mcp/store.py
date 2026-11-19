@@ -238,13 +238,17 @@ class SqliteMcpStore:
                     return
                 if stored != spec:
                     return
-            c.execute(
-                "INSERT INTO mcp_state(name, state) VALUES (?, ?) "
-                "ON CONFLICT(name) DO UPDATE SET state = excluded.state",
-                (name, state.model_dump_json()),
-            )
+            self._put_state_row(c, name, state)
 
         self._write(go)
+
+    @staticmethod
+    def _put_state_row(c: sqlite3.Connection, name: str, state: ServerState) -> None:
+        c.execute(
+            "INSERT INTO mcp_state(name, state) VALUES (?, ?) "
+            "ON CONFLICT(name) DO UPDATE SET state = excluded.state",
+            (name, state.model_dump_json()),
+        )
 
     @staticmethod
     def _put_trust(c: sqlite3.Connection, entry: TrustEntry) -> None:
@@ -296,3 +300,29 @@ class SqliteMcpStore:
             )
         else:
             self._write(lambda c: c.execute("DELETE FROM mcp_off WHERE key=?", (key,)))
+
+    def set_server_on(self, name: str, on: bool, *, now: float) -> None:
+        """Switch a server on or off in one transaction; switching on also clears the
+        "switched off" stop state that ``zygos serve`` recorded."""
+
+        from zygos.mcp.supervisor import SWITCHED_OFF  # supervisor imports this module
+
+        def go(c: sqlite3.Connection) -> None:
+            key = f"server:{name}"
+            if not on:
+                c.execute(
+                    "INSERT INTO mcp_off(key, server) VALUES (?, NULL) "
+                    "ON CONFLICT(key) DO UPDATE SET server = excluded.server",
+                    (key,),
+                )
+                return
+            c.execute("DELETE FROM mcp_off WHERE key=?", (key,))
+            row = c.execute("SELECT state FROM mcp_state WHERE name=?", (name,)).fetchone()
+            if row is None:
+                return
+            state = self._parse(ServerState, row[0], "mcp_state", name)
+            if state is not None and state.status == "stopped" and state.detail == SWITCHED_OFF:
+                self._put_state_row(c, name, state.model_copy(
+                    update={"status": "not_started", "detail": None, "status_at": now}))
+
+        self._write(go)
