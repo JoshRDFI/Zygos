@@ -25,6 +25,8 @@ from zygos.config.loader import load_config
 from zygos.config.schema import ZygosConfig
 from zygos.errors import ConfigError
 from zygos.hardware.probe import HardwareProbe
+from zygos.mcp.store import SqliteMcpStore
+from zygos.mcp.supervisor import McpSupervisor
 from zygos.memory.retrieve import (
     Fts5RelevanceIndex, HybridRelevanceIndex, MemoryRetriever,
     RelevanceIndex, RetrievalWeights, VectorRelevanceIndex,
@@ -93,6 +95,7 @@ class RuntimeAssembly:
     address_sources: Mapping[str, AddressSource]
     addresses_at_start: Mapping[str, str]
     secrets: SecretsHandle
+    mcp: McpSupervisor
     residency: ResidencyManager | None = None
 
     def new_context(self, *, session_id: str | None = None) -> ExecutionContext:
@@ -103,6 +106,8 @@ class RuntimeAssembly:
         return self._router.snapshot()
 
     async def aclose(self) -> None:
+        # MCP first: stopping local servers and finishing its state writes needs the rest.
+        await self.mcp.aclose()
         if self.residency is not None:
             # A preload still running would fail on the closed client below.
             self.residency.cancel_preload()
@@ -343,6 +348,13 @@ def build_runtime(
     tool_service = ToolService(
         tool_registry, policy=PermissionPolicy(rules=config.tools.permission_rules)
     )
+    # Built after the tool service, then bound to it (the supervisor needs the service).
+    secrets = build_secret_store(config)
+    mcp = McpSupervisor(
+        SqliteMcpStore(Path(config.personalization.db_path)), secrets, tool_service,
+        rules=config.tools.permission_rules, new_context=lambda: root_context(bus),
+    )
+    tool_service.bind_mcp_gate(mcp.gate)
     tool_loop_config = ToolLoopConfig(
         max_iterations=config.tools.max_iterations,
         default_tool_choice=config.tools.tool_choice,
@@ -390,7 +402,8 @@ def build_runtime(
         memory_service=memory_service,
         voice_service=voice_service,
         preferences=SqlitePreferencesStore(Path(config.personalization.db_path)),
-        secrets=build_secret_store(config),
+        secrets=secrets,
+        mcp=mcp,
         http_client=client,
         event_bus=bus,
         capability_registry=registry,

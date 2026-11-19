@@ -12,7 +12,7 @@ import asyncio
 from fastapi import APIRouter, Request
 
 from zygos.api.health import RuntimeHealth, build_runtime_health
-from zygos.runtime.manifest import Manifest, primary_route, runtime_manifest
+from zygos.runtime.manifest import Manifest, mcp_manifest, primary_route, runtime_manifest
 from zygos.thinking.support import check_selected
 
 router = APIRouter()
@@ -25,7 +25,9 @@ async def get_runtime(request: Request) -> Manifest:
     await check_selected(runtime.thinking_support, lambda: primary_route(runtime.config))
     # The keychain probe can block for seconds: run it off the event loop.
     secrets_status = await asyncio.to_thread(runtime.secrets.status)
-    return runtime_manifest(runtime, secrets_status=secrets_status)
+    # The MCP record read can wait on a writer: also off the loop.
+    mcp_servers = await asyncio.to_thread(mcp_manifest, runtime.mcp.store)
+    return runtime_manifest(runtime, secrets_status=secrets_status, mcp_servers=mcp_servers)
 
 
 @router.get("/runtime/health", response_model=RuntimeHealth)

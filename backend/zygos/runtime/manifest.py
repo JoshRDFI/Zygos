@@ -9,17 +9,20 @@ from __future__ import annotations
 import platform
 import re
 from importlib.metadata import PackageNotFoundError, version
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict
 
 from zygos.hardware.probe import HardwareSnapshot
+from zygos.mcp.config import address, zygos_tool_name
+from zygos.mcp.permission import trust_state
 from zygos.runtime.capabilities import Capability, CapabilityBinding
 from zygos.services.router import RouteChoice
 from zygos.thinking.support import ThinkingSupport
 from zygos.voice.contract import SttHealth, TtsHealth
 
 if TYPE_CHECKING:
+    from zygos.mcp.store import SqliteMcpStore
     from zygos.runtime.bootstrap import RuntimeAssembly
     from zygos.secrets.resolve import SecretsStatus
 
@@ -64,6 +67,29 @@ class SecretsManifest(BaseModel):
     available: bool
 
 
+class McpToolManifest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str           # the Zygos tool name
+    server_tool: str    # the server's own name for it
+    enabled: bool
+    trust: Literal["trusted", "not_trusted", "changed"]
+
+
+class McpServerManifest(BaseModel):
+    """One MCP server as stored. No secret names or values, nothing from ``extra``."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    transport: str
+    address: str        # the URL, or a local server's command line
+    enabled: bool
+    status: str         # the last status recorded
+    era: str | None
+    tools: tuple[McpToolManifest, ...]
+
+
 class Manifest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -78,6 +104,7 @@ class Manifest(BaseModel):
     thinking: ThinkingSupport | None = None   # primary route, from the checker cache
     hardware: HardwareSnapshot | None = None   # the last scan; the manifest never scans
     secrets: SecretsManifest | None = None
+    mcp_servers: tuple[McpServerManifest, ...] = ()
 
 
 def _package_version() -> str:
@@ -94,11 +121,37 @@ def primary_route(config) -> RouteChoice:
                        model=config.providers.primary.model)
 
 
+def mcp_manifest(store: "SqliteMcpStore") -> tuple[McpServerManifest, ...]:
+    """MCP servers and their last-seen tools with on/off and trust, read from the record."""
+    specs = store.servers()
+    if not specs:
+        return ()
+    off = store.off()
+    trust = store.trust_entries()
+    out = []
+    for name in sorted(specs):
+        spec, state = specs[name], store.state(name)
+        tools = []
+        for seen in state.tools:
+            tool = zygos_tool_name(name, seen.name)
+            tools.append(McpToolManifest(
+                name=tool, server_tool=seen.name, enabled=f"tool:{tool}" not in off,
+                trust=trust_state(tool, seen, trust),
+            ))
+        out.append(McpServerManifest(
+            name=name, transport=spec.transport, address=address(spec),
+            enabled=f"server:{name}" not in off, status=state.status, era=state.era,
+            tools=tuple(tools),
+        ))
+    return tuple(out)
+
+
 def runtime_manifest(
-    runtime: "RuntimeAssembly", *, secrets_status: "SecretsStatus | None" = None
+    runtime: "RuntimeAssembly", *, secrets_status: "SecretsStatus | None" = None,
+    mcp_servers: tuple[McpServerManifest, ...] | None = None,
 ) -> Manifest:
-    """``secrets_status``: pass one computed off the event loop (the keychain probe
-    can block); by default it is read here."""
+    """``secrets_status`` / ``mcp_servers``: pass ones computed off the event loop (the
+    keychain probe and the record read can block); by default they are read here."""
     config = runtime.config
     snapshot = runtime.capability_registry.snapshot()
     plugins = tuple(
@@ -133,4 +186,5 @@ def runtime_manifest(
         secrets=SecretsManifest(
             backend=secrets.backend, reason=secrets.reason, available=secrets.available
         ),
+        mcp_servers=mcp_servers if mcp_servers is not None else mcp_manifest(runtime.mcp.store),
     )

@@ -5,10 +5,10 @@ the event bus (output is load-bearing, not observational; RFC-0002). Memory is
 guarded by presence and advisory (a retrieve failure degrades, never aborts).
 Reasoning-off streams tokens (with the speaker on, speaking them sentence by sentence
 as they arrive); reasoning-on constructs a fresh ReasoningService
-per turn and delivers the answer at turn.end. Tools-present (deps.tools non-empty)
+per turn and delivers the answer at turn.end. Tools-present (this turn's tool set non-empty)
 wins over both: it drives the agentic loop (RFC-0008), emitting live `tools:call`/
-`tools:result` frames and delivering the answer whole at turn.end (no chat:token
-frames — the no-synthetic-tokens rule).
+`tools:result` frames (with ``server`` for an MCP tool) and delivering the answer whole
+at turn.end (no chat:token frames — the no-synthetic-tokens rule).
 
 Stability: Experimental.
 """
@@ -65,6 +65,9 @@ class TurnDeps:
     new_id: Callable[[], str]
     tool_service: ToolService | None = None
     tools: tuple[Tool, ...] = ()
+    # The tools for one turn (built-ins + the MCP tools offered now); read once per turn,
+    # inside its loop. None: ``tools``.
+    tools_for_turn: Callable[[], tuple[Tool, ...]] | None = None
     tool_loop_config: ToolLoopConfig | None = None
     voice_service: "VoiceService | None" = None
     voice_gate: "VoiceGate | None" = None
@@ -140,6 +143,17 @@ async def _emit_model_chosen(ctx: ExecutionContext, deps: TurnDeps, turn_id: str
                                    model=route.model, reason=reason), source="turn")
     except Exception:  # noqa: BLE001 - trace only
         logger.warning("model.chosen trace failed", exc_info=True)
+
+
+def _turn_tools(deps: TurnDeps) -> tuple[Tool, ...]:
+    """This turn's tools. A failure to work out the MCP part leaves the built-ins."""
+    if deps.tools_for_turn is None:
+        return deps.tools
+    try:
+        return deps.tools_for_turn()
+    except Exception:  # noqa: BLE001 - MCP is optional; the turn goes on without it
+        logger.warning("per-turn tool set failed; using the built-in tools", exc_info=True)
+        return deps.tools
 
 
 def _speaks_reply(session: Session, deps: TurnDeps) -> bool:
@@ -221,14 +235,18 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
                 logger.warning("memory retrieve failed; degrading to no context", exc_info=True)
                 context = ()
 
-        if deps.tools:
+        tools = _turn_tools(deps)
+        if tools:
             messages = build_messages(context, text, modality, prefs)
+            metas = [getattr(t, "meta", None) for t in tools]
+            servers = {m.name: m.server for m in metas if getattr(m, "server", None)}
 
             def _frame(event: ToolEvent) -> None:
+                server = {"server": servers[event.name]} if event.name in servers else {}
                 if isinstance(event, ToolCallStarted):
                     session.enqueue(Frame(channel=TOOLS, type="call", payload={
                         "call_id": event.call_id, "tool": event.name,
-                        "arguments": dict(event.arguments)}))
+                        "arguments": dict(event.arguments), **server}))
                 else:  # ToolCallFinished
                     r = event.result
                     payload = {"call_id": event.call_id, "tool": event.name, "ok": r.ok}
@@ -237,11 +255,11 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
                     else:
                         payload["error_code"] = r.error_code
                         payload["error_message"] = r.error_message
-                    session.enqueue(Frame(channel=TOOLS, type="result", payload=payload))
+                    session.enqueue(Frame(channel=TOOLS, type="result", payload={**payload, **server}))
 
             agent_result = await run_agentic_loop(
                 ctx, model_service=deps.model_service, tool_service=deps.tool_service,
-                tools=deps.tools, messages=messages, config=deps.tool_loop_config, observer=_frame,
+                tools=tools, messages=messages, config=deps.tool_loop_config, observer=_frame,
                 think=effective, thinking=recorder, **routing)
             final = agent_result.text
             end_extra = {"stop_reason": agent_result.stop_reason, "iterations": agent_result.iterations}

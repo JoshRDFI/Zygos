@@ -52,10 +52,17 @@ def check_server_names(new: list[str], existing: list[str]) -> list[str]:
     return problems
 
 
+def address(spec: ServerSpec) -> str:
+    """Where a server is: its URL, or for a local one its command line (args included;
+    never its env values)."""
+    if spec.transport == "stdio":
+        return " ".join(shlex.quote(p) for p in [spec.command or "", *spec.args])
+    return spec.url or ""
+
+
 def describe(spec: ServerSpec) -> str:
     if spec.transport == "stdio":
-        cmd = " ".join(shlex.quote(p) for p in [spec.command or "", *spec.args])
-        return f"This runs `{cmd}` on this machine as you"
+        return f"This runs `{address(spec)}` on this machine as you"
     suffix = " (deprecated transport)" if spec.transport == "sse" else ""
     return f"This connects to {spec.url}{suffix}"
 

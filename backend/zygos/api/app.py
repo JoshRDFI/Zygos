@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import logging
 import time
 import uuid
 from collections.abc import Callable
@@ -38,6 +39,17 @@ from zygos.runtime.bootstrap import (
     RuntimeAssembly,
 )
 
+logger = logging.getLogger("zygos.api.app")
+
+
+async def _start_mcp(runtime: RuntimeAssembly) -> None:
+    """Start MCP servers in the background. Never blocks or fails startup."""
+    try:
+        await runtime.mcp.start()
+    except Exception as exc:  # noqa: BLE001 - MCP is optional; the server starts without it
+        logger.warning("mcp supervisor could not start (%s); continuing without MCP",
+                       type(exc).__name__)
+
 
 def _advance(app: FastAPI, stage: str) -> None:
     app.state.runtime = dataclasses.replace(app.state.runtime, lifecycle_stage=stage)
@@ -58,6 +70,7 @@ async def _lifespan(app: FastAPI):
             Path(runtime.config.tools.workspace_root).mkdir(parents=True, exist_ok=True)
         if runtime.voice_service is not None:
             await runtime.voice_service.start(ctx)
+        await _start_mcp(runtime)
         _advance(app, ACCEPT_REQUESTS_STAGE)
         yield
     finally:
@@ -104,6 +117,7 @@ def create_app(
         new_id=lambda: uuid.uuid4().hex,
         tool_service=runtime.tool_service,
         tools=runtime.tools,
+        tools_for_turn=lambda: runtime.tools + runtime.mcp.before_turn(),
         tool_loop_config=runtime.tool_loop_config,
         voice_service=runtime.voice_service,
         voice_gate=voice_gate,

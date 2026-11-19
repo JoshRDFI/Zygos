@@ -152,6 +152,11 @@ class McpSupervisor:
         self._closed = False
 
     @property
+    def store(self) -> SqliteMcpStore:
+        """The record (for read-only views such as the manifest)."""
+        return self._store
+
+    @property
     def connectors(self) -> Connectors:
         if self._connectors is None:
             self._connectors = _default_connectors()
