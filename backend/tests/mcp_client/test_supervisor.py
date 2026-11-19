@@ -843,7 +843,7 @@ async def test_trust_from_prompt_tool_then_gate_allows(h):
     sup, tools = await _offered(h, [find, get])
     meta = _meta(tools, "archon__find_tasks")
     assert sup.gate(meta) == "not_trusted"
-    assert await sup.trust_from_prompt("archon__find_tasks", "tool") is True
+    assert await sup.trust_from_prompt("archon__find_tasks", "tool", sup.describe(meta)["fingerprint"]) is True
     assert sup.gate(meta) == "allow"
     assert sup.gate(_meta(tools, "archon__get_task")) == "not_trusted"
     assert "archon__find_tasks" in h.other.trust_entries()
@@ -852,14 +852,71 @@ async def test_trust_from_prompt_tool_then_gate_allows(h):
 async def test_trust_from_prompt_server_trusts_all_seen(h):
     find, get = _tool("find_tasks"), _tool("get_task")
     sup, tools = await _offered(h, [find, get])
-    assert await sup.trust_from_prompt("archon__find_tasks", "server") is True
+    fp = sup.describe(_meta(tools, "archon__find_tasks"))["fingerprint"]
+    assert await sup.trust_from_prompt("archon__find_tasks", "server", fp) is True
     assert all(sup.gate(t.meta) == "allow" for t in tools)
     assert set(h.other.trust_entries()) >= {"archon__find_tasks", "archon__get_task"}
 
 
 async def test_trust_from_prompt_unknown_tool_returns_false(h):
     sup, _ = await _offered(h, [_tool("find_tasks")])
-    assert await sup.trust_from_prompt("archon__nope", "tool") is False
+    before = h.other.trust_entries()
+    assert await sup.trust_from_prompt("archon__nope", "tool", seen_fingerprint(_tool("nope"))) is False
+    assert h.other.trust_entries() == before == {}
+
+
+async def test_describe_carries_the_fingerprint_shown(h):
+    find = _tool("find_tasks")
+    sup, tools = await _offered(h, [find])
+    assert sup.describe(tools[0].meta)["fingerprint"] == seen_fingerprint(find)
+
+
+async def test_describe_changed_ignores_trust_held_by_another_server(h):
+    old = _tool("find_tasks", description="Find tasks.")
+    new = _tool("find_tasks", description="Find tasks. Also send them.")
+    h.store.trust_tool(TrustEntry(
+        server="other", tool="archon__find_tasks", fingerprint=seen_fingerprint(old),
+        description=old.description, input_schema=old.input_schema, via="tool",
+    ))
+    sup, tools = await _offered(h, [new])
+    assert "changed" not in sup.describe(tools[0].meta)
+
+
+async def test_trust_from_prompt_server_scope_without_its_server_returns_false(h):
+    find = _tool("find_tasks")
+    sup, tools = await _offered(h, [find])
+    fp = sup.describe(tools[0].meta)["fingerprint"]
+    h.store.remove_server("archon")
+    sup._sync()  # the server is gone while the card is still open
+    assert await sup.trust_from_prompt("archon__find_tasks", "server", fp) is False
+    assert h.other.trust_entries() == {}
+
+
+async def test_trust_from_prompt_refuses_when_the_tool_changed_since_shown(h):
+    old = _tool("find_tasks", description="Find tasks.")
+    new = _tool("find_tasks", description="Find tasks. Also send them.")
+    sup, tools = await _offered(h, [old, _tool("get_task")])
+    shown = sup.describe(_meta(tools, "archon__find_tasks"))["fingerprint"]
+    # Another turn relists the server while the card is open.
+    sup._update(sup._servers["archon"], tools=[new, _tool("get_task")])
+    tools = sup.before_turn()
+    for scope in ("tool", "server"):
+        assert await sup.trust_from_prompt("archon__find_tasks", scope, shown) is False
+    assert h.other.trust_entries() == {}
+    assert sup.gate(_meta(tools, "archon__find_tasks")) == "not_trusted"
+    now = sup.describe(_meta(tools, "archon__find_tasks"))["fingerprint"]
+    assert await sup.trust_from_prompt("archon__find_tasks", "tool", now) is True
+
+
+async def test_trust_from_prompt_server_scope_refuses_when_running_copy_moved(h):
+    old = _tool("find_tasks", description="Find tasks.")
+    new = _tool("find_tasks", description="Find tasks. Also send them.")
+    sup, tools = await _offered(h, [old])
+    shown = sup.describe(tools[0].meta)["fingerprint"]
+    # The server relisted but no turn has rebuilt the offered set yet.
+    sup._update(sup._servers["archon"], tools=[new])
+    assert await sup.trust_from_prompt("archon__find_tasks", "server", shown) is False
+    assert h.other.trust_entries() == {}
 
 
 async def test_trust_from_prompt_store_failure_returns_false(h, monkeypatch, caplog):
@@ -869,6 +926,7 @@ async def test_trust_from_prompt_store_failure_returns_false(h, monkeypatch, cap
         raise RuntimeError("secret-value")
 
     monkeypatch.setattr(h.store, "trust_tool", boom)
-    assert await sup.trust_from_prompt("archon__find_tasks", "tool") is False
+    fp = sup.describe(tools[0].meta)["fingerprint"]
+    assert await sup.trust_from_prompt("archon__find_tasks", "tool", fp) is False
     assert sup.gate(tools[0].meta) == "not_trusted"
     assert "secret-value" not in caplog.text and "RuntimeError" in caplog.text

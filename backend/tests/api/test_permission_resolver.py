@@ -138,7 +138,7 @@ async def test_absent_session_id_denies():
 
 DETAILS = {"server": "archon", "server_tool": "find_tasks", "where": "remote",
            "address": "http://localhost:8051/mcp", "description": "Find tasks.",
-           "claims": ["read-only"], "can_trust": True}
+           "claims": ["read-only"], "can_trust": True, "fingerprint": "fp-shown"}
 
 
 def _mcp_req(call_id="c1", details=None):
@@ -163,8 +163,8 @@ class _Trust:
         self.ok = ok
         self.calls = []
 
-    async def __call__(self, tool, scope):
-        self.calls.append((tool, scope))
+    async def __call__(self, tool, scope, shown):
+        self.calls.append((tool, scope, shown))
         return self.ok
 
 
@@ -220,7 +220,7 @@ async def test_allow_with_trust_tool_calls_trust_and_reports():
     resolver = WebSocketPromptResolver(reg, timeout_s=1.0, trust=trust)
     _, decision = await _answer(resolver, session, PromptAnswer("allow", "tool"))
     assert decision == "allow"
-    assert trust.calls == [("archon__find_tasks", "tool")]
+    assert trust.calls == [("archon__find_tasks", "tool", "fp-shown")]
     assert _results(session)[0].payload == {"call_id": "c1", "outcome": "trusted_tool"}
 
 
@@ -231,8 +231,20 @@ async def test_allow_with_trust_server():
     resolver = WebSocketPromptResolver(reg, timeout_s=1.0, trust=trust)
     _, decision = await _answer(resolver, session, PromptAnswer("allow", "server"))
     assert decision == "allow"
-    assert trust.calls == [("archon__find_tasks", "server")]
+    assert trust.calls == [("archon__find_tasks", "server", "fp-shown")]
     assert _results(session)[0].payload["outcome"] == "trusted_server"
+
+
+@pytest.mark.asyncio
+async def test_trust_without_a_shown_fingerprint_passes_none():
+    reg, session = _connected()
+    trust = _Trust(False)
+    details = {k: v for k, v in DETAILS.items() if k != "fingerprint"}
+    resolver = WebSocketPromptResolver(reg, timeout_s=1.0, trust=trust)
+    _, decision = await _answer(resolver, session, PromptAnswer("allow", "tool"), req=_mcp_req(details=details))
+    assert decision == "allow"
+    assert trust.calls == [("archon__find_tasks", "tool", None)]
+    assert _results(session)[0].payload["outcome"] == "trust_failed"
 
 
 @pytest.mark.asyncio
@@ -240,7 +252,7 @@ async def test_trust_failure_still_allows():
     for trust in (_Trust(False), None):
         reg, session = _connected()
         if trust is None:
-            async def trust(tool, scope):  # a raising callback counts as a failed save
+            async def trust(tool, scope, shown):  # a raising callback counts as a failed save
                 raise RuntimeError("store busy")
         resolver = WebSocketPromptResolver(reg, timeout_s=1.0, trust=trust)
         _, decision = await _answer(resolver, session, PromptAnswer("allow", "tool"))
@@ -383,7 +395,7 @@ async def test_trust_write_is_bounded():
     # and the card says trust was not saved.
     reg, session = _connected()
 
-    async def never(tool, scope):
+    async def never(tool, scope, shown):
         await asyncio.Event().wait()
 
     resolver = WebSocketPromptResolver(reg, timeout_s=0.05, trust=never)

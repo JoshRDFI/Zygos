@@ -330,14 +330,14 @@ async def test_app_wires_describe_trust_and_announce(tmp_path):
     runtime = build_runtime(_config(tmp_path))
     real = runtime.mcp
     assert runtime.tool_service._mcp_describe == real.describe
-    trusted: list[tuple[str, str]] = []
+    trusted: list[tuple[str, str, str]] = []
 
     class Stub:
         def before_turn(self):
             return ()
 
-        async def trust_from_prompt(self, tool, scope):
-            trusted.append((tool, scope))
+        async def trust_from_prompt(self, tool, scope, shown):
+            trusted.append((tool, scope, shown))
             return True
 
         async def aclose(self) -> None:
@@ -346,8 +346,8 @@ async def test_app_wires_describe_trust_and_announce(tmp_path):
     app = create_app(dataclasses.replace(runtime, mcp=Stub()))
     try:
         resolver = runtime.tool_service._resolver
-        assert await resolver._trust("archon__find_tasks", "server") is True
-        assert trusted == [("archon__find_tasks", "server")]
+        assert await resolver._trust("archon__find_tasks", "server", "fp") is True
+        assert trusted == [("archon__find_tasks", "server", "fp")]
         # Announce starts a task and returns at once; silent without a voice service.
         session = app.state.registry.create()
         session.speak = True

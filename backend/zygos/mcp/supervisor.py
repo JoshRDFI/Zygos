@@ -36,7 +36,9 @@ from typing import Any, Literal, Protocol
 
 from zygos.mcp.config import address
 from zygos.mcp.manage import trust_all, trust_one
-from zygos.mcp.permission import McpDecision, claims, mcp_decision, rule_forces_ask, trust_state
+from zygos.mcp.permission import (
+    McpDecision, claims, mcp_decision, rule_forces_ask, seen_fingerprint, trust_state,
+)
 from zygos.mcp.results import McpToolError, McpUnavailable
 from zygos.mcp.offered import build_offered, checked, with_clashes
 from zygos.mcp.store import McpStoreUnavailable, ServerState, SqliteMcpStore, TrustEntry
@@ -226,11 +228,17 @@ class McpSupervisor:
             "description": seen.description,
             "claims": claims(seen.annotations),
             "can_trust": not forced,
+            # What trust from this prompt is pinned to: a hash of what the card shows.
+            "fingerprint": seen_fingerprint(seen),
         }
         if forced:
             out["rule_note"] = "a config rule asks every time for this tool"
         entry = self._trust.get(meta.name)
-        if entry is not None and trust_state(meta.name, seen, self._trust) == "changed":
+        if (
+            entry is not None
+            and entry.server == spec.name
+            and trust_state(meta.name, seen, self._trust) == "changed"
+        ):
             out["changed"] = {
                 "old_description": entry.description,
                 "new_description": seen.description,
@@ -239,20 +247,30 @@ class McpSupervisor:
             }
         return out
 
-    async def trust_from_prompt(self, tool: str, scope: Literal["tool", "server"]) -> bool:
+    async def trust_from_prompt(self, tool: str, scope: Literal["tool", "server"], shown: str | None) -> bool:
         """Trust one offered tool, or every tool its server currently shows. Takes effect
-        at once (no reload), so the same turn can go on. False if nothing was recorded."""
+        at once (no reload), so the same turn can go on. ``shown`` is the fingerprint the
+        prompt showed; nothing is trusted unless the tool is still exactly that. False if
+        nothing was recorded."""
         offered = self._offered.get(tool)
-        if offered is None:
+        if offered is None or not shown or seen_fingerprint(offered.seen) != shown:
             return False
         server = offered.spec.name
+        if scope == "tool":
+            seen = [offered.seen]
+        else:
+            running = self._servers.get(server)
+            if running is None:
+                return False
+            seen = list(running.state.tools)
+            current = next((t for t in seen if t.name == offered.seen.name), None)
+            if current is None or seen_fingerprint(current) != shown:
+                return False
         try:
             async with self._write_lock:
                 if scope == "tool":
-                    entries = [await asyncio.to_thread(trust_one, self._store, server, offered.seen)]
+                    entries = [await asyncio.to_thread(trust_one, self._store, server, seen[0])]
                 else:
-                    running = self._servers.get(server)
-                    seen = running.state.tools if running is not None else [offered.seen]
                     entries = await asyncio.to_thread(trust_all, self._store, server, seen)
         except Exception as exc:  # noqa: BLE001 - the prompt falls back to "not trusted"
             logger.warning("mcp server %s: could not record trust (%s)", server, type(exc).__name__)

@@ -227,7 +227,7 @@ async def test_trust_ignored_for_unknown_call_id():
     session.connected = True
     trusted = []
 
-    async def trust(tool, scope):
+    async def trust(tool, scope, shown):
         trusted.append((tool, scope))
         return True
 

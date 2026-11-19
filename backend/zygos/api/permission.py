@@ -46,7 +46,7 @@ class WebSocketPromptResolver:
         registry: SessionRegistry,
         timeout_s: float,
         *,
-        trust: Callable[[str, str], Awaitable[bool]] | None = None,
+        trust: Callable[[str, str, str | None], Awaitable[bool]] | None = None,
         announce: Callable[[Session, str], Any] | None = None,
     ) -> None:
         self._registry = registry
@@ -116,7 +116,10 @@ class WebSocketPromptResolver:
             return "allowed"
         try:
             # Bounded: a wedged store must not hold the call the user already allowed.
-            saved = await asyncio.wait_for(self._trust(req.tool, answer.trust),
+            # Trust is pinned to the tool as the prompt showed it.
+            shown = req.details.get("fingerprint")
+            saved = await asyncio.wait_for(self._trust(req.tool, answer.trust,
+                                                       shown if isinstance(shown, str) else None),
                                            timeout=min(10.0, self._timeout_s))
         except asyncio.TimeoutError:
             logger.warning("recording trust for %r timed out", req.tool)

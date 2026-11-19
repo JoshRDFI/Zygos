@@ -135,7 +135,7 @@ def create_app(
     # so it never delays the prompt; the resolver keeps the task alive.
     resolver = WebSocketPromptResolver(
         registry, runtime.config.server.prompt_timeout_s,
-        trust=lambda tool, scope: app.state.runtime.mcp.trust_from_prompt(tool, scope),
+        trust=lambda tool, scope, shown: app.state.runtime.mcp.trust_from_prompt(tool, scope, shown),
         announce=lambda s, text: asyncio.ensure_future(say(s, app.state.turn_deps, text)),
     )
     runtime.tool_service.bind_resolver(resolver)
