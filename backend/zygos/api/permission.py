@@ -63,7 +63,7 @@ class WebSocketPromptResolver:
         fut: asyncio.Future[PromptAnswer] = asyncio.get_running_loop().create_future()
         session.pending_permissions[req.call_id] = fut
         cancel_wait = asyncio.ensure_future(ctx.wait_cancelled())
-        outcome: Outcome = "cancelled"
+        outcome: Outcome = "denied"  # an unexpected error after the prompt refuses
         prompted = False
         try:
             # The tool's details may set can_trust; they never replace the prompt's own keys.
@@ -87,9 +87,11 @@ class WebSocketPromptResolver:
             # A cancelled or failed future, or anything that is not an answer (the
             # socket's teardown settles pending prompts this way), denies.
             if fut.cancelled() or fut.exception() is not None:
+                outcome = "cancelled"
                 return "deny"
             answer = fut.result()
             if not isinstance(answer, PromptAnswer):
+                outcome = "cancelled"
                 return "deny"
             if answer.decision != "allow":
                 outcome = "denied"
@@ -113,7 +115,12 @@ class WebSocketPromptResolver:
         if answer.trust is None or not req.details.get("can_trust") or self._trust is None:
             return "allowed"
         try:
-            saved = await self._trust(req.tool, answer.trust)
+            # Bounded: a wedged store must not hold the call the user already allowed.
+            saved = await asyncio.wait_for(self._trust(req.tool, answer.trust),
+                                           timeout=min(10.0, self._timeout_s))
+        except asyncio.TimeoutError:
+            logger.warning("recording trust for %r timed out", req.tool)
+            saved = False
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - the user said yes; the call still runs

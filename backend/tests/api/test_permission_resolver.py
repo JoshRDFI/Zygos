@@ -302,10 +302,12 @@ async def test_cancel_outcome_cancelled():
 
     # The awaiting task itself cancelled.
     reg, session = _connected()
+    resolver = WebSocketPromptResolver(reg, timeout_s=30.0)
     task = asyncio.create_task(resolver.resolve(_mcp_req(), _tctx(session)))
     await asyncio.sleep(0)
     task.cancel()
     assert await task == "deny"
+    assert _results(session)[0].payload == {"call_id": "c1", "outcome": "cancelled"}
 
 
 @pytest.mark.asyncio
@@ -373,3 +375,19 @@ async def test_announce_failure_does_not_break_prompt():
     _, decision = await _answer(resolver, session, PromptAnswer("allow", None))
     assert decision == "allow"
     assert _results(session)[0].payload["outcome"] == "allowed"
+
+
+@pytest.mark.asyncio
+async def test_trust_write_is_bounded():
+    # A wedged trust store must not hold the call: the user said yes, so it runs,
+    # and the card says trust was not saved.
+    reg, session = _connected()
+
+    async def never(tool, scope):
+        await asyncio.Event().wait()
+
+    resolver = WebSocketPromptResolver(reg, timeout_s=0.05, trust=never)
+    _, decision = await asyncio.wait_for(
+        _answer(resolver, session, PromptAnswer("allow", "tool")), 2.0)
+    assert decision == "allow"
+    assert _results(session)[0].payload["outcome"] == "trust_failed"

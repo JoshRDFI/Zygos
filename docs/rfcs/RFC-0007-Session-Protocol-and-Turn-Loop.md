@@ -272,6 +272,9 @@ denies any pending permission prompt.
     counts only with `decision: "allow"` and only when the prompt offered
     `can_trust`; any other value is dropped. An answer for a `call_id` that is not
     pending in that session is ignored and writes no trust.
+  - A prompt for an MCP fallback tool carries `call_id` `<call_id>:fb`, its own id,
+    so an answer meant for the primary's prompt cannot answer it. The tool call's
+    own `call`/`result` frames keep the original `call_id`.
   - `tools:permission.result` `{call_id, outcome}` closes every prompt sent, once.
     `outcome` is `allowed`, `trusted_tool`, `trusted_server`, `denied`,
     `timed_out`, `cancelled` or `trust_failed` (the call ran but trust was not

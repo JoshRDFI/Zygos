@@ -136,7 +136,7 @@ class ToolService:
             fb = self._registry.get(tool.meta.fallback)
             if fb is not None:
                 fb_call = call.model_copy(update={"tool": fb.meta.name})
-                denied = (await self._check_mcp(fb.meta, fb_call, ctx)
+                denied = (await self._check_mcp(fb.meta, fb_call, ctx, fallback=True)
                           if fb.meta.server is not None else None)
                 if denied is not None:
                     yield ToolChunk(kind="result", result=denied)
@@ -170,13 +170,16 @@ class ToolService:
         )
 
     async def _check_mcp(
-        self, meta: ToolMeta, call: ToolCall, ctx: ExecutionContext
+        self, meta: ToolMeta, call: ToolCall, ctx: ExecutionContext, *, fallback: bool = False
     ) -> ToolResult | None:
         """MCP tools: config deny -> denied, never asked; trusted -> allowed; otherwise
         the user is asked through the permission resolver, and anything but allow refuses.
 
         With nobody to ask (no page connected), the resolver denies at once, so the
         refusal names the CLI way to trust the tool.
+
+        A fallback keeps the call's id, but its prompt gets its own id, so an answer
+        meant for the primary's prompt can never answer the fallback's.
         """
         decision: McpDecision = "deny"
         if self._mcp_gate is None:
@@ -199,9 +202,10 @@ class ToolService:
             tctx = ToolContext(
                 exec=ctx.child(span_id=call.call_id), tool=meta.name, call_id=call.call_id
             )
+            prompt_id = f"{call.call_id}:fb" if fallback else call.call_id
             req = PermissionRequest(
                 tool=meta.name, args_summary=call.args,
-                run_id=ctx.run_id, call_id=call.call_id, details=details,
+                run_id=ctx.run_id, call_id=prompt_id, details=details,
             )
             if await self._resolver.resolve(req, tctx) == "allow":
                 return None
@@ -234,7 +238,7 @@ class ToolService:
         if fb is None:
             return result   # missing fallback: primary failure stands
         fb_call = call.model_copy(update={"tool": fb.meta.name})   # keep call_id for correlation
-        if fb.meta.server is not None and (denied := await self._check_mcp(fb.meta, fb_call, ctx)) is not None:
+        if fb.meta.server is not None and (denied := await self._check_mcp(fb.meta, fb_call, ctx, fallback=True)) is not None:
             return denied
         return await self._run_with_fallback(fb, fb_call, ctx, depth=1)   # one level only
 

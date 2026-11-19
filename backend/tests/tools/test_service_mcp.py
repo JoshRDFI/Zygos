@@ -233,3 +233,21 @@ async def test_describe_failure_still_asks_with_empty_details():
     svc2.register(FakeMcp())
     await svc2.execute(ToolCall(tool="archon__find_tasks"), _ctx())
     assert resolver2.requests[0].details == {}
+
+
+async def test_fallback_prompt_has_its_own_id():
+    resolver = Recording("allow")
+    mcp = FakeMcp()
+    svc = ToolService(resolver=resolver, mcp_gate=lambda meta: "not_trusted")
+    svc.register(FailsWithMcpFallback())
+    svc.register(mcp)
+    res = await svc.execute(ToolCall(tool="primary", args={"x": 1}, call_id="c1"), _ctx())
+    chunks = [c async for c in svc.execute_stream(ToolCall(tool="primary", call_id="c2"), _ctx())]
+    assert [r.call_id for r in resolver.requests] == ["c1:fb", "c2:fb"]
+    assert res.ok and res.call_id == "c1"
+    assert chunks[-1].result.call_id == "c2"
+
+    # An MCP tool asked directly keeps the call's own id.
+    resolver.requests.clear()
+    await svc.execute(ToolCall(tool="archon__find_tasks", call_id="c3"), _ctx())
+    assert [r.call_id for r in resolver.requests] == ["c3"]

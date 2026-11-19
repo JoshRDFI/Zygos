@@ -253,6 +253,66 @@ async def test_trust_ignored_for_unknown_call_id():
     assert trusted == [] and session.pending_permissions == {}
 
 
+@pytest.mark.asyncio
+async def test_late_answer_for_primary_does_not_answer_fallback_prompt():
+    # An allow meant for the primary's card, arriving after the fallback's prompt is
+    # out, must not authorize the fallback.
+    from pydantic import BaseModel
+
+    from zygos.api.permission import WebSocketPromptResolver
+    from zygos.tools import BaseTool, ToolCall, ToolMeta, ToolService
+
+    class _In(BaseModel):
+        x: int = 0
+
+    class Primary(BaseTool):
+        meta = ToolMeta(name="primary", description="d", input_model=_In, fallback="archon__find_tasks")
+
+        async def execute(self, input, ctx):
+            raise RuntimeError("primary broke")
+
+    class Mcp(BaseTool):
+        def __init__(self):
+            self.meta = ToolMeta(name="archon__find_tasks", description="d",
+                                 input_schema={"type": "object"}, server="archon",
+                                 server_tool="find_tasks", permission="ask")
+            self.calls = 0
+
+        async def execute(self, input, ctx):
+            self.calls += 1
+            return "ran"
+
+    bus = InProcessEventBus()
+    registry = SessionRegistry(new_context=lambda sid: root_context(bus, session_id=sid),
+                               clock=lambda: 0.0, new_id=lambda: "s1")
+    session = registry.create()
+    session.connected = True
+    mcp = Mcp()
+    svc = ToolService(resolver=WebSocketPromptResolver(registry, timeout_s=5.0),
+                      mcp_gate=lambda meta: "not_trusted")
+    svc.register(Primary())
+    svc.register(mcp)
+    task = asyncio.create_task(svc.execute(ToolCall(tool="primary", call_id="c1"), session.root))
+    for _ in range(100):
+        if session.pending_permissions:
+            break
+        await asyncio.sleep(0.01)
+    [prompt_id] = session.pending_permissions
+    prompt = session.outbound.get_nowait()
+    assert prompt.type == "permission" and prompt.payload["call_id"] == prompt_id
+    assert prompt_id.endswith(":fb") and prompt_id != "c1"
+
+    await _dispatch(session, None, Frame(channel=TOOLS, type="permission_response",
+                                         payload={"call_id": "c1", "decision": "allow"}))
+    await asyncio.sleep(0)
+    assert not task.done() and not session.pending_permissions[prompt_id].done()
+
+    await _dispatch(session, None, Frame(channel=TOOLS, type="permission_response",
+                                         payload={"call_id": prompt_id, "decision": "deny"}))
+    res = await asyncio.wait_for(task, 2.0)
+    assert res.ok is False and res.call_id == "c1" and mcp.calls == 0
+
+
 class _RecordingWS:
     """Fake websocket that records send_text/send_bytes calls in FIFO order."""
 
