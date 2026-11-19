@@ -20,6 +20,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from zygos.api.audio import cancel_audio_turn, end_audio_turn, feed_audio, start_audio_turn
 from zygos.api.duck import arm_duck, release_duck, stop_speech
 from zygos.api.frames import AUDIO_TAG_IN, CHAT, CONTROL, TOOLS, Frame, decode, encode
+from zygos.api.origin import log_refused, origin_allowed
 from zygos.api.permission import PromptAnswer
 from zygos.api.session import Session
 from zygos.api.turn import TurnDeps, run_turn
@@ -126,6 +127,11 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
     registry = websocket.app.state.registry
     deps = websocket.app.state.turn_deps
     await websocket.accept()
+    origin = websocket.headers.get("origin")
+    if not origin_allowed(origin, getattr(websocket.app.state, "allowed_origins", ())):
+        log_refused(origin or "")
+        await websocket.close(code=4403)
+        return
     session = registry.get(session_id)
     if session is None:
         await websocket.close(code=4404)

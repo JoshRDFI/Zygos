@@ -31,6 +31,9 @@ providers:
 server:
   host: 127.0.0.1             # loopback only; change deliberately to expose it
   port: 8000
+  # Pages served from this machine always work. Add the address of any other page
+  # (e.g. behind a reverse proxy) that may change settings or chat:
+  # allowed_origins: []        # e.g. ["https://zygos.example"]
 
 # Relative data paths (memory.db_path, personalization.db_path, tools.workspace_root,
 # models.profiles_dir, voice.stt.download_root, voice.tts.download_root, and

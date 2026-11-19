@@ -202,6 +202,7 @@ class _ImmediateDisconnectWebSocket:
 
     def __init__(self, app) -> None:
         self.app = app
+        self.headers: dict[str, str] = {}
 
     async def accept(self) -> None:
         return None
