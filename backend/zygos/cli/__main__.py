@@ -18,6 +18,8 @@ from pydantic import ValidationError
 
 from zygos.backends.setup import run_backend_setup, summarize
 from zygos.cli.doctor import DoctorReport, run_doctor
+from zygos.cli.mcp import add_parser as add_mcp_parser, run_mcp
+from zygos.config.loader import load_config
 from zygos.hardware.describe import describe_hardware
 from zygos.errors import ConfigError
 from zygos.personalization import PERSONALIZATION_FIELDS, Personalization
@@ -53,6 +55,7 @@ def _build_parser() -> argparse.ArgumentParser:
     set_cmd = personalize_cmds.add_parser("set", help="Set individual fields directly")
     for field in PERSONALIZATION_FIELDS:
         set_cmd.add_argument(f"--{field.replace('_', '-')}", dest=field, default=None)
+    add_mcp_parser(subcommands)
     return parser
 
 
@@ -193,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
             from zygos.voice import gpu_setup
 
             return gpu_setup.setup_gpu(force=args.force)
+        if args.command == "mcp":
+            return run_mcp(args, load_config(args.config), input_fn=_interruptible_input)
         if args.command == "serve":
             from zygos.api.app import run_server
 
