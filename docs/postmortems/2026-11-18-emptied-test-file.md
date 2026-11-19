@@ -3,7 +3,7 @@
 ## Summary
 
 During the MCP client build, an AI coding agent asked to "sort imports" in a test file
-emptied it (`backend/tests/cli/test_inspect_mcp.py`). The change was committed with the
+emptied it (`backend/tests/cli/test_inspect_mcp.py`, 22 lines to none in `ec630af`). The change was committed with the
 tests gone and the suite still green. It was caught during review of that build, and the
 file was restored from git history in `f2d316d`. In the same build a different agent wrote a commit trailer naming
 the wrong model, which was fixed by amending.
@@ -30,5 +30,5 @@ the wrong model, which was fixed by amending.
   it below half its size, unless `ZYGOS_ALLOW_TEST_SHRINK=1` is set. The commit-msg hook
   refuses a Claude co-author trailer other than the project's exact one. Both were shown
   to reject the bad case in a throwaway repository before being enabled.
-- Review rule (CLAUDE.md, "Zygos working rules"): check the result, not the report; read
+- Review rule (`CONTRIBUTING.md`, "Review and Testing Rules"): check the result, not the report; read
   `git diff --stat` and treat any test file that loses tests as a finding.
