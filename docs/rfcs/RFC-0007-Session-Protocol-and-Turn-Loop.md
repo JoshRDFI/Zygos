@@ -384,10 +384,13 @@ to loopback (DNS rebinding) is same-origin with itself and could read `GET`
 routes, so the `Host` header is checked on every HTTP request and WebSocket
 handshake, whatever the method. The hostname (port ignored, case-insensitive,
 trailing dot ignored) must be loopback, the host of a `server.allowed_origins`
-entry, a specific `server.host`, or listed in the new `server.allowed_hosts`.
-A refused HTTP request gets `403 {"detail": "host not allowed; add it to
-server.allowed_hosts"}`; a refused WebSocket is closed with code `4403` before
-it is accepted. A request without a `Host` header is allowed.
+entry, the bind host (`server.host`, or the `--host` flag of `zygos serve`) when it is
+a specific address, or listed in the new `server.allowed_hosts` (entries may be
+written as `name`, `name:port`, `[v6]` or a URL; unparseable entries fail
+config validation). A refused HTTP request gets `403 {"detail": "host not
+allowed; add it to server.allowed_hosts"}`; a refused WebSocket handshake is
+rejected with HTTP 403 (the guard closes before accepting; test clients report
+this as close code `4403`). A request without a `Host` header is allowed.
 
 ## Alternatives Considered
 

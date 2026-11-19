@@ -96,6 +96,7 @@ def create_app(
     embedder: Embedder | None = None,
     embedding_model: str = "",
     session_count: Callable[[], int] | None = None,
+    bind_host: str | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Zygos", lifespan=_lifespan)
     allowed_origins = list(runtime.config.server.allowed_origins)
@@ -103,7 +104,7 @@ def create_app(
     app.add_middleware(
         OriginGuard,
         allowed_origins=allowed_origins,
-        allowed_hosts=allowed_hosts_for(runtime.config.server),
+        allowed_hosts=allowed_hosts_for(runtime.config.server, bind_host),
     )
     app.state.runtime = runtime
     app.state.embedder = embedder
@@ -163,7 +164,7 @@ def run_server(runtime, *, host: str, port: int, run=None) -> None:
     import a web framework. uvicorn is imported lazily; the lifespan owns async
     startup and aclose; run() owns the loop.
     """
-    app = create_app(runtime, embedder=None, embedding_model="")
+    app = create_app(runtime, embedder=None, embedding_model="", bind_host=host)
     if run is None:
         import uvicorn
         run = uvicorn.run

@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from zygos.config.hostnames import normalize_host_entry
 from zygos.runtime.capabilities import Capability
 from zygos.tools.permissions import Rule
 
@@ -223,6 +224,17 @@ class ServerConfig(BaseModel):
     # extra hostnames a request may name in its Host header, port ignored (loopback and
     # the hosts of allowed_origins are always allowed); e.g. a LAN IP or a proxy domain
     allowed_hosts: list[str] = []
+
+    @field_validator("allowed_hosts")
+    @classmethod
+    def _parseable_hosts(cls, v: list[str]) -> list[str]:
+        for entry in v:
+            if normalize_host_entry(entry) is None:
+                raise ValueError(
+                    f"server.allowed_hosts entry {entry!r} is not a host name or address; "
+                    "use e.g. 192.168.1.20, zygos.lan, zygos.lan:8443 or [fe80::1]"
+                )
+        return v
     # reserved for the voice-build audio handshake (RFC-0005); unused in M8
     audio_codec: str = "pcm"
     audio_sample_rate: int = 16000

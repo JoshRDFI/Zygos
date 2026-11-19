@@ -18,6 +18,8 @@ from urllib.parse import urlsplit
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from zygos.config.hostnames import normalize_host_entry, parse_host_header
+
 _log = logging.getLogger(__name__)
 
 _LOOPBACK = {"localhost", "127.0.0.1", "::1"}
@@ -46,28 +48,6 @@ def log_refused_host(host: str) -> None:
     _log.warning("refused host: %s", host[:200])
 
 
-def _hostname(host_header: str) -> str | None:
-    """The lower-cased hostname of a Host header value (port and trailing dot
-    dropped), or None when the value is malformed."""
-    value = host_header.strip()
-    if not value or any(c.isspace() for c in value):
-        return None
-    if value.startswith("["):
-        end = value.find("]")
-        if end < 0:
-            return None
-        name, rest = value[1:end], value[end + 1:]
-        if not name or (rest and not (rest.startswith(":") and rest[1:].isdigit())):
-            return None
-    else:
-        name, sep, port = value.partition(":")
-        if sep and not port.isdigit():
-            return None
-        if not name or ":" in port:
-            return None
-    return name.lower().rstrip(".") or None
-
-
 def host_allowed(host_header: str | None, allowed: frozenset[str]) -> bool:
     """True when the Host header names an allowed hostname (port ignored).
 
@@ -76,13 +56,14 @@ def host_allowed(host_header: str | None, allowed: frozenset[str]) -> bool:
     """
     if host_header is None:
         return True
-    name = _hostname(host_header)
+    name = parse_host_header(host_header)
     return name is not None and name in allowed
 
 
-def allowed_hosts_for(server) -> frozenset[str]:
+def allowed_hosts_for(server, bind_host: str | None = None) -> frozenset[str]:
     """Hostnames a request may name: loopback, the host of each allowed origin, a
-    specific bind address, and ``server.allowed_hosts``."""
+    specific bind address (``bind_host`` when given, else ``server.host``), and
+    ``server.allowed_hosts``."""
     hosts = set(_LOOPBACK)
     for origin in server.allowed_origins:
         try:
@@ -91,11 +72,15 @@ def allowed_hosts_for(server) -> frozenset[str]:
             continue
         if name:
             hosts.add(name.lower().rstrip("."))
-    if server.host and server.host not in _WILDCARD_BINDS:
-        hosts.add(server.host.lower().rstrip("."))
-    for name in server.allowed_hosts:
-        if name.strip():
-            hosts.add(name.strip().lower().rstrip("."))
+    bind = bind_host if bind_host is not None else server.host
+    if bind and bind.strip() not in _WILDCARD_BINDS:
+        name = normalize_host_entry(bind)
+        if name:
+            hosts.add(name)
+    for entry in server.allowed_hosts:
+        name = normalize_host_entry(entry)
+        if name:
+            hosts.add(name)
     return frozenset(hosts)
 
 
@@ -123,6 +108,8 @@ class OriginGuard:
             if not host_allowed(host, self.allowed_hosts):
                 log_refused_host(host or "")
                 if scope["type"] == "websocket":
+                    # Closing before accept rejects the handshake with HTTP 403;
+                    # test clients report it as close code 4403.
                     await send({"type": "websocket.close", "code": 4403})
                     return
                 await self._refuse(send, "host not allowed; add it to server.allowed_hosts")

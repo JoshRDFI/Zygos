@@ -195,7 +195,7 @@ above.
 
 The chat shows only "thought for N s". The model's thinking itself appears step by step in **Inspect**, and is never spoken or saved to memory. For now this works with Ollama models that support thinking (e.g. qwen3); for other models the controls are disabled with the reason.
 
-**Who can use the web page.** Only pages served from this machine (`localhost`, `127.0.0.1` or `[::1]`), or from an address listed in `server.allowed_origins`, can change settings or chat; another website you visit cannot drive Zygos through your browser. Set `allowed_origins` when you serve the page through a reverse proxy. Other websites also cannot read your Zygos data: every request must name this machine (or a configured host) in its `Host` header. Set `server.allowed_hosts` when you open Zygos by a LAN IP or by a domain through a proxy.
+**Who can use the web page.** Only pages served from this machine (`localhost`, `127.0.0.1` or `[::1]`), or from an address listed in `server.allowed_origins`, can change settings or chat; another website you visit cannot drive Zygos through your browser. Set `allowed_origins` when you serve the page through a reverse proxy. Other websites also cannot read your Zygos data: every request must name this machine (or a configured host) in its `Host` header. Set `server.allowed_hosts` when you open Zygos by a LAN IP or by a domain through a proxy (an address passed with `zygos serve --host` is allowed automatically). A refused WebSocket handshake gets HTTP 403. A reverse proxy should forward the original Host (nginx: `proxy_set_header Host $host;`); otherwise it must restrict server names itself, because the backend then only sees the proxy's own address.
 
 ## Quick start (v1 CLI, local)
 

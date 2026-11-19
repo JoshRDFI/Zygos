@@ -32,3 +32,23 @@ def test_run_server_wires_app_and_invokes_run():
     assert captured["port"] == 1234
     # serve wires no live embedder (LocalEmbedder loads eagerly)
     assert captured["app"].state.embedder is None
+
+
+def test_run_server_allows_the_bind_host_in_host_header():
+    from starlette.testclient import TestClient
+
+    runtime = build_runtime()
+    captured = {}
+
+    try:
+        run_server(runtime, host="192.168.1.20", port=8000,
+                   run=lambda app, *, host, port: captured.update(app=app))
+        with TestClient(captured["app"]) as c:
+            ok = c.get("/preferences", headers={"Host": "192.168.1.20:8000"})
+            bad = c.get("/preferences", headers={"Host": "evil.example:8000"})
+    finally:
+        import asyncio
+        asyncio.run(runtime.aclose())
+
+    assert ok.status_code != 403
+    assert bad.status_code == 403
