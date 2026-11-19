@@ -20,7 +20,7 @@ def _mount(runtime, *, embedder=None, embedding_model="", session_count=lambda: 
 
 def _client(app):
     return httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://t"
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
     )
 
 

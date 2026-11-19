@@ -7,8 +7,10 @@ Tests that need a working keychain inject a fake backend explicitly.
 
 import importlib.util
 from pathlib import Path
+from urllib.parse import urljoin
 
 import pytest
+from starlette.testclient import TestClient
 
 from zygos.home import reset_zygos_home_cache
 
@@ -97,3 +99,25 @@ def pytest_sessionfinish(session, exitstatus):
         for name in sorted(new):
             print(f"  {name}")
         session.exitstatus = 1
+
+
+@pytest.fixture(autouse=True)
+def _client_talks_to_localhost(monkeypatch):
+    """Starlette's TestClient sends ``Host: testserver``, which the Host guard
+    rightly refuses. Tests talk to the app the way a browser on this machine does,
+    so the client defaults to ``http://localhost``. Tests of the guard itself pass an
+    explicit ``Host`` header."""
+    original = TestClient.__init__
+
+    def init(self, app, base_url="http://localhost", *args, **kwargs):
+        original(self, app, base_url, *args, **kwargs)
+
+    monkeypatch.setattr(TestClient, "__init__", init)
+
+    # websocket_connect resolves relative URLs against a hard-coded ws://testserver.
+    original_ws = TestClient.websocket_connect
+
+    def websocket_connect(self, url, *args, **kwargs):
+        return original_ws(self, urljoin("ws://localhost", url), *args, **kwargs)
+
+    monkeypatch.setattr(TestClient, "websocket_connect", websocket_connect)

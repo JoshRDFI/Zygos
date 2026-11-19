@@ -34,6 +34,9 @@ server:
   # Pages served from this machine always work. Add the address of any other page
   # (e.g. behind a reverse proxy) that may change settings or chat:
   # allowed_origins: []        # e.g. ["https://zygos.example"]
+  # Requests must name this machine in their Host header. Add any other name you
+  # open Zygos by (a LAN IP, or a domain through a proxy):
+  # allowed_hosts: []          # e.g. ["192.168.1.20", "zygos.example"]
 
 # The model is told the local time each turn. Uncomment to override the system zone:
 # personalization:

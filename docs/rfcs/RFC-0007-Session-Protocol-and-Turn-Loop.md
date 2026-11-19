@@ -379,6 +379,16 @@ when its host is loopback (`localhost`, `127.0.0.1` or `[::1]`, over `http` or
 without an `Origin` header (curl, the CLI, non-browser clients) is allowed. `GET`
 requests are not checked.
 
+*Additive, 2026-11-19.* **Host check.** A hostile page whose domain re-resolves
+to loopback (DNS rebinding) is same-origin with itself and could read `GET`
+routes, so the `Host` header is checked on every HTTP request and WebSocket
+handshake, whatever the method. The hostname (port ignored, case-insensitive,
+trailing dot ignored) must be loopback, the host of a `server.allowed_origins`
+entry, a specific `server.host`, or listed in the new `server.allowed_hosts`.
+A refused HTTP request gets `403 {"detail": "host not allowed; add it to
+server.allowed_hosts"}`; a refused WebSocket is closed with code `4403` before
+it is accepted. A request without a `Host` header is allowed.
+
 ## Alternatives Considered
 
 **Text-first, minimal envelope (defer tools/trace/audio channels to later RFCs).**

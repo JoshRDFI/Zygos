@@ -20,7 +20,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from zygos.api.origin import OriginGuard
+from zygos.api.origin import OriginGuard, allowed_hosts_for
 from zygos.api.permission import WebSocketPromptResolver
 from zygos.api.routes_backends import router as backends_router
 from zygos.api.routes_models import router as models_router
@@ -100,7 +100,11 @@ def create_app(
     app = FastAPI(title="Zygos", lifespan=_lifespan)
     allowed_origins = list(runtime.config.server.allowed_origins)
     app.state.allowed_origins = allowed_origins
-    app.add_middleware(OriginGuard, allowed_origins=allowed_origins)
+    app.add_middleware(
+        OriginGuard,
+        allowed_origins=allowed_origins,
+        allowed_hosts=allowed_hosts_for(runtime.config.server),
+    )
     app.state.runtime = runtime
     app.state.embedder = embedder
     app.state.embedding_model = embedding_model

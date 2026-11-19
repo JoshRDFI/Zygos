@@ -220,6 +220,9 @@ class ServerConfig(BaseModel):
     prompt_timeout_s: float = 120.0
     # extra browser origins allowed to write/chat (loopback is always allowed)
     allowed_origins: list[str] = []
+    # extra hostnames a request may name in its Host header, port ignored (loopback and
+    # the hosts of allowed_origins are always allowed); e.g. a LAN IP or a proxy domain
+    allowed_hosts: list[str] = []
     # reserved for the voice-build audio handshake (RFC-0005); unused in M8
     audio_codec: str = "pcm"
     audio_sample_rate: int = 16000

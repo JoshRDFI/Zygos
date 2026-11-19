@@ -63,7 +63,7 @@ async def test_get_runtime_shows_accept_requests_after_startup():
     app = create_app(runtime)
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://t"
+            transport=httpx.ASGITransport(app=app), base_url="http://localhost"
         ) as client:
             resp = await client.get("/runtime")
     assert resp.json()["lifecycle_stage"] == "accept_requests"
@@ -106,7 +106,7 @@ async def test_startup_scans_hardware_once_and_mounts_models_routes():
         assert calls == [1]
         assert probe.last() is not None
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as client:
             assert (await client.get("/hardware")).status_code == 200
             assert (await client.get("/runtime")).json()["hardware"] is not None
         assert calls == [1, 1]  # GET /hardware rescans; GET /runtime does not

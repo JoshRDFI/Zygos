@@ -50,7 +50,7 @@ def _client(runtime):
     app = FastAPI()
     app.include_router(router)
     app.state.runtime = runtime
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t")
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost")
 
 
 @pytest.mark.asyncio

@@ -109,7 +109,7 @@ async def test_get_runtime_route_carries_mcp(tmp_path):
     app.include_router(router)
     app.state.runtime = runtime
     try:
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as client:
             body = (await client.get("/runtime")).json()
     finally:
         await runtime.aclose()
