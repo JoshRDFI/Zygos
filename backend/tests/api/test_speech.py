@@ -197,3 +197,92 @@ async def test_speak_reply_clears_duck_state_on_end():
     assert session.speaking is False
     assert session.ducked is False
     assert session.duck_timeout is None
+
+
+# ---- one stream at a time per session ---------------------------------------------
+
+
+class _SlowSynth:
+    """Yields its chunks with a pause between them, so two streams would interleave."""
+
+    def __init__(self, tag: bytes, n: int = 3):
+        self._tag, self._n = tag, n
+
+    async def chunks(self):
+        for i in range(self._n):
+            await asyncio.sleep(0.01)
+            yield self._tag + bytes([i])
+
+    async def cancel(self):
+        pass
+
+    async def aclose(self):
+        pass
+
+
+class _PerTextVoice:
+    tts_available = True
+
+    @property
+    def tts_format(self):
+        return AudioFormat(sample_rate=24000)
+
+    def synthesize_stream(self, ctx, text):
+        return _SlowSynth(text.encode()[:1])
+
+
+def _sequence(items):
+    """Each output item as begin/end/<first byte of the audio>."""
+    out = []
+    for i in items:
+        if isinstance(i, (bytes, bytearray)):
+            out.append(chr(i[1]))
+        else:
+            out.append(i.type)
+    return out
+
+
+def _assert_not_interleaved(seq, n_streams, n_chunks=3):
+    expected_shape = (["tts.begin"] + ["x"] * n_chunks + ["tts.end"]) * n_streams
+    assert [s if s.startswith("tts.") else "x" for s in seq] == expected_shape, seq
+    for k in range(n_streams):
+        block = seq[k * (n_chunks + 2) + 1: k * (n_chunks + 2) + 1 + n_chunks]
+        assert len(set(block)) == 1, seq
+
+
+async def test_two_announces_in_one_session_never_overlap():
+    from types import SimpleNamespace
+
+    from zygos.api.speech import say
+
+    session = _session()
+    session.speak = True
+    ids = iter(["a1", "a2"])
+    deps = SimpleNamespace(voice_service=_PerTextVoice(), new_id=lambda: next(ids))
+    # Fire-and-forget, as the permission prompt does.
+    first = asyncio.ensure_future(say(session, deps, "A: I need your OK"))
+    second = asyncio.ensure_future(say(session, deps, "B: I need your OK"))
+    await asyncio.gather(first, second)
+    _assert_not_interleaved(_sequence(_drain(session)), 2)
+    assert session.speaking is False
+
+
+async def test_announce_waits_for_the_turns_own_speech():
+    from types import SimpleNamespace
+
+    from zygos.api.speech import say
+
+    session = _session()
+    session.speak = True
+    voice = _PerTextVoice()
+    deps = SimpleNamespace(voice_service=voice, new_id=lambda: "a1")
+    ctx = root_context(InProcessEventBus())
+    prefix = asyncio.ensure_future(speak_reply(session, voice, ctx, "Let me think", "t1"))
+    await asyncio.sleep(0)  # the prefix has started
+    announce = asyncio.ensure_future(say(session, deps, "I need your OK"))
+    await asyncio.sleep(0.015)
+    assert session.speaking is True  # the prefix is still playing; the announce waits
+    await asyncio.gather(prefix, announce)
+    seq = _sequence(_drain(session))
+    _assert_not_interleaved(seq, 2)
+    assert seq[1] == "L" and seq[6] == "I"

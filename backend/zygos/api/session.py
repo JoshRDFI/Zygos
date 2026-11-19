@@ -40,6 +40,7 @@ class Session:
         self.outbound: asyncio.Queue[Frame | bytes] = asyncio.Queue()
         self.speak = False  # per-session spoken-output preference (Voice C2 T8 sets it)
         self.speaking = False  # True while a TTS synthesis is streaming (speech.py)
+        self.speech_lock = asyncio.Lock()  # one speak_reply stream at a time (speech.py)
         self.ducked = False    # True during a duck window (barge-in stage 1)
         self.duck_timeout: asyncio.Task | None = None  # auto-unduck backstop
         self.active_cancel: CancelToken | None = None

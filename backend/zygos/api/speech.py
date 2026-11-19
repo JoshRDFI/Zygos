@@ -5,6 +5,9 @@ tied to the turn's CancelToken: a barge-in trips ctx.cancelled and this loop bre
 at the next chunk boundary, emitting tts.end(cancelled). A synthesis failure is
 isolated to a tts.end(error) frame — it never propagates out of the turn.
 
+A session plays one `speak_reply` stream at a time (``session.speech_lock``); a
+second stream, e.g. a permission announce during the "Let me think" prefix, waits.
+
 Stability: Experimental.
 """
 
@@ -19,6 +22,14 @@ logger = logging.getLogger("zygos.api.speech")
 
 
 async def speak_reply(session, voice_service, ctx, text: str, turn_id: str) -> None:
+    # One stream at a time per session: a runtime line (a permission announce, a
+    # voice-command confirmation) and the turn's own prefix or reply each wait for the
+    # one playing, so their audio never interleaves and `speaking` stays honest.
+    async with session.speech_lock:
+        await _stream(session, voice_service, ctx, text, turn_id)
+
+
+async def _stream(session, voice_service, ctx, text: str, turn_id: str) -> None:
     synth = voice_service.synthesize_stream(ctx, text)
     fmt = voice_service.tts_format
     session.enqueue(Frame(channel=AUDIO_OUT, type="tts.begin", payload={
