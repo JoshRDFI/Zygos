@@ -21,7 +21,7 @@ from zygos.agent.schema import tool_schema
 from zygos.mcp.permission import seen_fingerprint, trust_state
 from zygos.mcp.results import McpUnavailable
 from zygos.mcp.store import ServerState, SqliteMcpStore, TrustEntry
-from zygos.mcp.supervisor import Connectors, McpSupervisor
+from zygos.mcp.supervisor import SECRET_FAILURE, Connectors, McpSupervisor
 from zygos.mcp.types import SeenTool, ServerSpec
 from zygos.mcp.wire import ListResult
 from zygos.runtime.context import root_context
@@ -327,7 +327,7 @@ async def test_secret_store_unavailable_fails_only_that_server(h):
     await sup.start()
     await _until(lambda: _names(sup.before_turn()) == ["open__t"])
     await _until(lambda: h.store.state("locked").status == "failed")
-    assert h.store.state("locked").detail == "the keychain is locked"
+    assert h.store.state("locked").detail == SECRET_FAILURE + "the keychain is locked"
     assert "locked" not in h.fakes.list_calls
 
 

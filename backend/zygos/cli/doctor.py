@@ -168,6 +168,14 @@ async def _default_list_remote(*args: Any, **kwargs: Any) -> Any:
     return await list_remote(*args, **kwargs)
 
 
+def _with_secret_hint(detail: str, state: Any, name: str) -> str:
+    from zygos.mcp.supervisor import SECRET_FAILURE
+
+    if state.status == "failed" and (state.detail or "").startswith(SECRET_FAILURE):
+        return f"{detail} — {_SECRET_HINT.format(name=name)}"
+    return detail
+
+
 def _local_detail(state: Any) -> str:
     when = ""
     if state.status_at is not None:
@@ -185,16 +193,34 @@ def _local_detail(state: Any) -> str:
     return text
 
 
-async def _probe_remote(spec: Any, state: Any, list_remote: Callable[..., Any], timeout_s: float) -> tuple[str, bool]:
+async def _probe_remote(
+    spec: Any, state: Any, list_remote: Callable[..., Any], timeout_s: float, secrets: Any,
+) -> tuple[str, bool]:
+    from zygos.mcp.wire import scrub
+    from zygos.secrets import SecretStoreError
+
     limit = min(spec.timeout_s, timeout_s)
+    headers: dict[str, str] = {}
+    for item in spec.header_names:  # read-only, like the supervisor; values are never shown
+        try:
+            value = await asyncio.to_thread(secrets.get, f"mcp:{spec.name}:header:{item}")
+            why = "not set" if value is None else None
+        except SecretStoreError as exc:
+            value, why = None, scrub(str(exc), {})[:80] or type(exc).__name__
+        if value is None:
+            return f"not checked: needs {item} from the secret store ({why})", True
+        headers[item] = value
     try:
-        # Header values are not read: a server that needs them is reported not reachable.
         result = await asyncio.wait_for(
-            list_remote(spec, {}, era=state.era, discover=state.discover), limit)
+            list_remote(spec, headers, era=state.era, discover=state.discover), limit)
     except TimeoutError:
         return f"not reachable: no answer within {limit:g} s", True
-    except Exception as exc:  # noqa: BLE001 - doctor never aborts; type only, no text
-        return f"not reachable: {type(exc).__name__}", True
+    except Exception as exc:  # noqa: BLE001 - doctor never aborts
+        from zygos.mcp.results import McpToolError, McpUnavailable
+
+        # McpUnavailable/McpToolError reasons are already scrubbed of header values.
+        reason = scrub(str(exc), headers) if isinstance(exc, (McpUnavailable, McpToolError)) else type(exc).__name__
+        return f"not reachable: {reason}", True
     n = len(result.tools)
     return f"reachable, {n} tool{'s' if n != 1 else ''}", False
 
@@ -233,18 +259,15 @@ async def _mcp_checks(
         spec, state = servers[name], states[name]
         if spec.transport == "stdio":
             detail, warn = _local_detail(state), state.status in ("stopped", "failed")
-            if state.status == "failed" and "secret" in (state.detail or "").lower():
-                detail += f" — {_SECRET_HINT.format(name=name)}"
         elif probe and (installed or list_remote is not None):
-            note, warn = await _probe_remote(spec, state, connect, probe_timeout_s)
+            note, warn = await _probe_remote(spec, state, connect, probe_timeout_s, runtime.secrets)
             detail = f"{spec.url} (protocol {state.era or 'not known yet'}) — {note}"
         else:
             detail = f"{spec.url} (protocol {state.era or 'not known yet'})"
             warn = state.status in ("unreachable", "failed")
             if warn and state.detail:
                 detail += f" — {state.status}: {state.detail}"
-            if state.status == "failed" and "secret" in (state.detail or "").lower():
-                detail += f" — {_SECRET_HINT.format(name=name)}"
+        detail = _with_secret_hint(detail, state, name)
         out.append(DoctorCheck(f"mcp:{name}", True, detail, warn=warn))
     tools_by = {n: checked(s.tools) for n, s in states.items()}
     tools_by.update(with_clashes(tools_by))

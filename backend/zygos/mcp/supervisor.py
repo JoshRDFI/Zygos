@@ -48,10 +48,11 @@ from zygos.tools.permissions import Rule
 from zygos.tools.service import ToolService
 from zygos.tools.types import Tool, ToolMeta
 
-__all__ = ["Connectors", "McpSupervisor", "NO_MCP", "TOOL_COUNT_WARNING"]
+__all__ = ["Connectors", "McpSupervisor", "NO_MCP", "SECRET_FAILURE", "TOOL_COUNT_WARNING"]
 
 logger = logging.getLogger("zygos.mcp")
 
+SECRET_FAILURE = "secret store: "  # starts the detail of a server failed for secret reasons (doctor hints on it)
 NO_MCP = "MCP support isn't installed: pip install -e '.[mcp]'"
 TOOL_COUNT_WARNING = "small local models choose tools less reliably beyond about 20 — consider switching some off"
 _DEFAULT_TTL_S = 300.0
@@ -338,7 +339,7 @@ class McpSupervisor:
         try:
             env = await self._secret_values(spec, "env", spec.env_names)
         except SecretStoreError as exc:
-            self._fail(entry, str(exc))
+            self._fail(entry, SECRET_FAILURE + str(exc))
             return
         try:
             local = self.connectors.local(spec, env, on_event=lambda kind, detail: self._on_local(entry, kind, detail))
@@ -388,7 +389,7 @@ class McpSupervisor:
                     spec, headers, era=entry.state.era, discover=entry.state.discover
                 )
         except SecretStoreError as exc:
-            self._fail(entry, str(exc))
+            self._fail(entry, SECRET_FAILURE + str(exc))
             return
         except Exception as exc:  # noqa: BLE001 - a listing failure only affects this server
             # McpUnavailable/McpToolError reasons are scrubbed; anything else: its type only.
