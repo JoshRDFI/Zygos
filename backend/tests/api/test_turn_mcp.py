@@ -239,3 +239,35 @@ async def test_per_turn_tool_failure_keeps_builtins():
     result = next(f for f in frames if f.channel == TOOLS and f.type == "result")
     assert result.payload["ok"] is True
     assert frames[-1].payload["text"] == "done"
+
+
+async def test_per_turn_tool_failure_logged_once_until_recovery(caplog):
+    import logging
+
+    caplog.set_level(logging.DEBUG, logger="zygos.api.turn")
+    service = ToolService()
+    echo = EchoTool()
+    service.register(echo)
+    failing = [True]
+
+    def flaky():
+        if failing[0]:
+            raise RuntimeError("supervisor bug")
+        return (echo,)
+
+    def records():
+        return [r for r in caplog.records if r.name == "zygos.api.turn" and "tool set" in r.getMessage()]
+
+    for _ in range(3):
+        await _turn(_deps(_model(["plain"]), service, tools=(echo,), tools_for_turn=flaky))
+    warned = [r for r in records() if r.levelno == logging.WARNING]
+    assert len(warned) == 1 and warned[0].exc_info is not None
+    quiet = [r for r in records() if r.levelno == logging.DEBUG]
+    assert len(quiet) == 2 and all(r.exc_info is None for r in quiet)
+
+    failing[0] = False
+    await _turn(_deps(_model(["plain"]), service, tools=(echo,), tools_for_turn=flaky))
+    recovered = [r for r in records() if r.levelno == logging.INFO]
+    assert len(recovered) == 1
+    await _turn(_deps(_model(["plain"]), service, tools=(echo,), tools_for_turn=flaky))
+    assert len([r for r in records() if r.levelno == logging.INFO]) == 1

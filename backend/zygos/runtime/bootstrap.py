@@ -7,6 +7,7 @@ review-blocking smell.
 Stability: Experimental.
 """
 
+import logging
 import time
 import uuid
 import warnings
@@ -59,6 +60,8 @@ from zygos.tools.service import ToolService
 from zygos.tools.types import Tool
 from zygos.voice import VoiceService, build_stt_plugin, build_tts_plugin
 
+_log = logging.getLogger("zygos.runtime.bootstrap")
+
 REGISTER_CAPABILITIES_STAGE = "register_capabilities"
 LOAD_SKILLS_STAGE = "load_skills"
 LOAD_MEMORY_STAGE = "load_memory"
@@ -107,7 +110,11 @@ class RuntimeAssembly:
 
     async def aclose(self) -> None:
         # MCP first: stopping local servers and finishing its state writes needs the rest.
-        await self.mcp.aclose()
+        # A failure there must not skip closing everything else.
+        try:
+            await self.mcp.aclose()
+        except Exception as exc:  # noqa: BLE001 - log the type only (no server text)
+            _log.warning("mcp supervisor did not close cleanly (%s)", type(exc).__name__)
         if self.residency is not None:
             # A preload still running would fail on the closed client below.
             self.residency.cancel_preload()

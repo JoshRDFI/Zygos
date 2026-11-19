@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -145,15 +146,28 @@ async def _emit_model_chosen(ctx: ExecutionContext, deps: TurnDeps, turn_id: str
         logger.warning("model.chosen trace failed", exc_info=True)
 
 
+# tools_for_turn callables failing right now: warned once, quiet until they recover.
+_FAILING_TOOL_SETS: "weakref.WeakSet[Callable[[], tuple[Tool, ...]]]" = weakref.WeakSet()
+
+
 def _turn_tools(deps: TurnDeps) -> tuple[Tool, ...]:
     """This turn's tools. A failure to work out the MCP part leaves the built-ins."""
-    if deps.tools_for_turn is None:
+    source = deps.tools_for_turn
+    if source is None:
         return deps.tools
     try:
-        return deps.tools_for_turn()
+        tools = source()
     except Exception:  # noqa: BLE001 - MCP is optional; the turn goes on without it
-        logger.warning("per-turn tool set failed; using the built-in tools", exc_info=True)
+        if source in _FAILING_TOOL_SETS:
+            logger.debug("per-turn tool set still failing; using the built-in tools")
+        else:
+            _FAILING_TOOL_SETS.add(source)
+            logger.warning("per-turn tool set failed; using the built-in tools", exc_info=True)
         return deps.tools
+    if source in _FAILING_TOOL_SETS:
+        _FAILING_TOOL_SETS.discard(source)
+        logger.info("per-turn tool set recovered")
+    return tools
 
 
 def _speaks_reply(session: Session, deps: TurnDeps) -> bool:

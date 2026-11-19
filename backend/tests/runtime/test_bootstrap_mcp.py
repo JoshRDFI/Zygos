@@ -42,14 +42,33 @@ async def test_aclose_closes_mcp_before_http_client(tmp_path):
     runtime = build_runtime(_config(tmp_path))
     seen: list[bool] = []
 
+    real = runtime.mcp
+
     class Recording:
         async def aclose(self) -> None:
             seen.append(runtime.http_client.is_closed)
+            await real.aclose()
 
     runtime = dataclasses.replace(runtime, mcp=Recording())
     await runtime.aclose()
     assert seen == [False]
     assert runtime.http_client.is_closed
+    assert real._closed
+
+
+async def test_aclose_continues_when_mcp_close_fails(tmp_path, caplog):
+    runtime = build_runtime(_config(tmp_path))
+    real = runtime.mcp
+
+    class Failing:
+        async def aclose(self) -> None:
+            await real.aclose()
+            raise RuntimeError("close boom")
+
+    runtime = dataclasses.replace(runtime, mcp=Failing())
+    await runtime.aclose()
+    assert runtime.http_client.is_closed
+    assert "RuntimeError" in caplog.text and "close boom" not in caplog.text
 
 
 _NO_SERVER_RUN = textwrap.dedent(
