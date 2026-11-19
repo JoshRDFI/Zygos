@@ -127,6 +127,16 @@ python3.12 -m venv .venv
 
 The `.[secrets]` extra (OS keychain and encrypted file for saved secrets) is optional for now. It is needed later by MCP servers that use keys: `.venv/bin/pip install -e '.[secrets]'`.
 
+**MCP servers.** Zygos can use tools from MCP servers (RFC-0015). Install the extras (`.venv/bin/pip install -e '.[mcp,secrets]'`), then add servers from a standard `mcpServers` JSON file:
+
+```bash
+.venv/bin/python -m zygos.cli mcp add servers.json   # shows what it will do, asks first
+.venv/bin/python -m zygos.cli mcp list               # servers, tools, trust, status
+.venv/bin/python -m zygos.cli mcp trust archon/find_tasks
+```
+
+A tool the model hasn't been trusted for is refused until you trust it; the in-chat approval prompt arrives with the web UI part (phase 1b). Keys and tokens in a server's `env` or `headers` go to the secret store, never into the saved record. A local server (a command) runs on this machine as you, so add only ones you trust. Small local models choose tools less reliably beyond about 20, so switch some off (`zygos mcp off SERVER/TOOL`). `zygos doctor` shows each server's status.
+
 **2. Web UI** (terminal 2):
 
 ```bash

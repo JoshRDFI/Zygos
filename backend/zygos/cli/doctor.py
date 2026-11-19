@@ -6,8 +6,11 @@ primary route. Stability: Experimental.
 
 from __future__ import annotations
 
+import asyncio
+import importlib.util
 from dataclasses import dataclass
-from typing import Callable
+from datetime import datetime
+from typing import Any, Callable
 
 from zygos.backends.addresses import resolve_address
 from zygos.backends.view import build_view, restart_required, uses_ollama, uses_vllm
@@ -146,6 +149,116 @@ def _secrets_lines(runtime: RuntimeAssembly) -> list[DoctorCheck]:
     return out
 
 
+_MCP_READ_BUSY_S = 5.0
+_MCP_PROBE_S = 5.0
+_MCP_TOOL_WARN_OVER = 20
+_SECRET_HINT = "switch it off and on (zygos mcp off/on {name}) after unlocking the secret store"
+
+
+def _mcp_installed() -> bool:
+    try:
+        return importlib.util.find_spec("mcp") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+async def _default_list_remote(*args: Any, **kwargs: Any) -> Any:
+    from zygos.mcp.remote import list_remote  # imports the SDK only when called
+
+    return await list_remote(*args, **kwargs)
+
+
+def _local_detail(state: Any) -> str:
+    when = ""
+    if state.status_at is not None:
+        when = f" (as of {datetime.fromtimestamp(state.status_at).strftime('%H:%M')}, from zygos serve)"
+    if state.status == "not_started":
+        return "not started — zygos serve starts it"
+    text = state.status.replace("_", " ") + when
+    if state.status == "stopped" and state.exit_code is not None:
+        text = f"stopped — exit {state.exit_code}"
+        last = (state.stderr_tail or "").strip().splitlines()
+        if last:
+            text += f": {last[-1]}"
+    elif state.detail:
+        text += f" — {state.detail}"
+    return text
+
+
+async def _probe_remote(spec: Any, state: Any, list_remote: Callable[..., Any], timeout_s: float) -> tuple[str, bool]:
+    limit = min(spec.timeout_s, timeout_s)
+    try:
+        # Header values are not read: a server that needs them is reported not reachable.
+        result = await asyncio.wait_for(
+            list_remote(spec, {}, era=state.era, discover=state.discover), limit)
+    except TimeoutError:
+        return f"not reachable: no answer within {limit:g} s", True
+    except Exception as exc:  # noqa: BLE001 - doctor never aborts; type only, no text
+        return f"not reachable: {type(exc).__name__}", True
+    n = len(result.tools)
+    return f"reachable, {n} tool{'s' if n != 1 else ''}", False
+
+
+async def _mcp_checks(
+    runtime: RuntimeAssembly, probe: bool, list_remote: Callable[..., Any] | None,
+    mcp_installed: Callable[[], bool], probe_timeout_s: float,
+) -> list[DoctorCheck]:
+    """MCP servers as recorded; connects only with ``probe``. Never raises."""
+    from zygos.mcp.config import address, describe, zygos_tool_name
+    from zygos.mcp.offered import checked, with_clashes
+    from zygos.mcp.store import McpStoreUnavailable
+    from zygos.mcp.supervisor import NO_MCP, TOOL_COUNT_WARNING
+
+    store = runtime.mcp.store.strict_reader(busy_timeout_s=_MCP_READ_BUSY_S)
+    try:
+        def read() -> tuple[Any, Any, Any]:
+            servers = store.servers()
+            if not servers:
+                return servers, None, None
+            return servers, store.off(), {n: store.state(n) for n in servers}
+
+        servers, off, states = await asyncio.to_thread(read)
+    except McpStoreUnavailable:
+        return [DoctorCheck("mcp", True, "the MCP record can't be read right now — try again", warn=True)]
+    except Exception as exc:  # noqa: BLE001
+        return [DoctorCheck("mcp", True, f"the MCP record can't be read ({type(exc).__name__})", warn=True)]
+    if not servers:
+        return []
+    out: list[DoctorCheck] = []
+    installed = mcp_installed()
+    if not installed:
+        out.append(DoctorCheck("mcp", True, NO_MCP, warn=True))
+    connect = list_remote or _default_list_remote
+    for name in sorted(servers):
+        spec, state = servers[name], states[name]
+        if spec.transport == "stdio":
+            detail, warn = _local_detail(state), state.status in ("stopped", "failed")
+            if state.status == "failed" and "secret" in (state.detail or "").lower():
+                detail += f" — {_SECRET_HINT.format(name=name)}"
+        elif probe and (installed or list_remote is not None):
+            note, warn = await _probe_remote(spec, state, connect, probe_timeout_s)
+            detail = f"{spec.url} (protocol {state.era or 'not known yet'}) — {note}"
+        else:
+            detail = f"{spec.url} (protocol {state.era or 'not known yet'})"
+            warn = state.status in ("unreachable", "failed")
+            if warn and state.detail:
+                detail += f" — {state.status}: {state.detail}"
+            if state.status == "failed" and "secret" in (state.detail or "").lower():
+                detail += f" — {_SECRET_HINT.format(name=name)}"
+        out.append(DoctorCheck(f"mcp:{name}", True, detail, warn=warn))
+    tools_by = {n: checked(s.tools) for n, s in states.items()}
+    tools_by.update(with_clashes(tools_by))
+    count = sum(
+        1 for n in servers if f"server:{n}" not in off
+        for t in tools_by.get(n, [])
+        if t.problem is None and f"tool:{zygos_tool_name(n, t.name)}" not in off
+    )
+    too_many = count > _MCP_TOOL_WARN_OVER
+    out.append(DoctorCheck("mcp_tools", True,
+                           f"{count} on" + (f" — {TOOL_COUNT_WARNING}" if too_many else ""), warn=too_many))
+    return out
+
+
 async def _backend_checks(runtime: RuntimeAssembly) -> list[DoctorCheck]:
     """Optional backends (RFC-0014): shown only when set up; problems warn, never fail."""
     settings = runtime.backends.get()
@@ -183,7 +296,10 @@ async def _backend_checks(runtime: RuntimeAssembly) -> list[DoctorCheck]:
 
 
 async def run_doctor(
-    runtime: RuntimeAssembly, *, probe: bool = False, gpu_query: GpuQuery = run_nvidia_smi
+    runtime: RuntimeAssembly, *, probe: bool = False, gpu_query: GpuQuery = run_nvidia_smi,
+    list_remote: Callable[..., Any] | None = None,
+    mcp_installed: Callable[[], bool] = _mcp_installed,
+    probe_timeout_s: float = _MCP_PROBE_S,
 ) -> DoctorReport:
     config = runtime.config
     checks: list[DoctorCheck] = []
@@ -247,6 +363,7 @@ async def run_doctor(
         checks.append(DoctorCheck("stray_data_folder", True, stray_message(stray), warn=True))
 
     checks.extend(_secrets_check(runtime))
+    checks.extend(await _mcp_checks(runtime, probe, list_remote, mcp_installed, probe_timeout_s))
     checks.append(_default_model_check(runtime))
     checks.append(_hardware_check(runtime, gpu_query))
     checks.extend(_voice_device_checks(runtime))

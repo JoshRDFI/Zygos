@@ -158,6 +158,16 @@ def render_manifest(manifest: Manifest) -> str:
     lines.append("  plugins:")
     for plugin in manifest.plugins:
         lines.append(f"    {plugin.kind}/{plugin.name} -> {plugin.module}")
+    if manifest.mcp_servers:
+        lines.append("  mcp servers:")
+        for server in manifest.mcp_servers:
+            on = sum(1 for t in server.tools if t.enabled)
+            trusted = sum(1 for t in server.tools if t.trust == "trusted")
+            lines.append(
+                f"    {server.name} ({server.transport}, {'on' if server.enabled else 'off'}): "
+                f"{server.address} — {server.status.replace('_', ' ')}, "
+                f"protocol {server.era or 'not known yet'}, "
+                f"{on}/{len(server.tools)} on, {trusted} trusted")
     return "\n".join(lines)
 
 

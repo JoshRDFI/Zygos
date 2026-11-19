@@ -24,7 +24,7 @@
   contract, and a `"tool"` role plus tool-call/tool-result fields to the `Message`
   model. It does **not** change RFC-0001 §5 (the four-phase tool execution
   contract) — that stays as built.
-- **Amended by:** [RFC-0015](RFC-0015-MCP-Client-Connecting-to-MCP-Servers.md) (accepted 2026-11-17, additive) — a tool may declare its input as JSON Schema instead of a pydantic model; a result may carry artifacts (images, audio) beside its text; a stored trust record may raise a tool's permission to `allow`. Built-in tools are unchanged.
+- **Amended by:** [RFC-0015](RFC-0015-MCP-Client-Connecting-to-MCP-Servers.md) (accepted 2026-11-17, additive) — a tool may declare its input as JSON Schema instead of a pydantic model; a result may carry artifacts (images, audio) beside its text; a stored trust record may raise a tool's permission to `allow`. Built-in tools are unchanged. Phase 1a: MCP tools reach the model with their JSON-Schema input as given and a `server` label; the tool-name rule is `<server>__<tool>`.
 - **Implementation status:** tracked in [ROADMAP.md](../../ROADMAP.md); this RFC
   locks the tool-calling design. The work lands as its own build cycle; it is a
   producer for the M8 turn loop's `tools` channel (RFC-0007 §7), which specifies

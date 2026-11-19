@@ -24,6 +24,7 @@
   [RFC-0006](RFC-0006-Embedding-Contract-and-Hybrid-Memory-Retrieval.md) (the now
   async `MemoryService.retrieve()`/`search()`, `resume()`, and `embed_backlog()`
   that this layer is the first to await).
+- **Amended by** [RFC-0015](RFC-0015-MCP-Client-Connecting-to-MCP-Servers.md) (additive): `tools` frames carry an optional `server` field for MCP tools.
 - **Amends** [RFC-0005](RFC-0005-Voice-Interaction-STT-and-TTS.md) — reconciles
   its §4 WebSocket channel naming (`text` → `chat`) and its flat
   "all-frames-are-control" sketch into the channel-typed envelope specified here.
