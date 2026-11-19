@@ -23,7 +23,7 @@ def test_inspect_command_exits_zero(capsys):
 
 
 def test_inspect_survives_unroutable_model(monkeypatch, capsys):
-    """I2: `zygos inspect` must not crash when every circuit is open."""
+    """`zygos inspect` must not crash when every circuit is open."""
     from dataclasses import replace
 
     import zygos.cli.__main__ as cli

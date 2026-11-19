@@ -26,8 +26,8 @@ def test_stub_satisfies_protocol_and_registers():
     assert bindings and bindings[0].provider == "stub"
 
 
-def test_text_to_speech_now_has_a_contract():
-    # Cycle 2 adds the TTS contract; a conforming engine registers.
+def test_text_to_speech_has_a_contract():
+    # A conforming engine registers.
     from zygos.voice.contract import TextToSpeech
     assert CAPABILITY_CONTRACTS[Capability.TEXT_TO_SPEECH] is TextToSpeech
 

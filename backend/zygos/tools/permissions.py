@@ -19,7 +19,7 @@ class PermissionRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     tool: str
-    args_summary: dict[str, Any] = {}   # shallow; for a human prompt in M8. No secrets.
+    args_summary: dict[str, Any] = {}   # shallow; for a human-readable prompt. No secrets.
     run_id: str
     call_id: str
     details: dict[str, Any] = {}        # what the prompt shows about the tool (MCP). No secrets.

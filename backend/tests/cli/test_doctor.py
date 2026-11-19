@@ -252,7 +252,7 @@ def test_doctor_default_model_saved(tmp_path):
 
 
 def test_doctor_default_model_saved_installation_unknown_is_not_an_all_clear(tmp_path):
-    """Final fix wave I4: the doctor's own process has never listed Ollama, so it
+    """The doctor's own process has never listed Ollama, so it
     can't know a saved default was deleted -- it says so instead of '(saved)'."""
     check = _default_check(tmp_path, ("ollama", "gone:7b"))
     assert check.ok and not check.warn
@@ -268,7 +268,7 @@ def test_doctor_default_model_saved_but_ignored_warns(tmp_path):
 
 
 def test_doctor_probe_names_the_model_that_answered(tmp_path):
-    """Final fix wave minor (d): --probe generates through the saved default, so
+    """--probe generates through the saved default, so
     it says which model it probed rather than 'primary route responded'."""
     import asyncio
 

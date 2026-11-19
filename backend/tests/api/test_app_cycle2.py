@@ -36,7 +36,7 @@ def test_end_to_end_turn_over_real_app():
     kinds = [(f["channel"], f["type"]) for f in frames]
     assert kinds[0] == ("chat", "turn.start")
     assert kinds[-1] == ("chat", "turn.end")
-    # Default runtime wires the starter tools into TurnDeps (M8-C3), so a turn drives
+    # Default runtime wires the starter tools into TurnDeps, so a turn drives
     # the agentic tool loop (whole-answer via generate()) rather than token streaming;
     # the FakeProvider script text comes back intact instead of concatenated word-by-word.
     assert frames[-1]["payload"]["text"] == "alpha beta gamma"

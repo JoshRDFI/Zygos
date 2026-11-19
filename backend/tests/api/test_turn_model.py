@@ -1,6 +1,6 @@
 """RFC-0013 §5, §10, §11: turns report the answering model and category; loading frame.
 
-The route is pinned once per turn (controller ruling P5): a default change made
+The route is pinned once per turn (RFC-0013 §5): a default change made
 while a turn runs does not affect it.
 """
 
@@ -414,7 +414,7 @@ def test_app_turn_deps_carry_runtime_default_status():
     assert create_app(runtime).state.turn_deps.default_status is runtime.default_status
 
 
-# --- thinking check uses the pinned route (review fix round 2) ---------------
+# --- thinking check uses the pinned route ---------------
 
 class _ThinkChecker:
     def __init__(self, on_check=None):

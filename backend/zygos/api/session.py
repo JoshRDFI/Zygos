@@ -38,19 +38,19 @@ class Session:
         self.turn_status = "idle"
         self.connected = False
         self.outbound: asyncio.Queue[Frame | bytes] = asyncio.Queue()
-        self.speak = False  # per-session spoken-output preference (Voice C2 T8 sets it)
+        self.speak = False  # per-session spoken-output preference
         self.speaking = False  # True while a TTS synthesis is streaming (speech.py)
         self.speech_lock = asyncio.Lock()  # one speak_reply stream at a time (speech.py)
         self.ducked = False    # True during a duck window (barge-in stage 1)
         self.duck_timeout: asyncio.Task | None = None  # auto-unduck backstop
         self.active_cancel: CancelToken | None = None
         self.active_task: asyncio.Task | None = None
-        # call_id -> future awaiting a tools:permission_response (M8 C3)
+        # call_id -> future awaiting a tools:permission_response
         self.pending_permissions: dict[str, asyncio.Future] = {}
-        # connection bookkeeping used by the WS handler (Task 8)
+        # connection bookkeeping used by the WS handler
         self._writer: asyncio.Task | None = None
         self._conn: object | None = None
-        self.audio = None  # api.audio.AudioTurn | None — in-flight transcription (Task 11)
+        self.audio = None  # api.audio.AudioTurn | None — in-flight transcription
         # RFC-0012: sticky per-session thinking choice (None = config default),
         # and the last turn's input/id, for rethink.
         self.think: bool | None = None

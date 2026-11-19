@@ -1,4 +1,4 @@
-"""Deferred episodic->semantic consolidation (spec §5, Update stage).
+"""Deferred episodic->semantic consolidation (Update stage).
 
 Cheap-write is elsewhere; this is the expensive, off-critical-path pass. Each batch
 makes ONE LLM call (no DB lock held across it), then commits the derived semantic

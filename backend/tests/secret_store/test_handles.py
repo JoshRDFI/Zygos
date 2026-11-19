@@ -40,7 +40,7 @@ def test_package_import_pulls_no_optional_libraries():
     assert out.stdout.strip() == ""
 
 
-# -- M8: the error never echoes something that may be a secret ---------------
+# -- the error never echoes something that may be a secret ---------------
 
 
 def test_invalid_handle_without_colon_is_not_shown():
@@ -62,7 +62,7 @@ def test_invalid_handle_with_colon_is_shown_truncated():
     assert len(shown) <= 40 and shown.endswith("...")
 
 
-# -- follow-ups: boundaries and echo rule ------------------------------------
+# -- boundaries and echo rule ------------------------------------
 
 
 def test_handle_length_boundary():

@@ -101,7 +101,7 @@ class _UnroutableModel:
 
 @pytest.mark.asyncio
 async def test_get_runtime_survives_unroutable_model():
-    """I2/M6: warm-up checks the config primary route, never select_model()."""
+    """Warm-up checks the config primary route, never select_model()."""
     from dataclasses import replace
 
     from zygos.providers.fake import FakeProvider

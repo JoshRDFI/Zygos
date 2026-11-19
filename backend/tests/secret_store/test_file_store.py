@@ -163,7 +163,7 @@ def test_stat_error_is_unavailable(tmp_path, monkeypatch):
     assert "PermissionError" in s.availability()
 
 
-# -- follow-ups ----------------------------------------------------------------
+# -- header and edge cases ----------------------------------------------------------------
 
 
 def test_tampered_header_is_corrupt(store):

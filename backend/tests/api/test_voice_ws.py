@@ -1,4 +1,4 @@
-"""Voice sidecar lifespan integration (Voice Cycle 1, Task 10).
+"""Voice sidecar lifespan integration.
 
 Proves the FastAPI lifespan actually spawns the STT sidecar at startup and
 kills it at shutdown when voice is enabled — mirroring the memory_service
@@ -210,17 +210,17 @@ class _BlockingModel:
 
 
 def test_back_to_back_utterances_barge_in_cleanly(tmp_path):
-    # controller-directed fix: the audio-final path must barge in on a still-
+    # The audio-final path must barge in on a still-
     # running prior turn the same way the typed user_message path does,
     # otherwise back-to-back utterances clobber session.active_task.
     #
     # Turn 1 is made to block mid-stream so it is DEMONSTRABLY still running when
     # utterance 2's `final` reaches consume() — otherwise the barge-in branch
     # (`if session.active_task is not None and not session.active_task.done()`)
-    # never actually fires and this test is vacuous (see original Finding 1).
+    # never actually fires and this test is vacuous.
     rt = _voice_runtime(tmp_path)
     release = threading.Event()
-    # tools are ON by default (M8-C3); force the plain reasoning-off streaming path
+    # tools are ON by default; force the plain reasoning-off streaming path
     # so this test exercises run_turn's cooperative-cancellation polling loop the
     # same way it's mirrored in _BlockingModel.stream() below — the agentic-loop
     # path only checks ctx.cancelled between iterations, not mid model_service.generate().

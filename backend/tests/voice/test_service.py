@@ -26,7 +26,7 @@ async def test_unknown_engine_raises():
     # model_construct to exercise build_stt_plugin's own defensive branch.
     bad_config = SttConfig.model_construct(engine="whisper_cpp")
     with pytest.raises(Exception):
-        build_stt_plugin(bad_config)  # no worker this cycle
+        build_stt_plugin(bad_config)  # no plugin exists for this engine
 
 
 async def test_transcription_partials_then_final_drives_events():

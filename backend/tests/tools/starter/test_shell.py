@@ -1,4 +1,4 @@
-"""M5 C3 Task 4 — run_command: sandbox, exit codes, streaming, timeout-kill."""
+"""Run_command: sandbox, exit codes, streaming, timeout-kill."""
 
 import asyncio
 import sys
@@ -98,7 +98,7 @@ async def test_timeout_kills_child(tmp_path):
 
 @pytest.mark.asyncio
 async def test_stream_timeout_kills_child(tmp_path):
-    """Streaming deadline (via Task 1 aclose fix) runs the finally -> child killed."""
+    """Streaming deadline (the executor closes the inner generator) runs the finally -> child killed."""
     marker = tmp_path / "done.txt"
     tool = RunCommandTool(root=tmp_path, timeout_s=0.3)
     code = (

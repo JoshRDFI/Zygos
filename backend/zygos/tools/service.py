@@ -1,4 +1,4 @@
-"""ToolService facade — permission gate + one-level fallback over the executor (M5 C2).
+"""ToolService facade — permission gate + one-level fallback over the executor (M5).
 
 Pull-only snapshot; no bus events; no bootstrap wiring (pure library). The permission check
 runs ONCE per call; fallback is orchestrated here (the only layer with registry access to
@@ -226,7 +226,7 @@ class ToolService:
         """Run `tool`, recursing one level into its fallback on failure.
 
         NOTE: a built-in fallback is intentionally NOT re-gated through the permission
-        check — the primary's gate covers the call (spec §7, maintainer-approved). A
+        check — the primary's gate covers the call. A
         fallback configured with `permission="deny"`/`"ask"` is a config smell that
         would surface in review, not something this layer defends against. An MCP
         fallback (``meta.server`` set) is gated like any MCP call: trust is per tool.

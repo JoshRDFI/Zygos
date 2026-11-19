@@ -1,4 +1,4 @@
-"""Tool contract: JSON-Schema input tools (MCP phase 1a, Task 1)."""
+"""Tool contract: JSON-Schema input tools (RFC-0015 phase 1a)."""
 
 import pytest
 from pydantic import BaseModel, ValidationError

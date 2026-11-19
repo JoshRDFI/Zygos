@@ -2,7 +2,7 @@
 
 Episodic writes commit immediately (durable-on-write). `consolidate_batch` folds a
 derived semantic set and marks its sources in a single transaction, so an interrupted
-consolidation rolls back cleanly and is safe to redo (spec §3, §5).
+consolidation rolls back cleanly and is safe to redo.
 
 Stability: Experimental.
 """

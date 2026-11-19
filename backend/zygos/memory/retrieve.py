@@ -1,5 +1,5 @@
 """Retrieval: a pluggable relevance index (FTS5 now, embedding-ready) plus
-multi-factor, token-budgeted assembly (spec §4).
+multi-factor, token-budgeted assembly.
 
 Stability: Experimental.
 """

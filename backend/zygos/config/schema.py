@@ -215,7 +215,7 @@ class ServerConfig(BaseModel):
     host: str = "127.0.0.1"          # loopback default (RFC-0007 §11)
     port: int = 8000
     request_timeout_s: float = 60.0
-    # permission-prompt timeout; reserved here, consumed by the Cycle 3 resolver
+    # permission-prompt timeout; reserved here, consumed by the WebSocket permission resolver
     prompt_timeout_s: float = 120.0
     # extra browser origins allowed to write/chat (loopback is always allowed)
     allowed_origins: list[str] = []

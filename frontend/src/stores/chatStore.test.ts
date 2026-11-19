@@ -71,7 +71,7 @@ test("voice_command frames do not change messages", () => {
   expect(useChatStore.getState().messages).toHaveLength(1);
 });
 
-test("an error after turn.start releases the stuck streaming message (I3)", () => {
+test("an error after turn.start releases the stuck streaming message", () => {
   const s = useChatStore.getState();
   s.addUser("q");
   s.onFrame({ channel: "chat", type: "turn.start", payload: { turn_id: "t1", think: true } });

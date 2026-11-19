@@ -1,4 +1,4 @@
-"""M5 C3 Task 2 — read_file / write_file confinement + behavior."""
+"""Read_file / write_file confinement + behavior."""
 
 import pytest
 

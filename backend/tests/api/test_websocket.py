@@ -664,7 +664,7 @@ def test_think_toggle_applies_to_next_turn(monkeypatch):
     async def run():
         await _dispatch(session, deps, Frame(channel=CONTROL, type="think", payload={"enabled": True}))
         assert session.think is True
-        await session.think_state_task  # sent off the reader path (M5)
+        await session.think_state_task  # sent off the reader path
         frames = _drain_ws(session)
         assert frames[-1].type == "think.state" and frames[-1].payload["enabled"] is True
         await _dispatch(session, deps, Frame(channel=CHAT, type="user_message", payload={"text": "q"}))
@@ -722,7 +722,7 @@ def test_connect_survives_unroutable_model():
         assert json.loads(ws.receive_text())["type"] == "pong"
 
 
-# --- RFC-0012 §2 (final-review I1, M5): re-announce support changes; never block the reader
+# --- RFC-0012 §2 re-announce support changes; never block the reader
 
 class _SequenceChecker:
     """Returns each queued support in turn, then repeats the last."""

@@ -633,7 +633,7 @@ async def test_late_state_write_skips_a_replaced_server(h):
     assert h.store.state("r") == ServerState()
 
 
-# ---- final-review fixes ---------------------------------------------------------------
+# ---- hanging secret store and late writes ---------------------------------------------------------------
 
 SECRET_SLOW = "secret store didn't answer in time"
 

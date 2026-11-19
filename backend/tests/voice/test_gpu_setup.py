@@ -37,7 +37,7 @@ def test_fresh_setup_step_order(tmp_path):
 
 
 def test_rerun_reuses_existing_venv_but_repeats_install_swap_check(tmp_path):
-    # Review Focus #5
+    # A second run still repeats the install swap check.
     venv = str(tmp_path / "v")
     rec, removed = _Rec(), []
     code = gpu_setup.setup_gpu(venv_dir=venv, run=rec, exists=lambda p: True,
@@ -49,7 +49,7 @@ def test_rerun_reuses_existing_venv_but_repeats_install_swap_check(tmp_path):
 
 
 def test_reuse_repairs_broken_onnxruntime_gpu_by_removing_both_builds_first(tmp_path):
-    # Controller ruling: `pip install -e .[voice]` can reinstall CPU onnxruntime
+    # `pip install -e .[voice]` can reinstall CPU onnxruntime
     # (transitive via faster-whisper) even when reusing a venv already pinned to
     # onnxruntime-gpu, clobbering the shared onnxruntime/ import package. Every
     # run must uninstall BOTH builds before reinstalling onnxruntime-gpu so a

@@ -325,8 +325,8 @@ class _GatedFailProvider:
 
 
 async def test_circuit_opened_emitted_once_under_concurrent_failures():
-    # I1: two concurrent same-route failures crossing the threshold must emit
-    # circuit.opened exactly ONCE (the old state_before/after code emitted twice).
+    # Two concurrent same-route failures crossing the threshold must emit
+    # circuit.opened exactly ONCE.
     events, sub = _recorder()
     bus = InProcessEventBus()
     bus.subscribe(sub)
@@ -371,7 +371,7 @@ class _StaleProbeProvider:
 
 
 async def test_stale_nonprobe_success_does_not_admit_second_probe():
-    # I2: a non-probe success completing during half_open must NOT clear _probing;
+    # A non-probe success completing during half_open must NOT clear _probing;
     # a concurrent second admit stays denied (exactly one probe).
     clock = {"t": 0.0}
     provider = _StaleProbeProvider()
@@ -415,7 +415,7 @@ class _DeadProbeProvider:
 
 
 async def test_dead_probe_does_not_wedge_breaker():
-    # I2 (finally): a probe attempt that dies with a non-ProviderError must clear
+    # A probe attempt that dies with a non-ProviderError must clear
     # _probing so the breaker isn't wedged half-open forever.
     clock = {"t": 0.0}
     provider = _DeadProbeProvider()
@@ -747,7 +747,7 @@ async def test_factory_raising_is_cached_as_none_and_skipped():
     assert [e.payload.reason for e in events if e.type == "route.skipped"] == ["no_provider", "no_provider"]
 
 
-# -- RFC-0013 final fix wave: admission without claiming; load failures on the breaker --
+# -- RFC-0013: admission without claiming; load failures on the breaker --
 
 
 class _NamedProvider:

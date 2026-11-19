@@ -376,7 +376,7 @@ async def test_saved_default_not_installed_is_ignored_and_reported(tmp_path):
     assert [m["name"] for m in body["models"] if m["is_default"]] == ["qwen3:8b"]
 
 
-# -- final fix wave I2: a reset or a non-Ollama default cancels the pending preload --
+# -- a reset or a non-Ollama default cancels the pending preload --
 
 
 class _GatedOllama:

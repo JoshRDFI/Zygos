@@ -1,4 +1,4 @@
-"""M5 C3 Task 5 — starter suite exports + real permission gate end-to-end."""
+"""Starter suite exports + real permission gate end-to-end."""
 
 import pytest
 

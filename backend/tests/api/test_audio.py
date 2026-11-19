@@ -1,12 +1,12 @@
-"""Unit tests for zygos.api.audio (Voice Cycle 1, Task 12 review fix + I2 fix).
+"""Unit tests for zygos.api.audio .
 
-Finding 3: cancel_audio_turn's IPC call to the sidecar (transcription.cancel(),
+cancel_audio_turn's IPC call to the sidecar (transcription.cancel(),
 which does writer.drain() under the hood) must not be able to kill the whole
 session if the sidecar has already died. A dead sidecar raising
 ConnectionResetError/BrokenPipeError/OSError there must be swallowed, and the
 pusher/consumer tasks must still be cancelled and session.audio still cleared.
 
-I2 (whole-branch review): if transcription fails BEFORE the client sends
+Also: if transcription fails BEFORE the client sends
 audio.endpoint (e.g. the sidecar crashes mid-utterance, AC5), consume()'s
 except-branch fires and clears session.audio — but the pusher task is still
 parked on `await inbox.get()` waiting for a sentinel that will never arrive.

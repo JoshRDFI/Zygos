@@ -1,4 +1,4 @@
-"""The permission decision for MCP tools (RFC-0015 §5; spec "Untrusted tools in 1a").
+"""The permission decision for MCP tools (RFC-0015 §5).
 
 Config rules can only tighten an MCP tool: any matching ``deny`` denies, any matching
 ``ask`` makes it "not trusted", ``allow`` rules are ignored. Otherwise trust decides;

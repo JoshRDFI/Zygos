@@ -1,4 +1,4 @@
-"""End-to-end TTS output over a real fake TTS sidecar (Voice Cycle 2, Task 10)."""
+"""End-to-end TTS output over a real fake TTS sidecar."""
 from __future__ import annotations
 
 import dataclasses

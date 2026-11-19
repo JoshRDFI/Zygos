@@ -29,7 +29,7 @@ def _device_spec(device, reason=None, spec_device="cuda"):
 
 
 async def test_old_style_health_ok_falls_back_to_spec_device():
-    # Review Focus #1: fake_tts replies {"type":"health_ok"} with no device.
+    # fake_tts replies {"type":"health_ok"} with no device.
     p = TtsPlugin(FAKE, readiness_timeout_s=5.0)
     try:
         await p.start()
@@ -77,7 +77,7 @@ async def test_gpu_readiness_failure_retries_on_cpu_fallback():
 
 
 async def test_gpu_worker_hard_crash_before_readiness_retries_on_cpu_fallback():
-    # Review Focus: crash_worker connects then os._exit(1) without running its
+    # crash_worker connects then os._exit(1) without running its
     # event loop, so send_control/recv on the dead conn can raise EOFError *or*
     # OSError (BrokenPipeError/ConnectionResetError) depending on OS timing.
     # Either must be treated as a readiness failure and retried on CPU.
@@ -100,7 +100,7 @@ async def test_no_fallback_spec_raises():
 
 
 async def test_both_attempts_fail_raises_and_closes_both():
-    # Review Focus #3
+    # Both the GPU and the CPU attempt fail.
     silent_cpu = TtsEngineSpec(name="kokoro", device="cpu",
                                argv=(sys.executable, str(_SUPPORT / "silent_worker.py")))
     p = TtsPlugin(SILENT, readiness_timeout_s=0.3, fallback_spec=silent_cpu)

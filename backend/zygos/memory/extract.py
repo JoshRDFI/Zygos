@@ -1,4 +1,4 @@
-"""Cheap, synchronous episodic extraction — no LLM (spec §5, Extract stage).
+"""Cheap, synchronous episodic extraction — no LLM (Extract stage).
 
 Importance is a heuristic over cheap signals; the deferred consolidation pass
 refines it with an LLM rating.

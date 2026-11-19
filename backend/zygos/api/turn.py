@@ -191,7 +191,7 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
             prefs = deps.preferences.get()
         except Exception:  # noqa: BLE001 - personalization is advisory (RFC-0010)
             logger.warning("preferences read failed; degrading to no identity", exc_info=True)
-    # RFC-0013 §5 ruling P5: the route is pinned once per turn; every call of the
+    # RFC-0013 §5: the route is pinned once per turn; every call of the
     # turn gets it, so a default changed mid-turn applies from the next turn.
     category = CATEGORY_OF[classify_task(text)]
     try:

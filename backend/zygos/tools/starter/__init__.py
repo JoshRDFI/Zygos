@@ -1,4 +1,4 @@
-"""Starter tool suite (M5 C3): concrete file/http/shell tools built on the C1/C2 contract.
+"""Starter tool suite (M5): concrete file/http/shell tools built on the tool contract.
 
 Pure library — a caller (M8 turn loop) constructs and registers these with a ToolService.
 Stability: Experimental.

@@ -1,4 +1,4 @@
-"""M5 C1 Task 2 — Tool Protocol + BaseTool defaults."""
+"""Tool Protocol + BaseTool defaults."""
 
 import pytest
 from pydantic import BaseModel

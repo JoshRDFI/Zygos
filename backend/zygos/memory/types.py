@@ -1,7 +1,7 @@
 """Memory value types — layers, modality-tagged content, records, snapshot state.
 
 `content` is a modality-tagged structure (text-only in M4) — the seam that keeps
-native multimodal from forcing a schema migration later (spec §1).
+native multimodal from forcing a schema migration later.
 
 Stability: Experimental.
 """

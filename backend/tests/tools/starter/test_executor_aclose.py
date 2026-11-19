@@ -1,4 +1,4 @@
-"""M5 C3 Task 1 — _stream_with_timeout must close its inner generator promptly."""
+"""_stream_with_timeout must close its inner generator promptly."""
 
 import asyncio
 

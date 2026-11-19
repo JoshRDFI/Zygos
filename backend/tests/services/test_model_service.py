@@ -228,7 +228,7 @@ async def test_saved_default_failure_falls_back_and_next_call_retries_it(op):
     assert store.choices.default_model == DefaultModel(provider="fake", model="saved")
 
 
-# -- residency (Task 4 implements it; the service only drives the protocol) ------
+# -- residency (the service only drives the protocol) ------
 
 
 async def test_local_effective_route_is_made_resident_and_held_for_the_call():
@@ -332,7 +332,7 @@ def test_select_model_config_order_ignores_saved_default():
 
 
 
-# -- final fix wave I1: residency follows the router's admission state -----------
+# -- residency follows the router's admission state -----------
 
 
 class _Answering:
@@ -424,7 +424,7 @@ async def test_a_non_provider_error_from_residency_falls_back_not_fails(op, capl
     assert [c for c in router.calls if c["op"] == "record_failure"] == []
 
 
-# -- final fix wave minor (b): the answering local model is held for the call ------
+# -- the answering local model is held for the call ------
 
 
 @pytest.mark.parametrize("op", ["generate", "stream"])

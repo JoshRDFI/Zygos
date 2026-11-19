@@ -281,7 +281,7 @@ async def test_loop_records_thinking_per_iteration():
 
 
 async def test_route_and_callbacks_pass_to_every_generate_including_final():
-    """RFC-0013 ruling P5: the turn's pinned route reaches every call of the loop."""
+    """RFC-0013 §5: the turn's pinned route reaches every call of the loop."""
     from zygos.services.router import RouteChoice
     pinned = RouteChoice("other", "s")
     seen: list = []

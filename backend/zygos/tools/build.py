@@ -1,4 +1,4 @@
-"""ToolBuildContext — the uniform construction input for config-declared tools (M8 C3).
+"""ToolBuildContext — the uniform construction input for config-declared tools (M8).
 
 A tool's `from_config(ctx)` reads what it needs (a sandbox `workspace`, its own `settings`),
 mirroring how providers are built from `(settings, client)`. Stability: Experimental.

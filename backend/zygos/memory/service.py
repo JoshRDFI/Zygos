@@ -1,8 +1,8 @@
-"""MemoryService — RFC-0001 §2 surface over the 4-stage loop (spec §2).
+"""MemoryService — RFC-0001 §2 surface over the 4-stage loop.
 
 store/search/retrieve/snapshot are cheap & synchronous. summarize/flush/resume are
 async (they drive the LLM-backed consolidation). One consolidation engine, three
-entry points (spec §2).
+entry points.
 
 Stability: Experimental.
 """

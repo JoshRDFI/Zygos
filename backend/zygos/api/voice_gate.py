@@ -1,4 +1,4 @@
-"""Single-session voice ownership gate (closes review finding I3).
+"""Single-session voice ownership gate.
 
 Voice engines are shared single-connection local sidecars: only one session may
 use voice at a time, so concurrent sessions can never interleave PCM/control

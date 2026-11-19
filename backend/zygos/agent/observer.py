@@ -1,4 +1,4 @@
-"""Observation hook for the agentic loop (M8 C3).
+"""Observation hook for the agentic loop (M8).
 
 Neutral, api-free events the turn loop translates into `tools:*` frames. Purely
 observational: dropping the observer changes only what the client sees, never the loop's

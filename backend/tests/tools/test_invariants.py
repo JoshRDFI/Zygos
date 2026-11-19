@@ -1,4 +1,4 @@
-"""M5 C2 Task 8 — RFC-0002 invariants: tools emit no events and never trip the shared token."""
+"""RFC-0002 invariants: tools emit no events and never trip the shared token."""
 
 import pytest
 from pydantic import BaseModel

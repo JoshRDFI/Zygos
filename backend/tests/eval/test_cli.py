@@ -242,7 +242,7 @@ def test_check_provider_configured_uses_the_shared_local_providers():
 
 @pytest.mark.asyncio
 async def test_eval_measures_the_config_model_even_with_a_saved_default(tmp_path):
-    """Final fix wave I3: the CLI says providers.primary.model is under test, so a
+    """The CLI says providers.primary.model is under test, so a
     saved default (one click in the Models page) must not answer eval runs."""
     from zygos.models.default import DefaultStatus
     from zygos.providers.types import GenerationResult

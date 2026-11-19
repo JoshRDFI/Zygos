@@ -709,7 +709,7 @@ async def test_cancel_during_prefix_leaves_no_task(monkeypatch):
     assert created and all(t.done() for t in created)
 
 
-# --- RFC-0012 final review: M1 bounded direct buffer, M8 AC8 over every path, AC4 --------
+# --- RFC-0012: bounded direct buffer, every path --------
 
 class _BigThinkingStreamProvider(_RecordingProvider):
     """40 chunks of 1,000 thinking chars each (distinct per chunk), then the answer."""
@@ -799,7 +799,7 @@ async def test_turn_end_carries_rethink_of():
     assert _end(_drain(session)).payload["rethink_of"] == "t2"
 
 
-# --- Sentence-streaming speech: run_turn's direct path (2026-11-04 spec §3, §5) ----------
+# --- Sentence-streaming speech: run_turn's direct path ----------
 
 from zygos.api.frames import AUDIO_OUT, Frame  # noqa: E402
 
@@ -1004,7 +1004,7 @@ async def test_speaker_off_unchanged():
     assert voice.texts == [] and timings == []
 
 
-# --- Final review fixes: M2 (Review Focus 5) and a second cancel during abort ------------
+# --- A second cancel during abort ------------
 
 class _SlowCancelSynth:
     """Never finishes on its own; once cancelled, takes ``ticks`` loop turns to unwind."""

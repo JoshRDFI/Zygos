@@ -158,7 +158,7 @@ test("thinking text never appears in the chat", () => {
   expect(container.textContent).not.toContain("SECRET-CHAIN");
 });
 
-test("after a failed turn, Think it through on an earlier answer is enabled (I3)", async () => {
+test("after a failed turn, Think it through on an earlier answer is enabled", async () => {
   await startConnected();
   useThinkStore.setState({ supported: true });
   useChatStore.setState({ messages: [{ role: "user", text: "why?", streaming: false }, answered()] });

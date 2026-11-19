@@ -189,7 +189,7 @@ def _garbage_record(tmp_path):
 
 
 def test_doctor_explicit_file_ignores_unreadable_record_nothing_saved_is_warn(tmp_path, monkeypatch):
-    # Ruling 5: explicit encrypted_file ignores the record, so "saved" is the file only.
+    # Explicit encrypted_file ignores the record, so "saved" is the file only.
     monkeypatch.setitem(sys.modules, "cryptography.hazmat.primitives.ciphers.aead", None)
     _garbage_record(tmp_path)
     report, _ = _report(_write(tmp_path, "encrypted_file"))

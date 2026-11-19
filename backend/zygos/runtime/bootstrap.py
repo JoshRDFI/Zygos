@@ -317,7 +317,7 @@ def build_runtime(
         registry.register(Capability.SPEECH_TO_TEXT, stt_plugin, priority=0)
         registry.register(Capability.TEXT_TO_SPEECH, tts_plugin, priority=0)
         # `VoiceService.start` is intentionally NOT awaited here — build_runtime
-        # is a sync composition root; the async consumer (Task 10) spawns the
+        # is a sync composition root; the async app lifespan spawns the
         # sidecar at startup.
 
     hardware = HardwareProbe(models_dir=config.models.ollama_models_dir)

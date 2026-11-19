@@ -1,4 +1,4 @@
-"""M5 C1 Task 1 — error taxonomy + data models."""
+"""Error taxonomy + data models."""
 
 import dataclasses
 import pytest
@@ -80,7 +80,7 @@ def test_toolcontext_is_frozen():
         tctx.tool = "changed"
 
 
-# M5 C2 Task 2 tests below
+# RetryPolicy and streaming chunk types
 from typing import Any
 
 from zygos.tools.types import RetryPolicy, ToolChunk

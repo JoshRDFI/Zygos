@@ -46,7 +46,7 @@ def test_worker_python_override_present_wins_over_managed():
 
 
 def test_worker_python_override_missing_names_that_path_not_managed():
-    # Review Focus #2: a bad override must not silently use the managed venv.
+    # A bad override must not silently use the managed venv.
     got = resolve_worker_launch("cuda", "/custom/py", VENV_PY,
                                 exists=_exists(VENV_PY), main_python=MAIN)
     assert got.python == MAIN and got.device == "cpu"

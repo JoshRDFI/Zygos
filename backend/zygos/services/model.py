@@ -46,7 +46,7 @@ def classify_task(prompt: str) -> TaskClassification:
 
 
 class _ConfigOrder:
-    """A turn that began with no saved default (RFC-0013 §5, ruling P5): use the
+    """A turn that began with no saved default (RFC-0013 §5): use the
     router's configured order and do not look the saved default up again, so a
     default saved mid-turn applies from the next turn."""
 
@@ -69,7 +69,7 @@ TurnRoute = Union[RouteChoice, _ConfigOrder]
 
 
 class ResidencyLike(Protocol):
-    """Keeps a local model loaded for a call (RFC-0013 §5; implemented in Task 4).
+    """Keeps a local model loaded for a call (RFC-0013 §5).
 
     ``ensure_resident`` loads the route's model if needed (reporting it through
     ``on_loading``) and raises ``ProviderError`` when the load fails; ``turn``

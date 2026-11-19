@@ -1,4 +1,4 @@
-"""M5 C1 Task 5 — ToolService facade."""
+"""ToolService facade."""
 
 import pytest
 from pydantic import BaseModel

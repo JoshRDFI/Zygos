@@ -1,4 +1,4 @@
-"""`zygos mcp add | list | remove | on | off | trust | untrust` (MCP phase 1a, Task 8)."""
+"""`zygos mcp add | list | remove | on | off | trust | untrust` (RFC-0015 phase 1a)."""
 
 from __future__ import annotations
 

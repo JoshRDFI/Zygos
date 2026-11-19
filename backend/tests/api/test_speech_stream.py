@@ -380,10 +380,10 @@ async def test_abort_after_synthesize_failure_does_not_raise():
     await sp.abort()
     ends = [i for i in _frames(s) if getattr(i, "type", None) == "tts.end"]
     assert len(ends) == 1
-    assert ends[0].payload["reason"] == "error"  # M1: a later abort keeps the error reason
+    assert ends[0].payload["reason"] == "error"  # a later abort keeps the error reason
 
 
-# --- Final review fixes (M1, M3, M4) -------------------------------------------------------
+# --- Speaker state after a synthesis failure -------------------------------------------------------
 
 async def test_speaking_false_right_after_synthesis_failure():
     s = _sess()

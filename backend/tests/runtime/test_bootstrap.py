@@ -237,7 +237,7 @@ from zygos.runtime.bootstrap import _provider_settings  # noqa: E402
 
 
 def test_native_thinking_defaults_off():
-    """2026-10-15 decision: native model thinking is OFF unless configured."""
+    """Native model thinking is OFF unless configured."""
     assert _provider_settings(load_config(None), "ollama").think is False
 
 
@@ -443,7 +443,7 @@ def test_build_runtime_wires_residency_into_the_model_service(tmp_path: Path):
 
 
 async def test_aclose_cancels_a_pending_preload_before_closing_the_client():
-    """Final fix wave minor 7: shutdown doesn't leave a preload on a closed client."""
+    """Shutdown doesn't leave a preload on a closed client."""
     from zygos.services.router import RouteChoice
 
     runtime = build_runtime()

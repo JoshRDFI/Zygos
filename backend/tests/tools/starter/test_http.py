@@ -1,4 +1,4 @@
-"""M5 C3 Task 3 — http_fetch: returned-as-output statuses, SSRF, transport retry."""
+"""Http_fetch: returned-as-output statuses, SSRF, transport retry."""
 
 import httpx
 import pytest

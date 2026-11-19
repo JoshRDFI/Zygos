@@ -1,4 +1,4 @@
-"""M5 C2 Task 1 — tool error taxonomy additions."""
+"""Tool error taxonomy additions."""
 
 from zygos.errors import ToolError, ToolNotFound, ToolPermissionDenied, ToolTimeout, ZygosError
 

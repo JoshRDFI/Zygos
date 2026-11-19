@@ -163,7 +163,7 @@ def test_vad_onset_then_silence_ducks_and_restores(tmp_path):
 
 def test_disconnect_clears_armed_duck_timeout(tmp_path):
     # AC9 disconnect path: teardown clears an armed duck timeout (regression coverage;
-    # the behavior already exists from Task 5's teardown wiring).
+    # the teardown wiring already does this).
     app = _voice_app(tmp_path)
     with TestClient(app) as client:
         sid = client.post("/sessions").json()["id"]

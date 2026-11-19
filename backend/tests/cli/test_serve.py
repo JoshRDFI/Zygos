@@ -30,5 +30,5 @@ def test_run_server_wires_app_and_invokes_run():
     assert isinstance(captured["app"], FastAPI)
     assert captured["host"] == "127.0.0.1"
     assert captured["port"] == 1234
-    # Cycle 1 wires no live embedder (LocalEmbedder loads eagerly)
+    # serve wires no live embedder (LocalEmbedder loads eagerly)
     assert captured["app"].state.embedder is None

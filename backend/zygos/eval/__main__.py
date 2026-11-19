@@ -54,7 +54,7 @@ async def run_eval(suite_path, *, split, category, assembly, judge_model,
     tasks = suite.filter(split=split, category=category)
     scorers = build_scorers(judge_service or assembly.model_service, judge_model)
     # The model under test is providers.primary.model (as the CLI says), never the
-    # saved default from the Models page (RFC-0013 final review I3).
+    # saved default from the Models page (RFC-0013).
     runner = EvalRunner(assembly.reasoning_service, scorers, assembly.new_context, route=CONFIG_ORDER)
     records = await runner.run(tasks)
     return build_report(suite.name, records)

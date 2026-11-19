@@ -107,7 +107,7 @@ _NO_SERVER_RUN = textwrap.dedent(
 
 
 def test_mcp_never_imported_with_no_servers(tmp_path):
-    """Ruling 4: in a fresh interpreter (other tests in this process import the SDK)."""
+    """In a fresh interpreter (other tests in this process import the SDK)."""
     cfg = _config(tmp_path)
     env = {**os.environ, "ZYGOS_HOME": str(tmp_path / "home")}
     proc = subprocess.run(

@@ -1,4 +1,4 @@
-"""End-to-end live tool-calling round-trip (M8 Cycle 3, Task 10).
+"""End-to-end live tool-calling round-trip (M8).
 
 Proves the whole wired stack — WS turn loop -> RFC-0008 agentic loop -> ToolService
 permission gate -> WebSocketPromptResolver -> `tools:*` framing — works together, using
@@ -14,8 +14,7 @@ Scenarios:
   2. permission "deny" round-trip: tools:result carries tool_permission_denied, and the
      turn still completes normally.
   3. disconnect while a permission prompt is outstanding resolves the pending future to
-     "deny" and clears `Session.pending_permissions` (pins the WS disconnect cleanup path
-     added in an earlier M8-C3 task).
+     "deny" and clears `Session.pending_permissions` (pins the WS disconnect cleanup path).
 
 Stability: Experimental (test-only).
 """

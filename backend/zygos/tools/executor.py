@@ -1,6 +1,6 @@
-"""Four-phase tool executor: per-attempt timeout + guaranteed cleanup (M5 C2).
+"""Four-phase tool executor: per-attempt timeout + guaranteed cleanup (M5).
 
-Extends the C1 single-attempt core. `_one_attempt` is the C1 guarded block plus an
+`_one_attempt` is the single-attempt guarded block plus an
 `asyncio.wait_for` timeout around `execute` (the only awaitable phase). `execute_tool` wraps
 `_one_attempt` in a retry loop over `tool.meta.retry.attempts` with injected backoff sleep, and
 checks `ctx.cancelled` at each attempt boundary. Stability: Experimental.
@@ -27,7 +27,7 @@ async def _one_attempt(
     """One four-phase attempt. Returns (result, is_ok, retryable).
 
     `cleanup` always runs (finally). A cleanup raise downgrades a success to
-    tool_cleanup_failed but never masks a prior failure (C1 rule).
+    tool_cleanup_failed but never masks a prior failure.
     """
     name = tctx.tool
     call_id = tctx.call_id

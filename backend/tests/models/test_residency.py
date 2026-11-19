@@ -166,7 +166,7 @@ async def test_no_gpu_is_unknown_fit_and_evicts_nothing(tmp_path):
 
 
 async def test_load_waits_for_the_turn_in_flight_on_the_model_it_must_unload(tmp_path):
-    """Review Focus 2: a model with a turn in flight is never unloaded."""
+    """A model with a turn in flight is never unloaded."""
     rig = Rig(tmp_path, {"a:latest": 10 * GiB, "b:latest": 10 * GiB}, loaded=("a:latest",))
     turn_ends = asyncio.Event()
     loading: list[RouteChoice] = []
@@ -257,7 +257,7 @@ async def test_concurrent_loads_for_different_models_are_serialised(tmp_path):
 
 
 async def test_load_error_raises_provider_error_and_releases_the_lock(tmp_path):
-    """Review Focus 3: a failed load falls back like any hard failure; the next load works."""
+    """A failed load falls back like any hard failure; the next load works."""
     rig = Rig(tmp_path, {"a:latest": 4 * GiB})
     rig.ollama.fail["a:latest"] = ProviderTimeout("ollama timed out", provider="ollama")
     with pytest.raises(ProviderError) as info:
@@ -313,7 +313,7 @@ async def test_cancelled_ensure_resident_propagates_and_releases_the_lock(tmp_pa
 
 
 async def test_preload_twice_cancels_the_first_only_the_second_loads(tmp_path):
-    """Review Focus 4: changing the default twice quickly."""
+    """Changing the default twice quickly."""
     rig = Rig(tmp_path, {"a:latest": 4 * GiB, "b:latest": 4 * GiB})
     rig.ollama.gates["a:latest"] = asyncio.Event()  # the first load hangs
     rig.manager.preload(_r("a:latest"))
@@ -365,7 +365,7 @@ async def test_non_ollama_route_is_a_no_op(tmp_path):
 
 
 async def test_loaded_non_victim_turn_skips_the_lock_while_an_eviction_waits(tmp_path):
-    """Review fix 1: X busy in session A, B waits to evict X for Y. D (Z loaded,
+    """X busy in session A, B waits to evict X for Y. D (Z loaded,
     not a victim) is not queued behind B; C (X, a victim) goes through the lock."""
     sizes = {"x:latest": 10 * GiB, "y:latest": 10 * GiB, "z:latest": 1 * GiB}
     rig = Rig(tmp_path, sizes, loaded=("x:latest", "z:latest"))
@@ -424,7 +424,7 @@ async def test_fast_path_rechecks_after_an_unload_it_raced(tmp_path):
 
 
 async def test_unneeded_victims_are_pruned(tmp_path):
-    """Review fix 2: idle Z goes first by order, but unloading X alone suffices."""
+    """Idle Z goes first by order, but unloading X alone suffices."""
     sizes = {"x:latest": 10 * GiB, "y:latest": 10 * GiB, "z:latest": 1 * GiB}
     rig = Rig(tmp_path, sizes, loaded=("x:latest", "z:latest"))  # 5 GiB free
     async with rig.manager.turn(_r("x:latest")):
@@ -435,7 +435,7 @@ async def test_unneeded_victims_are_pruned(tmp_path):
     assert rig.loaded_events()[0].evicted == ("x:latest",)
 
 
-# -- final fix wave: hold() for router-chosen answers; cancel_preload() -----------
+# -- hold() for router-chosen answers; cancel_preload() -----------
 
 
 async def test_hold_marks_a_model_in_use_until_released(tmp_path):

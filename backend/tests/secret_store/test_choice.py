@@ -79,7 +79,7 @@ def test_concurrent_record_if_absent_agree(tmp_path):
     assert results["keyring"] == results["file"]
 
 
-# -- M4: empty fields are invalid --------------------------------------------
+# -- empty fields are invalid --------------------------------------------
 
 
 @pytest.mark.parametrize("field", ["backend", "chosen_at", "install_id"])
@@ -108,7 +108,7 @@ def test_stored_record_with_empty_install_id_is_unreadable(tmp_path):
         SqliteChoiceStore(db).read()
 
 
-# -- M7: filesystem errors are SecretStoreUnavailable ------------------------
+# -- filesystem errors are SecretStoreUnavailable ------------------------
 
 
 def test_record_mkdir_error_is_unavailable(tmp_path):

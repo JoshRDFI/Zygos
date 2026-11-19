@@ -1,4 +1,4 @@
-"""M5 C2 Task 3 — permission policy + resolver seam."""
+"""Permission policy + resolver seam."""
 
 import asyncio
 

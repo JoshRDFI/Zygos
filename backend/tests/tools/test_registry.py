@@ -1,4 +1,4 @@
-"""M5 C1 Task 3 — ToolRegistry."""
+"""ToolRegistry."""
 
 import pytest
 from pydantic import BaseModel

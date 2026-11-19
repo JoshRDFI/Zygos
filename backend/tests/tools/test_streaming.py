@@ -1,4 +1,4 @@
-"""M5 C2 Task 6 — streaming executor: chunks + terminal result, started-flag retry cutoff."""
+"""Streaming executor: chunks + terminal result, started-flag retry cutoff."""
 
 import asyncio
 

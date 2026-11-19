@@ -1,4 +1,4 @@
-"""M5 C1 Task 4 — core executor: four cleanup paths + error mapping."""
+"""Core executor: four cleanup paths + error mapping."""
 
 import asyncio
 

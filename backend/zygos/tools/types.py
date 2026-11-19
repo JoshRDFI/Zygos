@@ -105,7 +105,7 @@ class ToolContext:
     """Per-call context derived from ExecutionContext. Holds NO service refs (RFC-0002).
 
     `exec` is a child span of the caller's context (span_id == call_id). `emit`/`cancelled`
-    passthrough are present but unused in M5 C1 (no events emitted this cycle).
+    passthrough are present but unused (tools emit no events; RFC-0002).
     """
 
     exec: ExecutionContext

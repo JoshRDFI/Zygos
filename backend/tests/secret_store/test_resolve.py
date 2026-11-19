@@ -452,7 +452,7 @@ def test_build_does_no_io_and_no_optional_imports(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
-# -- I1: a keyring whose discovery raises never escapes the handle -----------
+# -- a keyring whose discovery raises never escapes the handle -----------
 
 
 def _discovery_raises(monkeypatch):
@@ -520,7 +520,7 @@ def test_has_saved_explicit_file_ignores_record(tmp_path):
 
 
 def test_stat_error_on_secrets_file_is_unavailable_not_a_raise(tmp_path, monkeypatch):
-    # M7: no record, and secrets.enc can't be checked → unavailable, never a raise.
+    # No record, and secrets.enc can't be checked → unavailable, never a raise.
     _record_path = _db(tmp_path)
     h = _handle(tmp_path, keyring_backend=_fail_keyring())
     from pathlib import Path

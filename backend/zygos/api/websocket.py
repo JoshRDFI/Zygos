@@ -91,7 +91,7 @@ async def _dispatch(session: Session, deps: TurnDeps, frame: Frame) -> None:
         schedule_think_state(session, deps)
     elif frame.channel == CONTROL and frame.type == "think":
         session.think = bool(frame.payload.get("enabled", False))
-        schedule_think_state(session, deps)  # off the reader path (M5); always re-probes
+        schedule_think_state(session, deps)  # off the reader path; always re-probes
     elif frame.channel == TOOLS and frame.type == "permission_response":
         call_id = str(frame.payload.get("call_id", ""))
         decision = frame.payload.get("decision")

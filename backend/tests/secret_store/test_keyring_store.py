@@ -89,7 +89,7 @@ def test_no_install_id_reads_none_and_refuses_writes():
         s.delete(H)
 
 
-# -- I1: backend discovery failures are mapped, and bounded by the probe -----
+# -- backend discovery failures are mapped, and bounded by the probe -----
 
 
 def _discovery_raises(monkeypatch, exc):
@@ -140,7 +140,7 @@ def test_discovery_is_bounded_by_probe_timeout(monkeypatch):
     assert time.monotonic() - t0 < 2
 
 
-# -- M1: low-priority (plain-text) backends are not a keychain ---------------
+# -- low-priority (plain-text) backends are not a keychain ---------------
 
 
 def _with_priority(priority, module="keyrings.alt.file"):

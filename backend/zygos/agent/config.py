@@ -1,7 +1,7 @@
 """ToolLoopConfig — bounds for the agentic loop (RFC-0008 §9).
 
-Lives in agent/, NOT config/schema.py, this cycle (pure library; mirrors RetryPolicy
-living in tools/). M8 Cycle 3 adds the bootstrap/ToolsConfig wiring.
+Lives in agent/, not config/schema.py (pure library; mirrors RetryPolicy
+living in tools/).
 
 Stability: Experimental.
 """
