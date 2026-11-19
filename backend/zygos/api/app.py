@@ -130,6 +130,7 @@ def create_app(
         think_default=runtime.config.providers.think,
         thinking_support=runtime.thinking_support,
         default_status=runtime.default_status,
+        time_zone=runtime.config.personalization.time_zone,
     )
     # Both read the app's current state when called. The spoken line is fire-and-forget,
     # so it never delays the prompt; the resolver keeps the task alive.

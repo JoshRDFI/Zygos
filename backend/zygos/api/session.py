@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -55,6 +56,7 @@ class Session:
         # and the last turn's input/id, for rethink.
         self.think: bool | None = None
         self.last_user_text: str | None = None
+        self.previous_user_at: datetime | None = None  # when the last turn started
         self.last_turn_id: str | None = None
         # RFC-0012 §2: last think.state (supported, reason) sent, and the in-flight
         # background send (held so it is not GC'd; cancelled on WS teardown).

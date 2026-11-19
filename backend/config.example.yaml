@@ -35,6 +35,10 @@ server:
   # (e.g. behind a reverse proxy) that may change settings or chat:
   # allowed_origins: []        # e.g. ["https://zygos.example"]
 
+# The model is told the local time each turn. Uncomment to override the system zone:
+# personalization:
+#   time_zone: Europe/London   # IANA name
+
 # Relative data paths (memory.db_path, personalization.db_path, tools.workspace_root,
 # models.profiles_dir, voice.stt.download_root, voice.tts.download_root, and
 # voice.tts.worker_python when it contains a path separator; a bare name like

@@ -182,7 +182,7 @@ above.
 **Semantic memory (optional).** `memory.enabled: true` gives keyword recall out of the box;
 `retrieval_mode: hybrid` adds local embeddings and needs `pip install -e '.[server,embeddings]'`.
 
-**Personalize (optional).** `.venv/bin/python -m zygos.cli personalize` — describe yourself and the assistant you want; review the draft before it's saved. `personalize show|set|clear` edit it directly; changes apply on the next turn, no restart.
+**Personalize (optional).** `.venv/bin/python -m zygos.cli personalize` — describe yourself and the assistant you want; review the draft before it's saved. `personalize show|set|clear` edit it directly; changes apply on the next turn, no restart. The model is told the local time each turn; `personalization.time_zone` (an IANA name) overrides the system zone.
 
 **Thinking (optional).** Native model thinking is off by default, because it adds seconds before the first word. Turn it on when a question needs it:
 

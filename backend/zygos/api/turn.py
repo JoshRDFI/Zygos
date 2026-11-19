@@ -21,6 +21,7 @@ import time
 import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
@@ -41,6 +42,7 @@ from zygos.personalization.render import render_identity
 from zygos.providers.types import GenerationRequest, Message
 from zygos.reasoning.service import ReasoningService
 from zygos.reasoning.types import ReasoningInput
+from zygos.runtime.clock import resolve_zone, time_context_line
 from zygos.runtime.context import CancelToken, ExecutionContext
 from zygos.runtime.events import ModelChosen
 from zygos.services.model import CATEGORY_OF, CONFIG_ORDER, ModelService, classify_task
@@ -80,6 +82,9 @@ class TurnDeps:
     thinking_support: ThinkingSupportChecker | None = None
     # RFC-0013 §5: the runtime's default-model status, for the model.chosen reason
     default_status: "Callable[[], DefaultStatus] | None" = None
+    # The local time the model is told each turn; injectable so tests can pin it.
+    now: Callable[[], datetime] = lambda: datetime.now().astimezone()
+    time_zone: str | None = None  # personalization.time_zone; None = system zone
 
 
 def _json_safe(value):
@@ -105,12 +110,15 @@ def system_texts(modality: TurnModality,
 
 def build_messages(context: tuple[str, ...], text: str,
                    modality: TurnModality = TurnModality(),
-                   prefs: Personalization = Personalization()) -> tuple[Message, ...]:
+                   prefs: Personalization = Personalization(),
+                   time_line: str | None = None) -> tuple[Message, ...]:
     messages: list[Message] = [Message(role="system", content=t)
                                for t in system_texts(modality, prefs)]
     if context:
         joined = "\n".join(context)
         messages.append(Message(role="system", content=f"Relevant memory:\n{joined}"))
+    if time_line:  # after memory, just before the user message: the prompt's start stays stable
+        messages.append(Message(role="system", content=time_line))
     messages.append(Message(role="user", content=text))
     return tuple(messages)
 
@@ -182,6 +190,10 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
     turn_started_at = time.monotonic()
     turn_id = deps.new_id()
     session.last_user_text = text
+    tz, tz_label = resolve_zone(deps.time_zone)
+    now = deps.now().astimezone(tz)
+    time_line = time_context_line(now, session.previous_user_at, tz_label)
+    session.previous_user_at = now
     session.last_turn_id = turn_id
     speaks = _speaks_reply(session, deps)
     modality = TurnModality(spoken_input=spoken_input, spoken_output=speaks)
@@ -251,7 +263,7 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
 
         tools = _turn_tools(deps)
         if tools:
-            messages = build_messages(context, text, modality, prefs)
+            messages = build_messages(context, text, modality, prefs, time_line)
             metas = [getattr(t, "meta", None) for t in tools]
             servers = {m.name: m.server for m in metas if getattr(m, "server", None)}
 
@@ -278,7 +290,7 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
             final = agent_result.text
             end_extra = {"stop_reason": agent_result.stop_reason, "iterations": agent_result.iterations}
         elif not deps.reasoning_enabled:
-            request = GenerationRequest(messages=build_messages(context, text, modality, prefs),
+            request = GenerationRequest(messages=build_messages(context, text, modality, prefs, time_line),
                                         think=effective)
             thinking = TailBuffer()  # bounded, filled chunk by chunk (RFC-0012 §6)
             if speaks:  # speak sentence by sentence as the reply streams
@@ -305,7 +317,7 @@ async def run_turn(session: Session, deps: TurnDeps, text: str, cancel: CancelTo
         else:
             reasoning = deps.reasoning_factory()
             result = await reasoning.run(ctx, ReasoningInput(
-                prompt=text, context=context, system=system_texts(modality, prefs),
+                prompt=text, context=context, system=(*system_texts(modality, prefs), time_line),
                 think=effective), thinking=recorder, **routing)
             final = result.text
             end_extra = {

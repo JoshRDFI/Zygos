@@ -54,6 +54,69 @@ def test_build_messages_includes_memory_system_message():
     assert msgs[-1].role == "user"
 
 
+def test_build_messages_time_line_after_memory_before_user():
+    msgs = build_messages(("fact A",), "hello", TurnModality(spoken_input=True),
+                          time_line="Current local time: X.")
+    assert [m.role for m in msgs] == ["system", "system", "system", "user"]
+    assert "fact A" in msgs[1].content
+    assert msgs[2].content == "Current local time: X."
+    assert msgs[3].content == "hello"
+
+
+def test_build_messages_time_line_without_memory_precedes_user():
+    msgs = build_messages((), "hello", time_line="T")
+    assert [m.content for m in msgs] == ["T", "hello"]
+
+
+def test_build_messages_absent_time_line_adds_nothing():
+    assert build_messages(("f",), "hi", time_line=None) == build_messages(("f",), "hi")
+
+
+def _clocked_deps(model, times, **kw):
+    it = iter(times)
+    return TurnDeps(model_service=model, reasoning_factory=kw.pop("reasoning_factory", lambda: None),
+                    reasoning_enabled=kw.pop("reasoning_enabled", False), memory_service=None,
+                    new_id=lambda: "turn-1", now=lambda: next(it), time_zone="Europe/London", **kw)
+
+
+@pytest.mark.asyncio
+async def test_turn_gives_model_the_time_and_gap():
+    from datetime import datetime, timedelta, timezone
+    t0 = datetime(2026, 11, 19, 7, 41, tzinfo=timezone.utc)
+    model, provider = _recording_model(text="ok")
+    deps = _clocked_deps(model, [t0, t0 + timedelta(hours=3)])
+    session = _session()
+    await run_turn(session, deps, "one", CancelToken(), spoken_input=False, think=None)
+    await run_turn(session, deps, "two", CancelToken(), spoken_input=False, think=None)
+    first, second = (_all_system_texts(r) for r in provider.requests[:2])
+    assert first == ["Current local time: Thursday 19 November 2026, 07:41 (Europe/London)."]
+    assert second == ["Current local time: Thursday 19 November 2026, 10:41 (Europe/London). "
+                      "The user's previous message was 3 hours ago."]
+    assert provider.requests[0].messages[-1].content == "one"
+    assert provider.requests[0].messages[-2].role == "system"
+
+
+@pytest.mark.asyncio
+async def test_reasoning_path_gets_time_line_last_in_system():
+    from datetime import datetime, timezone
+    seen = {}
+
+    class _CapturingReasoning:
+        async def run(self, ctx, input, thinking=None, **kw):
+            seen["input"] = input
+            from zygos.reasoning.types import ReasoningResult
+            return ReasoningResult(text="r", loops_used=1, final_confidence=1.0,
+                                   halted_early=False, model="m")
+
+    model, _ = _recording_model(text="ok")
+    deps = _clocked_deps(model, [datetime(2026, 11, 19, 7, 41, tzinfo=timezone.utc)],
+                         reasoning_factory=_CapturingReasoning, reasoning_enabled=True)
+    await run_turn(_session(), deps, "hi", CancelToken(), spoken_input=True, think=None)
+    system = seen["input"].system
+    assert "speech-to-text" in system[0]
+    assert system[-1].startswith("Current local time: Thursday 19 November 2026, 07:41")
+
+
 @pytest.mark.asyncio
 async def test_reasoning_off_streams_tokens_then_turn_end():
     session = _session()
@@ -190,8 +253,16 @@ def _recording_model(**kw):
     return DefaultModelService(router), provider
 
 
-def _system_texts(request):
+_TIME_PREFIX = "Current local time:"
+
+
+def _all_system_texts(request):
     return [m.content for m in request.messages if m.role == "system"]
+
+
+def _system_texts(request):
+    """System messages other than the per-turn time line (covered by its own tests)."""
+    return [t for t in _all_system_texts(request) if not t.startswith(_TIME_PREFIX)]
 
 
 def test_build_messages_default_is_unchanged_by_modality_seam():
@@ -263,7 +334,9 @@ async def test_tools_path_receives_modality_message(monkeypatch):
                     new_id=lambda: "turn-1", tools=(object(),))
     await run_turn(_session(), deps, "hi", CancelToken(), spoken_input=True, think=None)
     systems = [m.content for m in captured["messages"] if m.role == "system"]
-    assert len(systems) == 1 and "speech-to-text" in systems[0]
+    assert len(systems) == 2 and "speech-to-text" in systems[0]
+    assert systems[1].startswith(_TIME_PREFIX)
+    assert captured["messages"][-2].content == systems[1]  # just before the user message
 
 
 @pytest.mark.asyncio
@@ -281,8 +354,9 @@ async def test_reasoning_path_receives_modality_message():
     deps = TurnDeps(model_service=model, reasoning_factory=_CapturingReasoning,
                     reasoning_enabled=True, memory_service=None, new_id=lambda: "turn-1")
     await run_turn(_session(), deps, "hi", CancelToken(), spoken_input=True, think=None)
-    (system,) = seen["input"].system
+    system, time_line = seen["input"].system
     assert "speech-to-text" in system
+    assert time_line.startswith(_TIME_PREFIX)
 
 
 @pytest.mark.asyncio
@@ -300,7 +374,8 @@ async def test_reasoning_path_typed_turn_has_no_system():
     deps = TurnDeps(model_service=model, reasoning_factory=_CapturingReasoning,
                     reasoning_enabled=True, memory_service=None, new_id=lambda: "turn-1")
     await run_turn(_session(), deps, "hi", CancelToken(), spoken_input=False, think=None)
-    assert seen["input"].system == ()
+    (time_line,) = seen["input"].system
+    assert time_line.startswith(_TIME_PREFIX)
 
 
 @pytest.mark.asyncio

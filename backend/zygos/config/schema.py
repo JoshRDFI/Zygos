@@ -1,8 +1,9 @@
 """Declarative configuration schema (RFC-0001 §3, §8). Stability: Experimental."""
 
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from zygos.runtime.capabilities import Capability
 from zygos.tools.permissions import Rule
@@ -228,6 +229,19 @@ class PersonalizationConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     db_path: str = ".zygos/preferences.db"
+    # IANA zone name for the time the model is told each turn; None = the system zone.
+    time_zone: str | None = None
+
+    @field_validator("time_zone")
+    @classmethod
+    def _known_zone(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        try:
+            ZoneInfo(v)
+        except (ZoneInfoNotFoundError, ValueError, OSError) as exc:
+            raise ValueError(f"unknown time zone {v!r}; use an IANA name such as Europe/London") from exc
+        return v
 
 
 class SecretsConfig(BaseModel):
