@@ -247,6 +247,15 @@ Zygos is developed AI-native and deliberately so: architecture, review, and ever
 decision about what ships are the maintainer's; the code is primarily authored by Claude
 (Anthropic) under that direction, reflected in the commit trailers.
 
+## Development
+
+Turn on the local git hooks once per clone with `git config core.hooksPath .githooks`.
+`commit-msg` checks the Conventional-Commits subject and that any Claude `Co-Authored-By`
+trailer is exactly the expected one; `pre-commit` runs `git diff --cached --check`, blocks
+commits that shrink or delete tests, and warns about planning leftovers in comments. Bypass
+the test guard with `ZYGOS_ALLOW_TEST_SHRINK=1`, or everything with `git commit --no-verify`
+in an emergency. Hook tests: `backend/.venv/bin/python -m pytest scripts/githooks -q`.
+
 ## About the name
 
 **Zygos** (ζυγός) is Ancient Greek for **yoke**, **coupling**, or **joining** — binding
