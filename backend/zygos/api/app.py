@@ -27,6 +27,7 @@ from zygos.api.routes_preferences import router as preferences_router
 from zygos.api.routes_runtime import router as runtime_router
 from zygos.api.routes_sessions import router as sessions_router
 from zygos.api.session import SessionRegistry
+from zygos.api.speech import say
 from zygos.api.trace import install_trace_bridge
 from zygos.api.turn import TurnDeps
 from zygos.api.voice_gate import VoiceGate
@@ -106,8 +107,6 @@ def create_app(
         new_id=lambda: uuid.uuid4().hex,
     )
     app.state.registry = registry
-    resolver = WebSocketPromptResolver(registry, runtime.config.server.prompt_timeout_s)
-    runtime.tool_service.bind_resolver(resolver)
     voice_gate = VoiceGate()
     app.state.turn_deps = TurnDeps(
         model_service=runtime.model_service,
@@ -128,6 +127,14 @@ def create_app(
         thinking_support=runtime.thinking_support,
         default_status=runtime.default_status,
     )
+    # Both read the app's current state when called. The spoken line is fire-and-forget,
+    # so it never delays the prompt; the resolver keeps the task alive.
+    resolver = WebSocketPromptResolver(
+        registry, runtime.config.server.prompt_timeout_s,
+        trust=lambda tool, scope: app.state.runtime.mcp.trust_from_prompt(tool, scope),
+        announce=lambda s, text: asyncio.ensure_future(say(s, app.state.turn_deps, text)),
+    )
+    runtime.tool_service.bind_resolver(resolver)
     install_trace_bridge(runtime.event_bus, registry)
     app.state.session_count = session_count if session_count is not None else registry.count
 

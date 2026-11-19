@@ -552,7 +552,8 @@ async def test_real_remote_listed_trusted_and_called(h):
 
         ctx = root_context(h.bus)
         denied = await h.service.execute(ToolCall(tool="echo__echo", args={"text": "hi"}), ctx)
-        assert denied.error_message == "not trusted yet — run: zygos mcp trust echo/echo"
+        assert denied.error_message == (
+            "not trusted — answer the prompt in the web page, or run: zygos mcp trust echo/echo")
 
         seen = next(t for t in h.store.state("echo").tools if t.name == "echo")
         h.other.trust_tool(_entry("echo", seen))

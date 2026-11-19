@@ -27,7 +27,7 @@ def mcp_decision(tool_name: str, rules: Sequence[Rule], trusted: bool) -> McpDec
     if "deny" in matching:
         return "deny"
     if "ask" in matching:
-        return "not_trusted"  # 1b: the prompt
+        return "not_trusted"  # a config ask rule prompts every time; trust cannot loosen it
     return "allow" if trusted else "not_trusted"
 
 

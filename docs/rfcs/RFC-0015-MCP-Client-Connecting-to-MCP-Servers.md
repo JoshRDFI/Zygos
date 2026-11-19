@@ -29,7 +29,7 @@
 - **Does not govern:** Zygos acting as an MCP **server** (later, its own RFC);
   installing MCP servers or their runtimes (`node`, `uv`, Docker — the user does);
   ComfyUI itself, RunPod, or any server's own behaviour; vision input (RFC-0009).
-- **Implementation status:** phase 0 built; phase 1a built (backend, CLI, doctor); 1b (web UI) next. Archon `85d6b4ab`.
+- **Implementation status:** phase 0 built; phase 1a built (backend, CLI, doctor); phase 1b build A: chat prompt and tool cards built; 1b build B (Tools page) next. Archon `85d6b4ab`.
 
 ## Summary
 

@@ -20,6 +20,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from zygos.api.audio import cancel_audio_turn, end_audio_turn, feed_audio, start_audio_turn
 from zygos.api.duck import arm_duck, release_duck, stop_speech
 from zygos.api.frames import AUDIO_TAG_IN, CHAT, CONTROL, TOOLS, Frame, decode, encode
+from zygos.api.permission import PromptAnswer
 from zygos.api.session import Session
 from zygos.api.turn import TurnDeps, run_turn
 from zygos.api.thinking import schedule_think_state
@@ -93,9 +94,11 @@ async def _dispatch(session: Session, deps: TurnDeps, frame: Frame) -> None:
     elif frame.channel == TOOLS and frame.type == "permission_response":
         call_id = str(frame.payload.get("call_id", ""))
         decision = frame.payload.get("decision")
+        trust = frame.payload.get("trust")
+        trust = trust if trust in ("tool", "server") else None
         fut = session.pending_permissions.get(call_id)
         if fut is not None and not fut.done() and decision in ("allow", "deny"):
-            fut.set_result(decision)
+            fut.set_result(PromptAnswer(decision, trust))
     elif frame.channel == CONTROL and frame.type == "audio.start":
         if _acquire_voice_or_warn(session, deps):
             await start_audio_turn(session, deps)

@@ -22,6 +22,7 @@ class PermissionRequest(BaseModel):
     args_summary: dict[str, Any] = {}   # shallow; for a human prompt in M8. No secrets.
     run_id: str
     call_id: str
+    details: dict[str, Any] = {}        # what the prompt shows about the tool (MCP). No secrets.
 
 
 class Rule(BaseModel):

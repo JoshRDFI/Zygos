@@ -161,7 +161,7 @@ pane, and trace pane off one socket without inferring structure.
 | Channel | Direction | `type` values | Notes |
 |---|---|---|---|
 | `chat` | both | `user_message` (→srv); `turn.start`, `token`, `turn.end`, `error` (→cli) | The conversation. STT `partial`/`final` map here in the voice build. |
-| `tools` | both | `call`, `chunk`, `result`, `permission` (→cli); `permission_response` (→srv) | Tool-call lifecycle + the interactive permission round-trip. |
+| `tools` | both | `call`, `chunk`, `result`, `permission`, `permission.result` (→cli); `permission_response` (→srv) | Tool-call lifecycle + the interactive permission round-trip. `permission.result` was added additively with RFC-0015 phase 1b (§7). |
 | `trace` | →cli | `event` | Mirrors one emitted bus payload; `payload` carries the event's own `type` + fields. |
 | `control` | both | `hello`/handshake, `auth` (reserved), `cancel`, `error`, `ping`/`pong` | Session/codec negotiation, barge-in/abort, protocol errors. |
 | `audio.in` | →srv | *(binary)* | **Reserved** — voice build (RFC-0005). |
@@ -257,6 +257,27 @@ denies any pending permission prompt.
   shared resolver routes each prompt to the right socket via `ctx.session_id`
   through the `SessionRegistry`. Sticky per-session "always allow" is a noted
   later refinement.
+
+  *Additive, with RFC-0015 phase 1b (MCP tools ask in chat).* All new fields are
+  optional; an old client that ignores them stays correct.
+  - `tools:permission` also carries `expires_in_s` (the resolver's timeout, for a
+    countdown) and `can_trust` (`false` for built-ins). For an MCP tool it adds
+    `server`, `server_tool`, `where` (`"local"`/`"remote"`), `address` (as
+    `zygos mcp list` shows it; never env or header values), `description`,
+    `claims` (the server's own annotations), `can_trust` (`false` with a
+    `rule_note` when a config `ask` rule forces the prompt), and `changed`
+    (`{old_description, new_description, old_schema, new_schema}`) for a tool that
+    changed since it was trusted.
+  - `tools:permission_response` takes an optional `trust: "tool" | "server"`. It
+    counts only with `decision: "allow"` and only when the prompt offered
+    `can_trust`; any other value is dropped. An answer for a `call_id` that is not
+    pending in that session is ignored and writes no trust.
+  - `tools:permission.result` `{call_id, outcome}` closes every prompt sent, once.
+    `outcome` is `allowed`, `trusted_tool`, `trusted_server`, `denied`,
+    `timed_out`, `cancelled` or `trust_failed` (the call ran but trust was not
+    saved: "couldn't save trust — it will ask again").
+  - When the session is speaking, the server says once per prompt "I need your OK
+    on screen to use <name>." Nothing listens for a spoken yes.
 
 - **Wiring.** Bootstrap builds `ToolService` and exposes it on `RuntimeAssembly`.
   A new **`ToolsConfig`** (§9) declares which in-tree tools are enabled and

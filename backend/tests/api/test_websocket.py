@@ -171,7 +171,8 @@ async def test_permission_response_resolves_future():
     session.pending_permissions["c1"] = fut
     await _dispatch(session, None, Frame(channel=TOOLS, type="permission_response",
                                          payload={"call_id": "c1", "decision": "allow"}))
-    assert fut.result() == "allow"
+    from zygos.api.permission import PromptAnswer
+    assert fut.result() == PromptAnswer("allow", None)
 
 
 @pytest.mark.asyncio
@@ -186,6 +187,70 @@ async def test_permission_response_ignores_unknown_and_bad_decision():
     await _dispatch(session, None, Frame(channel=TOOLS, type="permission_response",
                                          payload={"call_id": "c1", "decision": "maybe"}))
     assert not fut.done()
+
+
+@pytest.mark.asyncio
+async def test_permission_response_passes_trust():
+    from zygos.api.permission import PromptAnswer
+    for decision, trust in (("allow", "tool"), ("allow", "server"), ("deny", "server")):
+        session = _bare_session()
+        fut = asyncio.get_running_loop().create_future()
+        session.pending_permissions["c1"] = fut
+        await _dispatch(session, None, Frame(channel=TOOLS, type="permission_response", payload={
+            "call_id": "c1", "decision": decision, "trust": trust}))
+        assert fut.result() == PromptAnswer(decision, trust)
+
+
+@pytest.mark.asyncio
+async def test_bad_trust_value_dropped():
+    from zygos.api.permission import PromptAnswer
+    for trust in ("everything", 1, None, ["tool"]):
+        session = _bare_session()
+        fut = asyncio.get_running_loop().create_future()
+        session.pending_permissions["c1"] = fut
+        await _dispatch(session, None, Frame(channel=TOOLS, type="permission_response", payload={
+            "call_id": "c1", "decision": "allow", "trust": trust}))
+        assert fut.result() == PromptAnswer("allow", None)
+
+
+@pytest.mark.asyncio
+async def test_trust_ignored_for_unknown_call_id():
+    # A stale card, another tab or a forged id: nothing resolves and no trust is written.
+    from zygos.api.permission import WebSocketPromptResolver
+    from zygos.tools.permissions import PermissionRequest
+    from zygos.tools.types import ToolContext
+
+    bus = InProcessEventBus()
+    registry = SessionRegistry(new_context=lambda sid: root_context(bus, session_id=sid),
+                               clock=lambda: 0.0, new_id=lambda: "s1")
+    session = registry.create()
+    session.connected = True
+    trusted = []
+
+    async def trust(tool, scope):
+        trusted.append((tool, scope))
+        return True
+
+    resolver = WebSocketPromptResolver(registry, timeout_s=5.0, trust=trust)
+    req = PermissionRequest(tool="archon__find_tasks", run_id="r", call_id="c1",
+                            details={"can_trust": True})
+    task = asyncio.create_task(resolver.resolve(
+        req, ToolContext(exec=session.root, tool="archon__find_tasks", call_id="c1")))
+    await asyncio.sleep(0)
+    await _dispatch(session, None, Frame(channel=TOOLS, type="permission_response", payload={
+        "call_id": "zzz", "decision": "allow", "trust": "server"}))
+    await asyncio.sleep(0)
+    assert not task.done() and not session.pending_permissions["c1"].done()
+    assert trusted == []
+
+    # Answered once: a second answer for the same card does nothing.
+    await _dispatch(session, None, Frame(channel=TOOLS, type="permission_response", payload={
+        "call_id": "c1", "decision": "deny"}))
+    assert await task == "deny"
+    await _dispatch(session, None, Frame(channel=TOOLS, type="permission_response", payload={
+        "call_id": "c1", "decision": "allow", "trust": "server"}))
+    await asyncio.sleep(0)
+    assert trusted == [] and session.pending_permissions == {}
 
 
 class _RecordingWS:

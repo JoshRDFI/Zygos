@@ -37,20 +37,6 @@ class FakeMcp(BaseTool):
         return {"got": input}
 
 
-class SlowResolver:
-    """Would hang a turn for 120 s if an MCP tool ever reached it."""
-
-    def __init__(self) -> None:
-        self.asked = 0
-
-    async def resolve(self, req, ctx):
-        self.asked += 1
-        import asyncio
-
-        await asyncio.sleep(120)
-        return "deny"
-
-
 class Allow:
     async def resolve(self, req, ctx):
         return "allow"
@@ -60,12 +46,28 @@ def _ctx():
     return root_context(InProcessEventBus())
 
 
+REFUSAL = "not trusted — answer the prompt in the web page, or run: zygos mcp trust archon/find_tasks"
+
+
+class Recording:
+    """Records each request; answers with a fixed decision."""
+
+    def __init__(self, decision: str = "deny") -> None:
+        self.decision = decision
+        self.requests = []
+
+    async def resolve(self, req, ctx):
+        self.requests.append(req)
+        return self.decision
+
+
 async def test_untrusted_mcp_tool_denied_immediately_with_message():
-    resolver = SlowResolver()
+    # With nobody to answer (the headless resolver denies), the refusal is immediate.
+    resolver = Recording("deny")
     assert isinstance(resolver, PermissionResolver)
     tool = FakeMcp()
     for svc in (
-        ToolService(resolver=resolver),  # no gate -> not trusted
+        ToolService(),  # no gate -> not trusted; default resolver denies
         ToolService(resolver=resolver, mcp_gate=lambda meta: "not_trusted"),
     ):
         svc.register(tool)
@@ -74,8 +76,8 @@ async def test_untrusted_mcp_tool_denied_immediately_with_message():
         assert time.monotonic() - t0 < 1.0
         assert res.ok is False
         assert res.error_code == "tool_permission_denied"
-        assert res.error_message == "not trusted yet — run: zygos mcp trust archon/find_tasks"
-    assert resolver.asked == 0 and tool.calls == 0
+        assert res.error_message == REFUSAL
+    assert len(resolver.requests) == 1 and tool.calls == 0
 
 
 async def test_mcp_gate_allow_and_deny():
@@ -101,7 +103,7 @@ async def test_mcp_gate_also_guards_streams():
     svc.register(FakeMcp())
     chunks = [c async for c in svc.execute_stream(ToolCall(tool="archon__find_tasks"), _ctx())]
     assert len(chunks) == 1
-    assert chunks[0].result.error_message == "not trusted yet — run: zygos mcp trust archon/find_tasks"
+    assert chunks[0].result.error_message == REFUSAL
 
 
 async def test_builtin_permission_unchanged():
@@ -139,5 +141,95 @@ async def test_mcp_fallback_goes_through_the_mcp_gate():
             assert chunks[-1].result.ok
         else:
             assert mcp.calls == 0
-            assert res.error_message == "not trusted yet — run: zygos mcp trust archon/find_tasks"
+            assert res.error_message == REFUSAL
             assert chunks[-1].result.error_message == res.error_message
+
+
+async def test_untrusted_mcp_tool_asks_resolver():
+    resolver = Recording("allow")
+    tool = FakeMcp()
+    svc = ToolService(resolver=resolver, mcp_gate=lambda meta: "not_trusted")
+    svc.bind_mcp_describe(lambda meta: {"server": "archon", "server_tool": "find_tasks", "can_trust": True})
+    svc.register(tool)
+    res = await svc.execute(ToolCall(tool="archon__find_tasks", args={"q": 1}), _ctx())
+    assert res.ok and res.output == {"got": {"q": 1}} and tool.calls == 1
+    [req] = resolver.requests
+    assert req.tool == "archon__find_tasks" and req.args_summary == {"q": 1}
+    assert req.details == {"server": "archon", "server_tool": "find_tasks", "can_trust": True}
+    assert req.call_id == res.call_id
+
+
+async def test_untrusted_mcp_tool_refused_with_hint_on_deny():
+    tool = FakeMcp()
+    svc = ToolService(resolver=Recording("deny"), mcp_gate=lambda meta: "not_trusted")
+    svc.register(tool)
+    res = await svc.execute(ToolCall(tool="archon__find_tasks"), _ctx())
+    assert res.ok is False and res.error_code == "tool_permission_denied"
+    assert res.error_message == REFUSAL
+    assert tool.calls == 0
+
+
+async def test_config_deny_never_asks():
+    resolver = Recording("allow")
+    tool = FakeMcp()
+    svc = ToolService(resolver=resolver, mcp_gate=lambda meta: "deny")
+    svc.register(tool)
+    res = await svc.execute(ToolCall(tool="archon__find_tasks"), _ctx())
+    chunks = [c async for c in svc.execute_stream(ToolCall(tool="archon__find_tasks"), _ctx())]
+    assert res.error_message == "permission denied"
+    assert chunks[-1].result.error_message == "permission denied"
+    assert resolver.requests == [] and tool.calls == 0
+
+
+async def test_broken_gate_never_asks():
+    def gate(meta):
+        raise RuntimeError("boom")
+
+    resolver = Recording("allow")
+    tool = FakeMcp()
+    svc = ToolService(resolver=resolver, mcp_gate=gate)
+    svc.register(tool)
+    res = await svc.execute(ToolCall(tool="archon__find_tasks"), _ctx())
+    assert res.ok is False and res.error_code == "tool_permission_denied"
+    assert resolver.requests == [] and tool.calls == 0
+
+
+async def test_mcp_fallback_asks_too():
+    for decision, allowed in (("deny", False), ("allow", True)):
+        resolver = Recording(decision)
+        mcp = FakeMcp()
+        svc = ToolService(resolver=resolver, mcp_gate=lambda meta: "not_trusted")
+        svc.register(FailsWithMcpFallback())
+        svc.register(mcp)
+        res = await svc.execute(ToolCall(tool="primary", args={"x": 1}), _ctx())
+        chunks = [c async for c in svc.execute_stream(ToolCall(tool="primary", args={"x": 1}), _ctx())]
+        # The built-in primary is not gated by the resolver here (default policy allows);
+        # only the MCP fallback asks, once per path.
+        assert [r.tool for r in resolver.requests] == ["archon__find_tasks", "archon__find_tasks"]
+        if allowed:
+            assert res.ok and chunks[-1].result.ok and mcp.calls == 2
+        else:
+            assert mcp.calls == 0
+            assert res.error_message == REFUSAL
+            assert chunks[-1].result.error_message == REFUSAL
+
+
+async def test_describe_failure_still_asks_with_empty_details():
+    def describe(meta):
+        raise RuntimeError("describe broke")
+
+    resolver = Recording("allow")
+    tool = FakeMcp()
+    svc = ToolService(resolver=resolver, mcp_gate=lambda meta: "not_trusted")
+    svc.bind_mcp_describe(describe)
+    svc.register(tool)
+    res = await svc.execute(ToolCall(tool="archon__find_tasks"), _ctx())
+    assert res.ok and tool.calls == 1
+    assert resolver.requests[0].details == {}
+
+    # No describe bound at all: also empty details.
+    resolver2 = Recording("deny")
+    svc2 = ToolService(resolver=resolver2, mcp_gate=lambda meta: "not_trusted")
+    svc2.register(FakeMcp())
+    await svc2.execute(ToolCall(tool="archon__find_tasks"), _ctx())
+    assert resolver2.requests[0].details == {}

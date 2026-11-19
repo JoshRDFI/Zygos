@@ -362,6 +362,7 @@ def build_runtime(
         rules=config.tools.permission_rules, new_context=lambda: root_context(bus),
     )
     tool_service.bind_mcp_gate(mcp.gate)
+    tool_service.bind_mcp_describe(mcp.describe)
     tool_loop_config = ToolLoopConfig(
         max_iterations=config.tools.max_iterations,
         default_tool_choice=config.tools.tool_choice,

@@ -141,13 +141,18 @@ def test_permission_allow_round_trip():
             perm = _drive_until(ws, frames, _is_permission)
 
             # Payload is exactly the human-prompt shape — no secret-y extras.
-            assert set(perm["payload"].keys()) == {"call_id", "tool", "args_summary"}
+            assert set(perm["payload"].keys()) == {"call_id", "tool", "args_summary",
+                                                   "expires_in_s", "can_trust"}
+            assert perm["payload"]["can_trust"] is False  # a built-in has no Trust buttons
             assert perm["payload"]["call_id"] == "call-1"
             assert perm["payload"]["tool"] == "ask_tool"
             assert perm["payload"]["args_summary"] == {"note": "hi"}
 
             ws.send_text(_perm_response(perm["payload"]["call_id"], "allow"))
             _drive_until(ws, frames, _is_turn_end)
+
+    outcome = _frame(frames, "tools", "permission.result")
+    assert outcome["payload"] == {"call_id": "call-1", "outcome": "allowed"}
 
     call_frame = _frame(frames, "tools", "call")
     assert call_frame["payload"]["call_id"] == "call-1"

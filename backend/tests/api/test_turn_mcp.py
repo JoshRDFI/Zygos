@@ -126,8 +126,61 @@ async def test_untrusted_tool_turn_finishes_fast(tmp_path):
     assert result.payload["server"] == "echo"
     assert result.payload["ok"] is False
     assert result.payload["error_code"] == "tool_permission_denied"
-    assert result.payload["error_message"] == "not trusted yet — run: zygos mcp trust echo/echo"
+    assert result.payload["error_message"] == (
+        "not trusted — answer the prompt in the web page, or run: zygos mcp trust echo/echo")
     assert frames[-1].type == "turn.end" and frames[-1].payload["text"] == "ok then"
+
+
+class _McpEcho:
+    """An MCP-shaped tool (``meta.server`` set) without a live server."""
+
+    def __init__(self) -> None:
+        from zygos.tools import ToolMeta
+
+        self.meta = ToolMeta(name="echo__echo", description="[echo] Echo.",
+                             input_schema={"type": "object"}, server="echo",
+                             server_tool="echo", permission="ask")
+        self.calls = 0
+
+    async def execute(self, input, ctx):
+        self.calls += 1
+        return {"echoed": input}
+
+
+async def test_untrusted_tool_prompts_then_runs_and_frames_in_order():
+    from zygos.api.permission import PromptAnswer, WebSocketPromptResolver
+    from zygos.api.session import SessionRegistry
+    from zygos.tools import BaseTool
+
+    class Tool(_McpEcho, BaseTool):
+        pass
+
+    registry = SessionRegistry(new_context=lambda sid: root_context(InProcessEventBus(), session_id=sid),
+                               clock=lambda: 0.0, new_id=lambda: "s1")
+    session = registry.create()
+    session.connected = True
+    tool = Tool()
+    service = ToolService(mcp_gate=lambda meta: "not_trusted")
+    service.bind_mcp_describe(lambda meta: {"server": "echo", "server_tool": "echo", "can_trust": True})
+    service.bind_resolver(WebSocketPromptResolver(registry, timeout_s=5.0))
+    service.register(tool)
+
+    async def click_allow():
+        while not session.pending_permissions:
+            await asyncio.sleep(0)
+        next(iter(session.pending_permissions.values())).set_result(PromptAnswer("allow", None))
+
+    clicker = asyncio.create_task(click_allow())
+    deps = _deps(_model([_call("echo__echo", {"text": "hi"}), "it said hi"]), service, tools=(tool,))
+    await asyncio.wait_for(run_turn(session, deps, "go", CancelToken(), spoken_input=False, think=None), 5.0)
+    await clicker
+    frames = [f for f in _drain(session) if f.channel == TOOLS]
+    assert [f.type for f in frames] == ["call", "permission", "permission.result", "result"]
+    call, prompt, outcome, result = frames
+    assert prompt.payload["call_id"] == call.payload["call_id"] == result.payload["call_id"]
+    assert prompt.payload["server_tool"] == "echo" and prompt.payload["can_trust"] is True
+    assert outcome.payload == {"call_id": call.payload["call_id"], "outcome": "allowed"}
+    assert result.payload["ok"] is True and tool.calls == 1
 
 
 async def _until(cond, timeout: float = 30.0) -> None:
@@ -271,3 +324,36 @@ async def test_per_turn_tool_failure_logged_once_until_recovery(caplog):
     assert len(recovered) == 1
     await _turn(_deps(_model(["plain"]), service, tools=(echo,), tools_for_turn=flaky))
     assert len([r for r in records() if r.levelno == logging.INFO]) == 1
+
+
+async def test_app_wires_describe_trust_and_announce(tmp_path):
+    runtime = build_runtime(_config(tmp_path))
+    real = runtime.mcp
+    assert runtime.tool_service._mcp_describe == real.describe
+    trusted: list[tuple[str, str]] = []
+
+    class Stub:
+        def before_turn(self):
+            return ()
+
+        async def trust_from_prompt(self, tool, scope):
+            trusted.append((tool, scope))
+            return True
+
+        async def aclose(self) -> None:
+            await real.aclose()
+
+    app = create_app(dataclasses.replace(runtime, mcp=Stub()))
+    try:
+        resolver = runtime.tool_service._resolver
+        assert await resolver._trust("archon__find_tasks", "server") is True
+        assert trusted == [("archon__find_tasks", "server")]
+        # Announce starts a task and returns at once; silent without a voice service.
+        session = app.state.registry.create()
+        session.speak = True
+        started = resolver._announce(session, "I need your OK on screen to use x.")
+        assert isinstance(started, asyncio.Future)
+        await started
+        assert session.outbound.empty()
+    finally:
+        await app.state.runtime.aclose()

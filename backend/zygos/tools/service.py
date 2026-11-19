@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from typing import AsyncIterator, Awaitable, Callable, Literal, Sequence
+from typing import Any, AsyncIterator, Awaitable, Callable, Literal, Sequence
 
 from pydantic import BaseModel, ConfigDict
 
@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 McpDecision = Literal["allow", "deny", "not_trusted"]
 McpGate = Callable[[ToolMeta], McpDecision]
+McpDescribe = Callable[[ToolMeta], dict[str, Any]]
 
 
 class ToolServiceSnapshot(BaseModel):
@@ -62,6 +63,7 @@ class ToolService:
         self._sleep = sleep
         self._dynamic: list[str] = []
         self._mcp_gate = mcp_gate   # None: every MCP tool is "not trusted"
+        self._mcp_describe: McpDescribe | None = None
 
     def register(self, tool: Tool) -> None:
         self._registry.register(tool)
@@ -90,6 +92,10 @@ class ToolService:
     def bind_mcp_gate(self, gate: McpGate) -> None:
         """Late-bind the MCP permission decision (the supervisor is built after this service)."""
         self._mcp_gate = gate
+
+    def bind_mcp_describe(self, describe: McpDescribe) -> None:
+        """Late-bind what a permission prompt shows about an MCP tool."""
+        self._mcp_describe = describe
 
     async def execute(self, call: ToolCall, ctx: ExecutionContext) -> ToolResult:
         tool = self._registry.get(call.tool)
@@ -130,7 +136,8 @@ class ToolService:
             fb = self._registry.get(tool.meta.fallback)
             if fb is not None:
                 fb_call = call.model_copy(update={"tool": fb.meta.name})
-                denied = self._check_mcp(fb.meta, fb_call) if fb.meta.server is not None else None
+                denied = (await self._check_mcp(fb.meta, fb_call, ctx)
+                          if fb.meta.server is not None else None)
                 if denied is not None:
                     yield ToolChunk(kind="result", result=denied)
                     return
@@ -144,7 +151,7 @@ class ToolService:
         self, tool: Tool, call: ToolCall, ctx: ExecutionContext
     ) -> ToolResult | None:
         if tool.meta.server is not None:
-            return self._check_mcp(tool.meta, call)
+            return await self._check_mcp(tool.meta, call, ctx)
         decision = self._policy.decide(tool.meta)
         if decision == "ask":
             tctx = ToolContext(
@@ -162,24 +169,48 @@ class ToolService:
             error_code="tool_permission_denied", error_message="permission denied",
         )
 
-    def _check_mcp(self, meta: ToolMeta, call: ToolCall) -> ToolResult | None:
-        """MCP tools: config deny -> denied; not trusted -> refused at once (1a has no prompt).
+    async def _check_mcp(
+        self, meta: ToolMeta, call: ToolCall, ctx: ExecutionContext
+    ) -> ToolResult | None:
+        """MCP tools: config deny -> denied, never asked; trusted -> allowed; otherwise
+        the user is asked through the permission resolver, and anything but allow refuses.
 
-        Never reaches the resolver: in 1a nobody can answer it, so asking would only
-        freeze the turn until the resolver's timeout.
+        With nobody to ask (no page connected), the resolver denies at once, so the
+        refusal names the CLI way to trust the tool.
         """
-        decision: McpDecision = "not_trusted"
-        if self._mcp_gate is not None:
+        decision: McpDecision = "deny"
+        if self._mcp_gate is None:
+            decision = "not_trusted"
+        else:
             try:
                 decision = self._mcp_gate(meta)
-            except Exception:  # noqa: BLE001 - a broken gate must refuse, never allow
+            except Exception:  # noqa: BLE001 - a broken gate must refuse, never allow or ask
                 logger.exception("mcp permission gate failed for %r; refusing", meta.name)
         if decision == "allow":
             return None
-        message = (
-            "permission denied" if decision == "deny"
-            else f"not trusted yet — run: zygos mcp trust {meta.server}/{meta.server_tool}"
-        )
+        if decision == "not_trusted":
+            details: dict[str, Any] = {}
+            if self._mcp_describe is not None:
+                try:
+                    described = self._mcp_describe(meta)
+                    details = described if isinstance(described, dict) else {}
+                except Exception as exc:  # noqa: BLE001 - the prompt still asks, just with less
+                    logger.warning("mcp describe failed for %r (%s)", meta.name, type(exc).__name__)
+            tctx = ToolContext(
+                exec=ctx.child(span_id=call.call_id), tool=meta.name, call_id=call.call_id
+            )
+            req = PermissionRequest(
+                tool=meta.name, args_summary=call.args,
+                run_id=ctx.run_id, call_id=call.call_id, details=details,
+            )
+            if await self._resolver.resolve(req, tctx) == "allow":
+                return None
+            message = (
+                "not trusted — answer the prompt in the web page, or run: "
+                f"zygos mcp trust {meta.server}/{meta.server_tool}"
+            )
+        else:
+            message = "permission denied"
         return ToolResult.failed(
             tool=meta.name, call_id=call.call_id,
             error_code="tool_permission_denied", error_message=message,
@@ -203,7 +234,7 @@ class ToolService:
         if fb is None:
             return result   # missing fallback: primary failure stands
         fb_call = call.model_copy(update={"tool": fb.meta.name})   # keep call_id for correlation
-        if fb.meta.server is not None and (denied := self._check_mcp(fb.meta, fb_call)) is not None:
+        if fb.meta.server is not None and (denied := await self._check_mcp(fb.meta, fb_call, ctx)) is not None:
             return denied
         return await self._run_with_fallback(fb, fb_call, ctx, depth=1)   # one level only
 
