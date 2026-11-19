@@ -5,6 +5,7 @@ import ThinkControls from "../components/ThinkControls";
 import { useChatStore } from "../stores/chatStore";
 import { useSessionStore, getSessionClient } from "../session/sessionStore";
 import VoiceControls from "../components/VoiceControls";
+import ToolCallCard from "../components/ToolCallCard";
 
 export default function ChatSurface() {
   const messages = useChatStore((s) => s.messages);
@@ -53,6 +54,13 @@ export default function ChatSurface() {
         {messages.map((m, i) => (
           <div key={i} className={m.role === "user" ? "text-text" : "text-text-muted"}>
             <span className="font-mono text-xs mr-2 uppercase">{m.role}</span>
+            {m.role === "assistant" && m.tools && m.tools.length > 0 && (
+              <div className="space-y-2 my-2">
+                {m.tools.map((c) => (
+                  <ToolCallCard key={c.callId} card={c} send={(f) => getSessionClient()?.send(f)} />
+                ))}
+              </div>
+            )}
             <span>{m.text}{m.streaming ? " ▍" : ""}</span>
             {m.role === "assistant" && m.rethinkOf != null && m.think === true && (
               <span className="ml-2 text-xs text-text-muted">with thinking</span>

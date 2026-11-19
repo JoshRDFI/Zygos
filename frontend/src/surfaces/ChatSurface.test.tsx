@@ -217,3 +217,16 @@ test("a pending reply shows 'loading <model>…' until the first token", async (
   expect(screen.queryByText("loading qwen3:8b…")).toBeNull();
   useChatStore.getState().reset();
 });
+
+test("renders tool cards above the assistant text", () => {
+  useChatStore.setState({
+    messages: [{
+      role: "assistant", text: "REPLY TEXT", streaming: false,
+      tools: [{ callId: "c1", tool: "find_tasks", server: "archon", args: {}, status: "done" }],
+    }],
+  });
+  const { container } = render(<ChatSurface />);
+  const html = container.innerHTML;
+  expect(html.indexOf("find_tasks")).toBeGreaterThan(-1);
+  expect(html.indexOf("find_tasks")).toBeLessThan(html.indexOf("REPLY TEXT"));
+});
