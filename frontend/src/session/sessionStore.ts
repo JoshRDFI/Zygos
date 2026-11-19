@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { createSession as restCreateSession } from "../client/rest";
 import { WsClient } from "../client/wsClient";
-import { CHAT_FRAME_TYPES, useChatStore } from "../stores/chatStore";
+import { CHAT_FRAME_TYPES, TOOL_FRAME_TYPES, useChatStore } from "../stores/chatStore";
 import { useThinkStore } from "../stores/thinkStore";
 import { useSpeechStore } from "../stores/speechStore";
 import { useModelTraceStore } from "../stores/modelTraceStore";
@@ -59,6 +59,7 @@ export const useSessionStore = create<SessionState>((set) => ({
         const client = deps.createClient(id);
         const onFrame = useChatStore.getState().onFrame;
         const offs = CHAT_FRAME_TYPES.map((t) => client.on(`chat:${t}`, onFrame));
+        offs.push(...TOOL_FRAME_TYPES.map((t) => client.on(`tools:${t}`, onFrame)));
         const think = useThinkStore.getState();
         offs.push(client.on("control:think.state", think.onThinkState));
         offs.push(client.on("trace:event", think.onTrace));
@@ -67,7 +68,10 @@ export const useSessionStore = create<SessionState>((set) => ({
         offs.push(client.on("chat:voice_command", think.onVoiceCommand));
         offs.push(client.on("chat:turn.end", think.clearVoiceNotice));
         offs.push(client.onOpen(() => set({ status: "connected" })));
-        offs.push(client.onClose(() => set({ status: "disconnected" })));
+        offs.push(client.onClose(() => {
+          useChatStore.getState().cancelOpenPrompts();
+          set({ status: "disconnected" });
+        }));
         useVoiceStore.getState().attach(client);
         client.connect();
         rig = { client, offs };

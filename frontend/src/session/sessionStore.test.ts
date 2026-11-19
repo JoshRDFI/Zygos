@@ -178,3 +178,15 @@ test("trace model events reach the model trace store; chat:model.loading reaches
   expect(useModelTraceStore.getState().lines).toEqual([]);
   useChatStore.getState().reset();
 });
+
+test("session subscribes to tools frames and cancels open prompts on close", () => {
+  useSessionStore.getState().start();
+  return vi.waitFor(() => expect(getSessionClient()).toBe(fake)).then(() => {
+    useChatStore.getState().reset();
+    useChatStore.getState().onFrame({ channel: "chat", type: "turn.start", payload: { turn_id: "t" } });
+    fake.emit("tools:permission", { call_id: "a", tool: "t", args_summary: {}, expires_in_s: 60, can_trust: false });
+    expect(useChatStore.getState().messages.at(-1)!.tools?.[0].status).toBe("asking");
+    fake.fireClose();
+    expect(useChatStore.getState().messages.at(-1)!.tools?.[0]).toMatchObject({ status: "denied", outcome: "cancelled" });
+  });
+});

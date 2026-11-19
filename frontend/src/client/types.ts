@@ -140,3 +140,18 @@ export interface RuntimeHealth {
   embedder: { backend: string; model: string; state: string };
   active_sessions: number;
 }
+
+export type PermissionOutcome =
+  "allowed" | "trusted_tool" | "trusted_server" | "denied" | "timed_out" | "cancelled" | "trust_failed";
+export interface PermissionAsk {
+  argsSummary: Record<string, unknown>; expiresInS: number; askedAt: number; // Date.now()
+  canTrust: boolean; server?: string; serverTool?: string; where?: "local" | "remote";
+  address?: string; description?: string; claims: string[]; ruleNote?: string;
+  changed?: { oldDescription: string; newDescription: string; oldSchema: unknown; newSchema: unknown };
+}
+export interface ToolCard {
+  callId: string; tool: string; server?: string; args: Record<string, unknown>;
+  status: "asking" | "running" | "done" | "failed" | "denied";
+  output?: unknown; errorMessage?: string;
+  permission?: PermissionAsk; outcome?: PermissionOutcome;
+}

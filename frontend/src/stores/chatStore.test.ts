@@ -143,3 +143,129 @@ test("an error frame clears a pending loading note", () => {
   feed([{ channel: "chat", type: "error", payload: { message: "boom" } }]);
   expect(useChatStore.getState().messages.some((m) => m.loadingModel)).toBe(false);
 });
+
+// ---- tool cards ----
+const tf = (type: string, payload: Record<string, unknown>) => ({ channel: "tools", type, payload });
+const startTurn = () => {
+  const s = useChatStore.getState();
+  s.addUser("go");
+  s.onFrame({ channel: "chat", type: "turn.start", payload: { turn_id: "t1" } });
+};
+const cards = () => useChatStore.getState().messages.at(-1)!.tools ?? [];
+
+test("call then result makes a done card on the assistant message", () => {
+  startTurn();
+  const s = useChatStore.getState();
+  s.onFrame(tf("call", { call_id: "c1", tool: "web_search", arguments: { q: "x" }, server: "srv" }));
+  expect(cards()[0]).toMatchObject({ callId: "c1", tool: "web_search", server: "srv", args: { q: "x" }, status: "running" });
+  s.onFrame(tf("result", { call_id: "c1", tool: "web_search", ok: true, output: { n: 1 } }));
+  expect(cards()).toHaveLength(1);
+  expect(cards()[0]).toMatchObject({ status: "done", output: { n: 1 } });
+});
+
+test("a tool frame with no assistant message creates a streaming one", () => {
+  useChatStore.getState().onFrame(tf("call", { call_id: "c1", tool: "t", arguments: {} }));
+  const m = useChatStore.getState().messages.at(-1)!;
+  expect(m).toMatchObject({ role: "assistant", streaming: true });
+  expect(m.tools).toHaveLength(1);
+});
+
+test("permission before call keeps asking status", () => {
+  startTurn();
+  const s = useChatStore.getState();
+  s.onFrame(tf("permission", {
+    call_id: "c1", tool: "t", args_summary: { a: 1 }, expires_in_s: 60, can_trust: true,
+    server: "srv", server_tool: "t", where: "remote", address: "https://x", description: "d",
+    claims: ["reads"], rule_note: "n",
+    changed: { old_description: "o", new_description: "n", old_schema: 1, new_schema: 2 },
+  }));
+  s.onFrame(tf("call", { call_id: "c1", tool: "t", arguments: { a: 1 } }));
+  const c = cards()[0];
+  expect(cards()).toHaveLength(1);
+  expect(c.status).toBe("asking");
+  expect(c.permission).toMatchObject({
+    argsSummary: { a: 1 }, expiresInS: 60, canTrust: true, server: "srv", serverTool: "t",
+    where: "remote", address: "https://x", description: "d", claims: ["reads"], ruleNote: "n",
+    changed: { oldDescription: "o", newDescription: "n", oldSchema: 1, newSchema: 2 },
+  });
+  expect(typeof c.permission!.askedAt).toBe("number");
+});
+
+test("permission.result trusted_tool then result done", () => {
+  startTurn();
+  const s = useChatStore.getState();
+  s.onFrame(tf("call", { call_id: "c1", tool: "t", arguments: {} }));
+  s.onFrame(tf("permission", { call_id: "c1", tool: "t", args_summary: {}, expires_in_s: 60, can_trust: true }));
+  s.onFrame(tf("permission.result", { call_id: "c1", outcome: "trusted_tool" }));
+  expect(cards()[0]).toMatchObject({ status: "running", outcome: "trusted_tool" });
+  s.onFrame(tf("result", { call_id: "c1", tool: "t", ok: true, output: "ok" }));
+  expect(cards()[0].status).toBe("done");
+});
+
+test("denied result marks card denied; other failures are failed", () => {
+  startTurn();
+  const s = useChatStore.getState();
+  s.onFrame(tf("result", { call_id: "c1", tool: "t", ok: false, error_code: "tool_permission_denied", error_message: "no" }));
+  s.onFrame(tf("result", { call_id: "c2", tool: "t", ok: false, error_code: "boom", error_message: "bad" }));
+  expect(cards()[0].status).toBe("denied");
+  expect(cards()[1]).toMatchObject({ status: "failed", errorMessage: "bad" });
+});
+
+test("denying outcomes set status denied", () => {
+  startTurn();
+  const s = useChatStore.getState();
+  for (const [i, o] of ["denied", "timed_out", "cancelled"].entries()) {
+    s.onFrame(tf("permission", { call_id: `c${i}`, tool: "t", args_summary: {}, expires_in_s: 1, can_trust: false }));
+    s.onFrame(tf("permission.result", { call_id: `c${i}`, outcome: o }));
+  }
+  expect(cards().map((c) => c.status)).toEqual(["denied", "denied", "denied"]);
+});
+
+test("two pending cards resolve independently", () => {
+  startTurn();
+  const s = useChatStore.getState();
+  for (const id of ["a", "b"]) {
+    s.onFrame(tf("permission", { call_id: id, tool: "t", args_summary: {}, expires_in_s: 60, can_trust: true }));
+  }
+  s.onFrame(tf("permission.result", { call_id: "a", outcome: "allowed" }));
+  expect(cards().map((c) => [c.callId, c.status])).toEqual([["a", "running"], ["b", "asking"]]);
+});
+
+test("fallback prompt gets its own card and ends done or denied", () => {
+  startTurn();
+  const s = useChatStore.getState();
+  s.onFrame(tf("call", { call_id: "c1", tool: "t", arguments: {} }));
+  s.onFrame(tf("permission", { call_id: "c1:fb", tool: "t", args_summary: {}, expires_in_s: 60, can_trust: false }));
+  s.onFrame(tf("permission", { call_id: "c2:fb", tool: "t", args_summary: {}, expires_in_s: 60, can_trust: false }));
+  expect(cards().map((c) => c.callId)).toEqual(["c1", "c1:fb", "c2:fb"]);
+  s.onFrame(tf("permission.result", { call_id: "c1:fb", outcome: "allowed" }));
+  s.onFrame(tf("permission.result", { call_id: "c2:fb", outcome: "denied" }));
+  expect(cards().map((c) => c.status)).toEqual(["running", "done", "denied"]);
+});
+
+test("open card cancelled on turn end", () => {
+  startTurn();
+  const s = useChatStore.getState();
+  s.onFrame(tf("permission", { call_id: "a", tool: "t", args_summary: {}, expires_in_s: 60, can_trust: true }));
+  s.onFrame({ channel: "chat", type: "turn.end", payload: { text: "x" } });
+  expect(cards()[0]).toMatchObject({ status: "denied", outcome: "cancelled" });
+});
+
+test("cancelOpenPrompts marks asking cards cancelled", () => {
+  startTurn();
+  const s = useChatStore.getState();
+  s.onFrame(tf("permission", { call_id: "a", tool: "t", args_summary: {}, expires_in_s: 60, can_trust: true }));
+  s.onFrame(tf("call", { call_id: "b", tool: "t", arguments: {} }));
+  s.cancelOpenPrompts();
+  expect(cards().map((c) => c.status)).toEqual(["denied", "running"]);
+  expect(cards()[0].outcome).toBe("cancelled");
+});
+
+test("unknown tools frame type and bad call_id are ignored", () => {
+  startTurn();
+  const s = useChatStore.getState();
+  s.onFrame(tf("bogus", { call_id: "a" }));
+  s.onFrame(tf("call", { tool: "t" }));
+  s.onFrame(tf("call", { call_id: 5, tool: "t" }));
+  expect(cards()).toHaveLength(0);
+});
