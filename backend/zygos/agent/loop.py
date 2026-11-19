@@ -31,6 +31,11 @@ from zygos.tools.service import ToolService
 from zygos.tools.types import Tool, ToolCall, ToolResult
 
 
+# A tool called with the same arguments this many times in one turn gets a note
+# appended to that call's tool message. It never blocks the call.
+REPEAT_NUDGE_AT = (3, 5, 8)
+
+
 @dataclass(frozen=True)
 class AgentResult:
     text: str
@@ -73,6 +78,7 @@ async def run_agentic_loop(
     routing = {"route": route, "on_route": on_route, "on_loading": on_loading}
     schemas = tuple(tool_schema(t) for t in tools)
     history: list[Message] = list(messages)
+    seen: dict[tuple[str, str], int] = {}
 
     for i in range(config.max_iterations):
         if ctx.cancelled:
@@ -114,7 +120,14 @@ async def run_agentic_loop(
 
         results = await asyncio.gather(*[_dispatch(inv) for inv in result.tool_calls])
         for inv, res in zip(result.tool_calls, results):
-            history.append(Message(role="tool", tool_call_id=inv.id, content=_render(res)))
+            content = _render(res)
+            key = (inv.name, json.dumps(inv.arguments, sort_keys=True, default=str))
+            seen[key] = n = seen.get(key, 0) + 1
+            if n in REPEAT_NUDGE_AT:
+                content += (f"\n\nNote from Zygos: this is call {n} to {inv.name} with the "
+                            "same arguments in this turn. Look at the earlier results and "
+                            "try a different approach, or answer with what you have.")
+            history.append(Message(role="tool", tool_call_id=inv.id, content=content))
 
     # Iteration cap reached with tool calls still pending: one final tool-free answer.
     final_req = GenerationRequest(messages=tuple(history), tools=schemas, tool_choice="none",

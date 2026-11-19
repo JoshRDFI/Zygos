@@ -217,6 +217,13 @@ recoverable.
   generate→execute rounds. On reaching it, the loop makes **one final `generate`
   with `tool_choice="none"`** to force a text answer (graceful degradation); if that
   also fails, the turn ends with an error frame.
+- **Repeat nudge** (amended 2026-11-18, additive). Within one turn, the loop counts
+  calls by tool name and canonical arguments (sorted keys). When a count reaches 3,
+  5 or 8, a one-line note from Zygos is appended to that call's `tool` message,
+  telling the model it is repeating itself. The call is never blocked or skipped,
+  and the result's `ok`/`output`, the `tools:result` frame and observer events are
+  unchanged. The count is per `run_agentic_loop` call, so a new user message resets
+  it. The iteration cap above still applies.
 - **Concurrency.** Multiple `tool_calls` in one response run concurrently
   (`asyncio.gather` over independent `ToolService.execute` calls, each with its own
   `ctx.child`) — consistent with RFC-0002's single-loop model. Ordering across

@@ -306,3 +306,92 @@ async def test_route_and_callbacks_pass_to_every_generate_including_final():
         messages=[Message(role="user", content="go")], config=ToolLoopConfig(max_iterations=1),
         route=pinned, on_route=on_route, on_loading=on_loading)
     assert seen == [(pinned, on_route, on_loading)] * 2
+
+
+# --- repeated identical calls: a note in the tool message, never a block ---------
+
+NOTE = ("\n\nNote from Zygos: this is call {n} to {name} with the same arguments in this "
+        "turn. Look at the earlier results and try a different approach, or answer with "
+        "what you have.")
+
+
+class PairInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    a: int
+    b: int
+
+
+class PairTool(BaseTool):
+    def __init__(self) -> None:
+        self.meta = ToolMeta(name="pair", description="Sum.", input_model=PairInput,
+                             permission="allow")
+
+    async def execute(self, input: PairInput, ctx: ToolContext) -> dict:
+        return {"sum": input.a + input.b}
+
+
+async def _repeat(script, tools=(EchoTool,), max_iterations=8, observer=None):
+    result = await run_agentic_loop(
+        _ctx(), model_service=_model_service(script),
+        tool_service=_tool_service(*[t() for t in tools]), tools=[t() for t in tools],
+        messages=[Message(role="user", content="go")],
+        config=ToolLoopConfig(max_iterations=max_iterations), observer=observer)
+    return [m.content for m in result.messages if m.role == "tool"]
+
+
+def _same(n):
+    return [_call("echo", {"value": "x"}, cid=f"c{i}") for i in range(n)]
+
+
+async def test_no_nudge_below_three_identical_calls():
+    contents = await _repeat(_same(2) + ["done"])
+    assert len(contents) == 2
+    assert all("Note from Zygos" not in c for c in contents)
+
+
+async def test_nudge_on_third_identical_call():
+    contents = await _repeat(_same(3) + ["done"])
+    assert "Note from Zygos" not in contents[0] and "Note from Zygos" not in contents[1]
+    assert contents[2] == json.dumps({"echoed": "x"}) + NOTE.format(n=3, name="echo")
+
+
+async def test_nudge_at_five_and_eight():
+    contents = await _repeat(_same(8) + ["done"], max_iterations=9)
+    noted = [i + 1 for i, c in enumerate(contents) if "Note from Zygos" in c]
+    assert noted == [3, 5, 8]
+    assert contents[4].endswith(NOTE.format(n=5, name="echo"))
+    assert contents[7].endswith(NOTE.format(n=8, name="echo"))
+
+
+async def test_different_arguments_count_separately():
+    script = [_call("echo", {"value": "a"}, "1"), _call("echo", {"value": "b"}, "2"),
+              _call("echo", {"value": "a"}, "3"), _call("echo", {"value": "b"}, "4"),
+              "done"]
+    contents = await _repeat(script)
+    assert all("Note from Zygos" not in c for c in contents)
+
+
+async def test_argument_key_order_does_not_matter():
+    script = [_call("pair", {"a": 1, "b": 2}, "1"), _call("pair", {"b": 2, "a": 1}, "2"),
+              _call("pair", {"a": 1, "b": 2}, "3"), "done"]
+    contents = await _repeat(script, tools=(PairTool,))
+    assert contents[2].endswith(NOTE.format(n=3, name="pair"))
+
+
+async def test_two_identical_calls_in_one_response_count_twice():
+    two = GenerationResult(
+        text="", model="fake-model", provider="fake", finish_reason="tool_calls",
+        tool_calls=(ToolInvocation(id="a", name="echo", arguments={"value": "x"}),
+                    ToolInvocation(id="b", name="echo", arguments={"value": "x"})))
+    contents = await _repeat([two, _call("echo", {"value": "x"}, "c"), "done"])
+    assert [("Note from Zygos" in c) for c in contents] == [False, False, True]
+    assert contents[2].endswith(NOTE.format(n=3, name="echo"))
+
+
+async def test_nudge_does_not_change_result_or_frames():
+    events = []
+    contents = await _repeat(_same(3) + ["done"], observer=events.append)
+    assert "Note from Zygos" in contents[2]
+    finished = [e for e in events if isinstance(e, ToolCallFinished)]
+    assert len(finished) == 3
+    assert all(e.result.ok and e.result.output == {"echoed": "x"} for e in finished)
