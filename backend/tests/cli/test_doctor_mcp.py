@@ -238,3 +238,42 @@ def test_secret_failure_marker_end_to_end(tmp_path):
     SqliteMcpStore(db).put_state("a", state.model_copy(update={"status": "failed"}))
     line = {c.name: c for c in _mcp(_doctor(cfg))}["mcp:a"]
     assert "zygos mcp off/on a" in line.detail
+
+
+def test_probe_secret_read_times_out(tmp_path, monkeypatch):
+    import threading
+
+    import zygos.cli.doctor as doctor_mod
+
+    pytest.importorskip("cryptography")
+    monkeypatch.setattr(doctor_mod, "_MCP_PROBE_S", 0.2)
+    cfg, db = _write_file_store(tmp_path)
+    SqliteMcpStore(db).put_server(_auth_spec(URL))
+    release = threading.Event()
+    calls = []
+
+    async def spy(*a, **k):
+        calls.append(a)
+
+    async def go():
+        runtime = build_runtime(cfg)
+        try:
+            runtime.secrets.get = lambda handle: release.wait(30)  # a blocked keychain
+            return await run_doctor(runtime, probe=True, gpu_query=lambda: None, list_remote=spy)
+        finally:
+            release.set()
+            await runtime.aclose()
+
+    report = asyncio.run(go())
+    line = {c.name: c for c in _mcp(report)}["mcp:r"]
+    assert "not checked: needs Authorization from the secret store (timed out)" in line.detail and line.warn
+    assert calls == []
+
+
+def test_short_trims_at_word_boundary():
+    from zygos.cli.doctor import _short
+
+    assert _short("short") == "short"
+    out = _short("word " * 40)
+    assert len(out) <= 80 and out.endswith("…") and not out.endswith(" …")
+    assert _short("x" * 200) == "x" * 79 + "…"

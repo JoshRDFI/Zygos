@@ -193,6 +193,17 @@ def _local_detail(state: Any) -> str:
     return text
 
 
+def _short(text: str, limit: int = 80) -> str:
+    """At most ``limit`` chars, cut at a word boundary with an ellipsis."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit - 1]
+    if " " in cut and text[limit - 1] != " ":
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.rstrip() + "…"
+
+
 async def _probe_remote(
     spec: Any, state: Any, list_remote: Callable[..., Any], timeout_s: float, secrets: Any,
 ) -> tuple[str, bool]:
@@ -203,10 +214,13 @@ async def _probe_remote(
     headers: dict[str, str] = {}
     for item in spec.header_names:  # read-only, like the supervisor; values are never shown
         try:
-            value = await asyncio.to_thread(secrets.get, f"mcp:{spec.name}:header:{item}")
+            value = await asyncio.wait_for(
+                asyncio.to_thread(secrets.get, f"mcp:{spec.name}:header:{item}"), _MCP_PROBE_S)
             why = "not set" if value is None else None
+        except TimeoutError:
+            value, why = None, "timed out"
         except SecretStoreError as exc:
-            value, why = None, scrub(str(exc), {})[:80] or type(exc).__name__
+            value, why = None, _short(str(exc)) or type(exc).__name__
         if value is None:
             return f"not checked: needs {item} from the secret store ({why})", True
         headers[item] = value
@@ -219,7 +233,7 @@ async def _probe_remote(
         from zygos.mcp.results import McpToolError, McpUnavailable
 
         # McpUnavailable/McpToolError reasons are already scrubbed of header values.
-        reason = scrub(str(exc), headers) if isinstance(exc, (McpUnavailable, McpToolError)) else type(exc).__name__
+        reason = _short(scrub(str(exc), headers)) if isinstance(exc, (McpUnavailable, McpToolError)) else type(exc).__name__
         return f"not reachable: {reason}", True
     n = len(result.tools)
     return f"reachable, {n} tool{'s' if n != 1 else ''}", False
