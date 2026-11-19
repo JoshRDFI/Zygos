@@ -8,6 +8,9 @@ export const CHAT_FRAME_TYPES = ["turn.start", "token", "turn.end", "error", "pa
 export const TOOL_FRAME_TYPES = ["call", "result", "permission", "permission.result"] as const;
 
 const DENYING: PermissionOutcome[] = ["denied", "timed_out", "cancelled"];
+const FINISHED: ToolCard["status"][] = ["done", "failed", "denied"];
+// The server's default prompt window; used when a frame lacks a usable expires_in_s.
+const DEFAULT_EXPIRES_S = 120;
 
 const rec = (v: unknown): Record<string, unknown> =>
   v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
@@ -17,7 +20,7 @@ function parseAsk(p: Record<string, unknown>): PermissionAsk {
   const ch = p.changed && typeof p.changed === "object" ? (p.changed as Record<string, unknown>) : null;
   return {
     argsSummary: rec(p.args_summary),
-    expiresInS: typeof p.expires_in_s === "number" ? p.expires_in_s : 0,
+    expiresInS: typeof p.expires_in_s === "number" && p.expires_in_s > 0 ? p.expires_in_s : DEFAULT_EXPIRES_S,
     askedAt: Date.now(),
     canTrust: p.can_trust === true,
     server: str(p.server),
@@ -52,7 +55,14 @@ function applyToolFrame(messages: ChatMessage[], f: Frame): ChatMessage[] {
     : [...messages, { role: "assistant", text: "", streaming: true } as ChatMessage];
   return mapLastAssistant(base, (m) => {
     const tools = (m.tools ?? []).slice();
-    let i = tools.findIndex((c) => c.callId === callId);
+    let i = tools.map((c) => c.callId).lastIndexOf(callId);
+    // A provider may reuse a call id in a later step of the turn: a new call, or a
+    // new prompt, for an id whose card is finished (or whose prompt was answered)
+    // is a new card, never merged into the old one.
+    if (i >= 0 && (f.type === "call" || f.type === "permission")) {
+      const old = tools[i];
+      if (FINISHED.includes(old.status) || (f.type === "permission" && old.outcome)) i = -1;
+    }
     if (i < 0) {
       tools.push({ callId, tool: str(p.tool) ?? "", args: {}, status: "running" });
       i = tools.length - 1;

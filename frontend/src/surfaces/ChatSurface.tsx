@@ -56,8 +56,9 @@ export default function ChatSurface() {
             <span className="font-mono text-xs mr-2 uppercase">{m.role}</span>
             {m.role === "assistant" && m.tools && m.tools.length > 0 && (
               <div className="space-y-2 my-2">
-                {m.tools.map((c) => (
-                  <ToolCallCard key={c.callId} card={c} send={(f) => getSessionClient()?.send(f)} />
+                {m.tools.map((c, j) => (
+                  // Cards are only appended, and a call id can repeat across steps.
+                  <ToolCallCard key={`${j}:${c.callId}`} card={c} send={(f) => getSessionClient()?.send(f)} />
                 ))}
               </div>
             )}

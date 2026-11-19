@@ -269,3 +269,50 @@ test("unknown tools frame type and bad call_id are ignored", () => {
   s.onFrame(tf("call", { call_id: 5, tool: "t" }));
   expect(cards()).toHaveLength(0);
 });
+
+test("a call id reused by a later step starts a new card with a live prompt", () => {
+  startTurn();
+  const s = useChatStore.getState();
+  // step 1: prompted, allowed once, ran
+  s.onFrame(tf("call", { call_id: "call_0", tool: "find_tasks", arguments: { q: 1 } }));
+  s.onFrame(tf("permission", { call_id: "call_0", tool: "find_tasks", args_summary: {}, expires_in_s: 60, can_trust: true }));
+  s.onFrame(tf("permission.result", { call_id: "call_0", outcome: "allowed" }));
+  s.onFrame(tf("result", { call_id: "call_0", tool: "find_tasks", ok: true, output: "one" }));
+  // step 2 reuses the id
+  s.onFrame(tf("call", { call_id: "call_0", tool: "find_tasks", arguments: { q: 2 } }));
+  s.onFrame(tf("permission", { call_id: "call_0", tool: "find_tasks", args_summary: {}, expires_in_s: 60, can_trust: true }));
+  expect(cards()).toHaveLength(2);
+  expect(cards()[0]).toMatchObject({ args: { q: 1 }, status: "done", output: "one", outcome: "allowed" });
+  expect(cards()[1]).toMatchObject({ args: { q: 2 }, status: "asking" });
+  expect(cards()[1].outcome).toBeUndefined();
+  s.onFrame(tf("permission.result", { call_id: "call_0", outcome: "denied" }));
+  expect(cards().map((c) => c.status)).toEqual(["done", "denied"]);
+});
+
+test("a permission for an id whose prompt was already answered starts a new card", () => {
+  startTurn();
+  const s = useChatStore.getState();
+  s.onFrame(tf("permission", { call_id: "x:fb", tool: "t", args_summary: {}, expires_in_s: 60, can_trust: false }));
+  s.onFrame(tf("permission.result", { call_id: "x:fb", outcome: "allowed" }));
+  s.onFrame(tf("permission", { call_id: "x:fb", tool: "t", args_summary: {}, expires_in_s: 60, can_trust: false }));
+  expect(cards().map((c) => [c.status, c.outcome])).toEqual([["done", "allowed"], ["asking", undefined]]);
+});
+
+test("a call frame for a running card still merges", () => {
+  startTurn();
+  const s = useChatStore.getState();
+  s.onFrame(tf("permission", { call_id: "c1", tool: "t", args_summary: {}, expires_in_s: 60, can_trust: false }));
+  s.onFrame(tf("permission.result", { call_id: "c1", outcome: "allowed" }));
+  s.onFrame(tf("call", { call_id: "c1", tool: "t", arguments: { a: 1 } }));
+  expect(cards()).toHaveLength(1);
+  expect(cards()[0]).toMatchObject({ status: "running", args: { a: 1 } });
+});
+
+test("a permission frame without expires_in_s gets the default 120 s window", () => {
+  startTurn();
+  const s = useChatStore.getState();
+  s.onFrame(tf("permission", { call_id: "c1", tool: "t", args_summary: {}, can_trust: false }));
+  s.onFrame(tf("permission", { call_id: "c2", tool: "t", args_summary: {}, expires_in_s: "soon", can_trust: false }));
+  s.onFrame(tf("permission", { call_id: "c3", tool: "t", args_summary: {}, expires_in_s: -5, can_trust: false }));
+  expect(cards().map((c) => c.permission!.expiresInS)).toEqual([120, 120, 120]);
+});

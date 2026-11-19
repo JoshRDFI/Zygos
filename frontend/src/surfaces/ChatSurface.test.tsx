@@ -241,3 +241,28 @@ test("a cancelled card keeps its outcome label in the chat", () => {
   render(<ChatSurface />);
   expect(screen.getByText("Cancelled")).toBeTruthy();
 });
+
+test("a second prompt on a reused call id renders as its own answerable card", async () => {
+  const err = vi.spyOn(console, "error").mockImplementation(() => {});
+  useSessionStore.getState().start();
+  await vi.waitFor(() => expect(useSessionStore.getState().sessionId).toBe("sess-1"));
+  const s = useChatStore.getState();
+  const tf = (type: string, payload: Record<string, unknown>) => s.onFrame({ channel: "tools", type, payload });
+  s.addUser("go");
+  s.onFrame({ channel: "chat", type: "turn.start", payload: { turn_id: "t1" } });
+  tf("call", { call_id: "call_0", tool: "find_tasks", arguments: {} });
+  tf("permission", { call_id: "call_0", tool: "find_tasks", args_summary: {}, expires_in_s: 60, can_trust: false });
+  render(<ChatSurface />);
+  await userEvent.click(screen.getByRole("button", { name: "Allow once" }));
+  act(() => {
+    tf("permission.result", { call_id: "call_0", outcome: "allowed" });
+    tf("result", { call_id: "call_0", tool: "find_tasks", ok: true, output: "x" });
+    tf("call", { call_id: "call_0", tool: "find_tasks", arguments: {} });
+    tf("permission", { call_id: "call_0", tool: "find_tasks", args_summary: {}, expires_in_s: 60, can_trust: false });
+  });
+  const allow = screen.getAllByRole("button", { name: "Allow once" });
+  expect(allow).toHaveLength(1);
+  expect(allow[0]).toBeEnabled();
+  expect(err.mock.calls.some((c) => String(c[0]).includes("same key"))).toBe(false);
+  err.mockRestore();
+});
