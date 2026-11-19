@@ -474,7 +474,9 @@ class McpSupervisor:
                 return
             entry.dirty = False
             try:
-                await asyncio.to_thread(self._store.put_state, name, entry.state)
+                # Given the spec, the store skips the write if the server was replaced
+                # meanwhile (a late write for the old spec must not land on the new row).
+                await asyncio.to_thread(self._store.put_state, name, entry.state, spec=entry.spec)
             except Exception as exc:  # noqa: BLE001 - a lost status line must not stop the server
                 logger.warning("mcp server %s: could not record its state (%s)", name, type(exc).__name__)
 

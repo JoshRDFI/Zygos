@@ -167,7 +167,7 @@ def test_add_remote_lists_tools(setup):
         code, out = _run(setup, "add", path, "--yes", clock=lambda: 1000.0)
     assert code == 0, out
     assert "2 tools listed" in out
-    assert "zygos mcp trust echo/" in out
+    assert "zygos mcp trust echo/TOOL (or echo for all 2)" in out
     assert BEARER_TOKEN not in out
     state = _store(setup).state("echo")
     assert state.status == "reachable"
@@ -420,3 +420,190 @@ def test_on_off_tool(setup):
 def test_main_routes_mcp(setup, capsys):
     assert main(["--config", str(setup.path), "mcp", "list"]) == 0
     assert "No MCP servers added" in capsys.readouterr().out
+
+
+# ---- fix round 1 -------------------------------------------------------------------------
+
+
+def test_stdin_json_confirms_on_the_terminal(setup):
+    spec = json.dumps({"mcpServers": {"loc": {"command": "local-server"}}})
+    tty = io.StringIO("y\n")
+    code, out = _run(setup, "add", stdin=io.StringIO(spec), tty_opener=lambda: tty)
+    assert code == 0, out
+    assert "Add these servers? [y/N]" in out
+    assert "loc" in _store(setup).servers()
+
+    code, out = _run(setup, "add", stdin=io.StringIO(spec.replace("loc", "two")),
+                     tty_opener=lambda: io.StringIO("n\n"))
+    assert code == 1 and "two" not in _store(setup).servers()
+
+
+def test_stdin_json_without_terminal_needs_yes(setup):
+    spec = json.dumps({"mcpServers": {"loc": {"command": "local-server"}}})
+    stdin = io.StringIO(spec)
+    code, out = _run(setup, "add", stdin=stdin, tty_opener=lambda: None)
+    assert code == 1
+    assert "stdin was used for the JSON — pass --yes or give a FILE" in out
+    assert stdin.tell() == 0  # refused before reading
+    assert _store(setup).servers() == {}
+    code, out = _run(setup, "add", "--yes", stdin=io.StringIO(spec), tty_opener=lambda: None)
+    assert code == 0 and "loc" in _store(setup).servers()
+
+
+async def test_cli_trust_opens_the_supervisor_gate(setup):
+    from zygos.mcp.supervisor import Connectors, McpSupervisor
+    from zygos.runtime.context import root_context
+    from zygos.runtime.events import InProcessEventBus
+    from zygos.tools import ToolService
+
+    import asyncio
+
+    async def cli(*argv, **kwargs) -> int:  # the CLI is its own process: never on this loop
+        return (await asyncio.to_thread(_run, setup, *argv, **kwargs))[0]
+
+    spy = ListSpy([_tool("find"), _tool("get")])
+    path = _file(setup.tmp, {"archon": {"url": "http://127.0.0.1:9/mcp"}})
+    assert await cli("add", path, "--yes", list_remote=spy) == 0
+
+    async def call_remote(*args, **kwargs):  # pragma: no cover - never called here
+        raise AssertionError
+
+    sup = McpSupervisor(
+        SqliteMcpStore(setup.db), UnavailableSecrets(), ToolService(), rules=[],
+        new_context=lambda: root_context(InProcessEventBus()),
+        connectors=Connectors(local=None, list_remote=spy, call_remote=call_remote),  # type: ignore[arg-type]
+    )
+    try:
+        def gate(name: str) -> str:
+            tools = {t.meta.name: t.meta for t in sup.before_turn()}
+            return sup.gate(tools[name])
+
+        assert gate("archon__find") == "not_trusted"
+        assert await cli("trust", "archon/find") == 0
+        assert gate("archon__find") == "allow"
+        assert gate("archon__get") == "not_trusted"
+        assert await cli("untrust", "archon/find") == 0
+        assert gate("archon__find") == "not_trusted"
+        assert await cli("trust", "archon") == 0
+        assert gate("archon__find") == "allow" and gate("archon__get") == "allow"
+        assert await cli("untrust", "archon") == 0
+        assert gate("archon__get") == "not_trusted"
+    finally:
+        await sup.aclose()
+
+
+class FlakySecrets:
+    """The real store, except ``set`` fails for some handles (or every set once ``broken``)."""
+
+    def __init__(self, real, fail: set[str], *, stays_broken: bool = False) -> None:
+        self.real, self.fail, self.stays_broken, self.broken = real, fail, stays_broken, False
+
+    def __getattr__(self, name):
+        return getattr(self.real, name)
+
+    def set(self, handle, value):
+        if handle in self.fail or self.broken:
+            self.broken = self.stays_broken
+            raise SecretStoreUnavailable("the keychain went away")
+        self.real.set(handle, value)
+
+
+def _replace_setup(setup):
+    first = _file(setup.tmp, {
+        "arch": {"url": "http://127.0.0.1:9/mcp", "headers": {"Authorization": "sk-old", "X-Other": "v-2"}},
+    }, "first.json")
+    assert _run(setup, "add", first, "--yes", list_remote=ListSpy())[0] == 0
+    assert _run(setup, "trust", "arch/echo")[0] == 0
+    return _file(setup.tmp, {
+        "arch": {"url": "http://127.0.0.1:9/mcp", "headers": {"Authorization": "sk-new", "X-Fail": "v-3"}},
+    }, "second.json")
+
+
+def test_replace_restores_secrets_when_a_set_fails(setup):
+    second = _replace_setup(setup)
+    real = build_secret_store(setup.config)
+    flaky = FlakySecrets(real, {"mcp:arch:header:X-Fail"})
+    code, out = _run(setup, "add", second, "--yes", secrets=flaky, list_remote=ListSpy())
+    assert code == 1
+    assert "arch: not added — its secrets can't be stored: the keychain went away" in out
+    assert "restored" in out
+    assert real.get("mcp:arch:header:Authorization") == "sk-old"
+    assert real.get("mcp:arch:header:X-Fail") is None
+    store = _store(setup)
+    assert store.servers()["arch"].header_names == ["Authorization", "X-Other"]
+    assert "arch__echo" in store.trust_entries()  # the old server is untouched
+    assert "sk-old" not in out and "sk-new" not in out
+
+
+def test_replace_says_which_secrets_were_overwritten_when_restore_fails(setup):
+    second = _replace_setup(setup)
+    real = build_secret_store(setup.config)
+    flaky = FlakySecrets(real, {"mcp:arch:header:X-Fail"}, stays_broken=True)
+    code, out = _run(setup, "add", second, "--yes", secrets=flaky, list_remote=ListSpy())
+    assert code == 1
+    assert "arch: the secret Authorization was overwritten and couldn't be restored" in out
+    assert "sk-old" not in out and "sk-new" not in out
+
+
+def test_add_listing_is_bounded(setup, monkeypatch):
+    import asyncio
+
+    import zygos.cli.mcp as cli_mcp
+
+    monkeypatch.setattr(cli_mcp, "_ADD_LIST_CAP_S", 0.2)
+
+    async def silent(spec, headers, *, era, discover):
+        await asyncio.sleep(30)
+
+    path = _file(setup.tmp, {"slow": {"url": "http://127.0.0.1:9/mcp"}})
+    code, out = _run(setup, "add", path, "--yes", list_remote=silent)
+    assert code == 0
+    assert "slow: added, but its tools couldn't be listed: no answer within 0.2 s — zygos serve tries again" in out
+    state = _store(setup).state("slow")
+    assert state.status == "unreachable" and state.detail == "no answer within 0.2 s"
+
+
+def test_target_picks_the_longest_server_prefix(setup):
+    path = _file(setup.tmp, {
+        "a": {"url": "http://127.0.0.1:9/a"},
+        "a/b": {"url": "http://127.0.0.1:9/ab"},
+    })
+    assert _run(setup, "add", path, "--yes", list_remote=ListSpy([_tool("x"), _tool("b/x")]))[0] == 0
+    assert _run(setup, "trust", "a/b/x")[0] == 0
+    assert set(_store(setup).trust_entries()) == {"a_b__x"}
+
+
+def test_store_write_failure_is_a_readable_error(setup, monkeypatch):
+    import sqlite3
+
+    def locked(self, *args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(SqliteMcpStore, "put_server", locked)
+    path = _file(setup.tmp, {"loc": {"command": "local-server"}})
+    code, out = _run(setup, "add", path, "--yes")
+    assert code == 1
+    assert "zygos mcp: couldn't update the MCP record (database is locked); try again" in out
+    assert "Traceback" not in out
+
+
+def test_store_read_failure_is_a_readable_error(setup, monkeypatch):
+    from zygos.mcp.store import McpStoreUnavailable
+
+    def unreadable(self):
+        raise McpStoreUnavailable("mcp store unreadable (DatabaseError: file is not a database)")
+
+    monkeypatch.setattr(SqliteMcpStore, "servers", unreadable)
+    code, out = _run(setup, "list")
+    assert code == 1
+    assert "zygos mcp: mcp store unreadable (DatabaseError: file is not a database)" in out
+
+
+def test_add_hints_trust_and_warns_over_20(setup):
+    path = _file(setup.tmp, {"archon": {"url": "http://127.0.0.1:9/mcp"}})
+    tools = [_tool(f"t{i}") for i in range(21)]
+    code, out = _run(setup, "add", path, "--yes", list_remote=ListSpy(tools))
+    assert code == 0
+    assert ("trust the ones you want: zygos mcp trust archon/TOOL (or archon for all 21)"
+            " — see zygos mcp list") in out
+    assert TOOL_COUNT_WARNING in out

@@ -591,3 +591,18 @@ async def test_gate_requires_trust_entry_for_the_same_server(h):
     sup = h.make()
     (tool,) = sup.before_turn()
     assert sup.gate(tool.meta) == "not_trusted"
+
+
+async def test_late_state_write_skips_a_replaced_server(h):
+    h.store.put_server(_remote("r"))
+    h.fakes.remote_tools["r"] = [_tool("t")]
+    sup = h.make()
+    await sup.start()
+    await _until(lambda: _names(sup.before_turn()) == ["r__t"])
+    entry = sup._servers["r"]
+    # The CLI replaces the server before this run has re-read the record ...
+    h.other.replace_server(_remote("r", timeout_s=5))
+    # ... then a write this run had queued for the old spec lands.
+    sup._update(entry, detail="late, for the old spec")
+    await _until(lambda: not sup._chores)
+    assert h.store.state("r") == ServerState()

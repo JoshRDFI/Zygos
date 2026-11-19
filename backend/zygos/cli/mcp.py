@@ -19,6 +19,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import importlib.util
+import os
+import sqlite3
 import sys
 import time
 from collections.abc import Callable
@@ -31,7 +33,7 @@ from zygos.mcp.config import McpConfigError, check_server_names, describe, parse
 from zygos.mcp.offered import checked, with_clashes
 from zygos.mcp.permission import seen_fingerprint, trust_state
 from zygos.mcp.results import McpToolError, McpUnavailable
-from zygos.mcp.store import ServerState, SqliteMcpStore, TrustEntry
+from zygos.mcp.store import McpStoreUnavailable, ServerState, SqliteMcpStore, TrustEntry
 from zygos.mcp.supervisor import NO_MCP, TOOL_COUNT_WARNING
 from zygos.mcp.types import ParsedServer, SeenTool, ServerSpec
 from zygos.secrets import SecretStoreError, build_secret_store
@@ -39,6 +41,8 @@ from zygos.secrets import SecretStoreError, build_secret_store
 __all__ = ["add_parser", "run_mcp"]
 
 _DEFAULT_TTL_S = 300.0
+_ADD_LIST_CAP_S = 20.0  # the listing right after an add waits at most this long
+_READ_BUSY_S = 30.0  # how long a read waits for another writer (then a readable error)
 _TOOL_WARN_OVER = 20
 _LOCAL_HINT = " — its tools are listed when zygos serve starts it"
 
@@ -70,6 +74,14 @@ def _mcp_installed() -> bool:
         return False
 
 
+def _open_tty() -> TextIO | None:
+    """The terminal, for confirming when the JSON came on stdin; None without one."""
+    try:
+        return open("CONIN$" if os.name == "nt" else "/dev/tty", encoding="utf-8")
+    except OSError:
+        return None
+
+
 async def _default_list_remote(*args: Any, **kwargs: Any) -> Any:
     from zygos.mcp.remote import list_remote  # imports the SDK only when called
 
@@ -87,8 +99,15 @@ class _Cli:
         list_remote: Callable[..., Any],
         mcp_installed: Callable[[], bool],
         clock: Callable[[], float],
+        stdin: TextIO,
+        tty_opener: Callable[[], TextIO | None],
     ) -> None:
-        self.store = SqliteMcpStore(Path(config.personalization.db_path))
+        # Strict: an unreadable record is an error, never "no servers".
+        self.store = SqliteMcpStore(Path(config.personalization.db_path)).strict_reader(
+            busy_timeout_s=_READ_BUSY_S
+        )
+        self.stdin = stdin
+        self.tty_opener = tty_opener
         self.config = config
         self.input_fn = input_fn
         self.out = out
@@ -113,8 +132,21 @@ class _Cli:
     # ---- add ---------------------------------------------------------------------
 
     def add(self, file: str | None, yes: bool) -> int:
+        tty = None
+        if not file and not yes:
+            # stdin carries the JSON, so the answer has to come from the terminal.
+            tty = self.tty_opener()
+            if tty is None:
+                return self.error("stdin was used for the JSON — pass --yes or give a FILE")
         try:
-            text = Path(file).read_text(encoding="utf-8") if file else sys.stdin.read()
+            return self._add(file, yes, tty)
+        finally:
+            if tty is not None:
+                tty.close()
+
+    def _add(self, file: str | None, yes: bool, tty: TextIO | None) -> int:
+        try:
+            text = Path(file).read_text(encoding="utf-8") if file else self.stdin.read()
         except OSError as exc:
             return self.error(f"can't read {file}: {exc.strerror or type(exc).__name__}")
         try:
@@ -129,13 +161,15 @@ class _Cli:
             return 1
         for item in parsed:
             self._show_planned(item, existing.get(item.spec.name))
-        if not yes and not self._confirm("Add these servers? [y/N] "):
+        if not yes and not self._confirm("Add these servers? [y/N] ", tty):
             self.say("Nothing added.")
             return 1
         code = 0
         for item in parsed:
             if not self._save(item, existing.get(item.spec.name)):
                 code = 1
+        if self._tools_on() > _TOOL_WARN_OVER:
+            self.say(TOOL_COUNT_WARNING)
         return code
 
     def _show_planned(self, item: ParsedServer, old: ServerSpec | None) -> None:
@@ -150,36 +184,72 @@ class _Cli:
         if old is not None:
             self.say(f"  replaces the existing server {spec.name} (its trust is cleared)")
 
-    def _confirm(self, prompt: str) -> bool:
-        try:
-            answer = self.input_fn(prompt)
-        except EOFError:
-            self.say()
-            return False
+    def _confirm(self, prompt: str, tty: TextIO | None) -> bool:
+        if tty is not None:
+            self.out.write(prompt)
+            self.out.flush()
+            answer = tty.readline()
+            if not answer:
+                self.say()
+                return False
+        else:
+            try:
+                answer = self.input_fn(prompt)
+            except EOFError:
+                self.say()
+                return False
         return answer.strip().lower() in ("y", "yes")
 
     def _save(self, item: ParsedServer, old: ServerSpec | None) -> bool:
         spec = item.spec
-        if item.secrets:
-            status = self.secrets.status()
-            if not status.available:
-                self.say(f"{spec.name}: not added — its secrets can't be stored: {status.why_unavailable}")
-                return False
-            try:
-                for handle, value in item.secrets.items():
-                    self.secrets.set(handle, value)
-            except SecretStoreError as exc:
-                self.say(f"{spec.name}: not added — its secrets can't be stored: {exc}")
-                return False
+        if item.secrets and not self._save_secrets(item):
+            return False
         if old is not None:
-            self.store.remove_server(spec.name)  # clears its state, trust and on/off
+            self.store.replace_server(spec)  # one transaction; clears its state, trust and on/off
             self._delete_secrets(spec.name, sorted(_handles(old) - set(item.secrets)))
-        self.store.put_server(spec)
+        else:
+            self.store.put_server(spec)
         if spec.transport == "stdio":
             self.say(f"{spec.name}: added{_LOCAL_HINT}")
             return True
         self._list_once(item)
         return True
+
+    def _save_secrets(self, item: ParsedServer) -> bool:
+        """Store a server's secret values; on a failure put back what was there before."""
+        name = item.spec.name
+        status = self.secrets.status()
+        if not status.available:
+            self.say(f"{name}: not added — its secrets can't be stored: {status.why_unavailable}")
+            return False
+        written: list[str] = []
+        try:
+            previous = {handle: self.secrets.get(handle) for handle in item.secrets}
+            for handle, value in item.secrets.items():
+                self.secrets.set(handle, value)
+                written.append(handle)
+        except SecretStoreError as exc:
+            self.say(f"{name}: not added — its secrets can't be stored: {exc}")
+            self._undo_secrets(name, previous if written else {}, written)
+            return False
+        return True
+
+    def _undo_secrets(self, server: str, previous: dict[str, str | None], written: list[str]) -> None:
+        stuck: list[str] = []
+        for handle in written:
+            try:
+                if previous[handle] is None:
+                    self.secrets.delete(handle)
+                else:
+                    self.secrets.set(handle, previous[handle])  # type: ignore[arg-type]
+            except SecretStoreError:
+                stuck.append(handle)
+        for handle in stuck:
+            what = "overwritten" if previous[handle] is not None else "saved"
+            undo = "restored" if previous[handle] is not None else "removed"
+            self.say(f"{server}: the secret {_secret_name(handle)} was {what} and couldn't be {undo}")
+        if written and not stuck:
+            self.say(f"{server}: the secrets saved before the failure were restored")
 
     def _list_once(self, item: ParsedServer) -> None:
         spec = item.spec
@@ -188,11 +258,21 @@ class _Cli:
             return
         prefix = f"mcp:{spec.name}:header:"
         headers = {h[len(prefix):]: v for h, v in item.secrets.items() if h.startswith(prefix)}
+        limit = min(spec.timeout_s, _ADD_LIST_CAP_S)
+
+        async def bounded() -> Any:
+            return await asyncio.wait_for(self.list_remote(spec, headers, era=None, discover=None), limit)
+
         try:
-            result = asyncio.run(self.list_remote(spec, headers, era=None, discover=None))
+            result = asyncio.run(bounded())
         except Exception as exc:  # noqa: BLE001 - a failed listing never undoes the add
             # McpUnavailable/McpToolError reasons are scrubbed of header values; others: type only.
-            reason = str(exc) if isinstance(exc, (McpUnavailable, McpToolError)) else type(exc).__name__
+            if isinstance(exc, TimeoutError):
+                reason = f"no answer within {limit:g} s"
+            elif isinstance(exc, (McpUnavailable, McpToolError)):
+                reason = str(exc)
+            else:
+                reason = type(exc).__name__
             now = self.clock()
             self.store.put_state(
                 spec.name, ServerState(status="unreachable", detail=reason, status_at=now)
@@ -209,15 +289,17 @@ class _Cli:
         count = len(tools)
         self.say(f"{spec.name}: added — {count} tool{'s' if count != 1 else ''} listed (protocol {result.era})")
         if tools:
-            self.say(f"  trust the ones you want: zygos mcp trust {spec.name}/{tools[0].name}")
+            self.say(
+                f"  trust the ones you want: zygos mcp trust {spec.name}/TOOL "
+                f"(or {spec.name} for all {count}) — see zygos mcp list"
+            )
 
     def _delete_secrets(self, server: str, handles: list[str]) -> None:
         for handle in handles:
             try:
                 self.secrets.delete(handle)
             except SecretStoreError as exc:
-                name = handle.rsplit(":", 1)[-1]
-                self.say(f"{server}: could not delete the secret {name}: {exc}")
+                self.say(f"{server}: could not delete the secret {_secret_name(handle)}: {exc}")
 
     # ---- list ---------------------------------------------------------------------
 
@@ -229,9 +311,7 @@ class _Cli:
         off = self.store.off()
         trust = self.store.trust_entries()
         states = {name: self.store.state(name) for name in servers}
-        tools_by = {name: checked(state.tools) for name, state in states.items()}
-        tools_by.update(with_clashes(tools_by))
-        on_count = 0
+        tools_by = _tools_by(states)
         for name in sorted(servers):
             spec, state = servers[name], states[name]
             server_on = f"server:{name}" not in off
@@ -256,14 +336,18 @@ class _Cli:
                     self.say(f"    {seen.name} — left out: {seen.problem}")
                     continue
                 tool_on = f"tool:{zname}" not in off
-                on_count += server_on and tool_on
                 self.say(f"    {seen.name} — {'on' if tool_on else 'off'}, {self._trust_text(name, zname, seen, trust)}")
+        on_count = _count_on(servers, off, tools_by)
         self.say(f"{on_count} tool{'s' if on_count != 1 else ''} on")
         if on_count > _TOOL_WARN_OVER:
             self.say(TOOL_COUNT_WARNING)
         if not self.mcp_installed():
             self.say(NO_MCP)
         return 0
+
+    def _tools_on(self) -> int:
+        servers = self.store.servers()
+        return _count_on(servers, self.store.off(), _tools_by({n: self.store.state(n) for n in servers}))
 
     def _presence(self, handle: str) -> str:
         try:
@@ -304,8 +388,9 @@ class _Cli:
         servers = self.store.servers()
         if target in servers:
             return servers[target], None
-        for i, char in enumerate(target):
-            if char == "/" and target[:i] in servers:
+        # Server names may contain "/": the longest matching server name wins.
+        for i in range(len(target) - 1, 0, -1):
+            if target[i] == "/" and target[:i] in servers:
                 return servers[target[:i]], target[i + 1:]
         return None
 
@@ -382,6 +467,27 @@ class _Cli:
         return 0
 
 
+def _secret_name(handle: str) -> str:
+    return handle.rsplit(":", 1)[-1]
+
+
+def _tools_by(states: dict[str, ServerState]) -> dict[str, list[SeenTool]]:
+    """Each server's tools with schema problems and cross-server name clashes noted."""
+    tools_by = {name: checked(state.tools) for name, state in states.items()}
+    tools_by.update(with_clashes(tools_by))
+    return tools_by
+
+
+def _count_on(servers: dict[str, ServerSpec], off: set[str], tools_by: dict[str, list[SeenTool]]) -> int:
+    return sum(
+        1
+        for name in servers
+        if f"server:{name}" not in off
+        for seen in tools_by.get(name, [])
+        if seen.problem is None and f"tool:{zygos_tool_name(name, seen.name)}" not in off
+    )
+
+
 def _handles(spec: ServerSpec) -> set[str]:
     return {f"mcp:{spec.name}:env:{n}" for n in spec.env_names} | {
         f"mcp:{spec.name}:header:{n}" for n in spec.header_names
@@ -422,12 +528,24 @@ def run_mcp(
     list_remote: Callable[..., Any] | None = None,
     mcp_installed: Callable[[], bool] = _mcp_installed,
     clock: Callable[[], float] = time.time,
+    stdin: TextIO | None = None,
+    tty_opener: Callable[[], TextIO | None] = _open_tty,
 ) -> int:
     """Run one ``zygos mcp`` subcommand; returns the exit code."""
     cli = _Cli(
         config, input_fn=input_fn, out=out if out is not None else sys.stdout, secrets=secrets,
         list_remote=list_remote or _default_list_remote, mcp_installed=mcp_installed, clock=clock,
+        stdin=stdin if stdin is not None else sys.stdin, tty_opener=tty_opener,
     )
+    try:
+        return _dispatch(cli, args)
+    except McpStoreUnavailable as exc:  # already a readable reason, never values
+        return cli.error(str(exc))
+    except sqlite3.Error as exc:
+        return cli.error(f"couldn't update the MCP record ({exc}); try again")
+
+
+def _dispatch(cli: _Cli, args: argparse.Namespace) -> int:
     command = args.mcp_command
     if command == "add":
         return cli.add(args.file, args.yes)

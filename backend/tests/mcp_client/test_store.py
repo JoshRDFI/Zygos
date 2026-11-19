@@ -264,3 +264,33 @@ def test_strict_reader_gives_up_fast_while_locked(tmp_path):
         assert time.monotonic() - t0 < 0.5
         con.execute("ROLLBACK")
     assert set(reader.servers()) == {"fs"}
+
+
+def test_replace_server_is_one_transaction_and_clears(tmp_path):
+    s = SqliteMcpStore(tmp_path / "p.db")
+    s.put_server(_spec())
+    s.put_state("fs", ServerState(status="running"))
+    s.set_off("tool", "fs__x", True, server="fs")
+    s.set_off("server", "fs", True)
+    s.trust_server("fs", [])
+    before = s.version()
+    new = _spec().model_copy(update={"args": ["--other"]})
+    s.replace_server(new)
+    assert s.version() == before + 1  # one write
+    assert s.servers() == {"fs": new}
+    assert s.state("fs") == ServerState()
+    assert s.off() == set() and s.trusted_servers() == set()
+    with pytest.raises(ValueError):
+        s.replace_server(_spec("a__b"))
+
+
+def test_put_state_with_spec_skips_a_replaced_server(tmp_path):
+    s = SqliteMcpStore(tmp_path / "p.db")
+    old = _spec()
+    s.put_server(old)
+    new = old.model_copy(update={"args": ["--new"]})
+    s.replace_server(new)
+    s.put_state("fs", ServerState(status="running", detail="late, old spec"), spec=old)
+    assert s.state("fs") == ServerState()
+    s.put_state("fs", ServerState(status="running", detail="current"), spec=new)
+    assert s.state("fs").detail == "current"

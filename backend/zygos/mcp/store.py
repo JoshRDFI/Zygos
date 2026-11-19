@@ -194,28 +194,57 @@ class SqliteMcpStore:
             )
         )
 
+    @staticmethod
+    def _clear_server(c: sqlite3.Connection, name: str) -> None:
+        c.execute("DELETE FROM mcp_servers WHERE name=?", (name,))
+        c.execute("DELETE FROM mcp_state WHERE name=?", (name,))
+        c.execute("DELETE FROM mcp_trust_servers WHERE name=?", (name,))
+        c.execute("DELETE FROM mcp_off WHERE key=?", (f"server:{name}",))
+        c.execute("DELETE FROM mcp_trust WHERE json_extract(entry, '$.server') = ?", (name,))
+        c.execute("DELETE FROM mcp_off WHERE server = ?", (name,))
+
     def remove_server(self, name: str) -> None:
+        self._write(lambda c: self._clear_server(c, name))
+
+    def replace_server(self, spec: ServerSpec) -> None:
+        """Put ``spec`` in place of the server of the same name, clearing that server's
+        state, trust and on/off, in one transaction (a reader never sees it missing)."""
+        if "__" in clean_part(spec.name):
+            raise ValueError(
+                f"server name {spec.name!r}: '__' is reserved as the server/tool separator"
+            )
+
         def go(c: sqlite3.Connection) -> None:
-            c.execute("DELETE FROM mcp_servers WHERE name=?", (name,))
-            c.execute("DELETE FROM mcp_state WHERE name=?", (name,))
-            c.execute("DELETE FROM mcp_trust_servers WHERE name=?", (name,))
-            c.execute("DELETE FROM mcp_off WHERE key=?", (f"server:{name}",))
-            c.execute("DELETE FROM mcp_trust WHERE json_extract(entry, '$.server') = ?", (name,))
-            c.execute("DELETE FROM mcp_off WHERE server = ?", (name,))
+            self._clear_server(c, spec.name)
+            c.execute(
+                "INSERT INTO mcp_servers(name, spec) VALUES (?, ?)", (spec.name, spec.model_dump_json())
+            )
 
         self._write(go)
 
-    def put_state(self, name: str, state: ServerState) -> None:
+    def put_state(self, name: str, state: ServerState, *, spec: ServerSpec | None = None) -> None:
         """Record a server's state; a no-op once the server is gone (a late write must not
-        leave a row a re-added server of the same name would adopt)."""
-        self._write(
-            lambda c: c.execute(
-                "INSERT INTO mcp_state(name, state) SELECT ?, ? "
-                "WHERE EXISTS (SELECT 1 FROM mcp_servers WHERE name = ?) "
+        leave a row a re-added server of the same name would adopt) and, given ``spec``,
+        a no-op when the stored server is no longer that spec (replaced meanwhile)."""
+
+        def go(c: sqlite3.Connection) -> None:
+            row = c.execute("SELECT spec FROM mcp_servers WHERE name=?", (name,)).fetchone()
+            if row is None:
+                return
+            if spec is not None:
+                try:
+                    stored = ServerSpec.model_validate_json(row[0])
+                except ValidationError:
+                    return
+                if stored != spec:
+                    return
+            c.execute(
+                "INSERT INTO mcp_state(name, state) VALUES (?, ?) "
                 "ON CONFLICT(name) DO UPDATE SET state = excluded.state",
-                (name, state.model_dump_json(), name),
+                (name, state.model_dump_json()),
             )
-        )
+
+        self._write(go)
 
     @staticmethod
     def _put_trust(c: sqlite3.Connection, entry: TrustEntry) -> None:
