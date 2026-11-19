@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Frame, PermissionOutcome, ToolCard } from "../client/types";
 
-const OUTCOME: Record<PermissionOutcome, string> = {
+export const OUTCOME: Record<PermissionOutcome, string> = {
   allowed: "Allowed",
   trusted_tool: "Trusted this tool",
   trusted_server: "Trusted this server",

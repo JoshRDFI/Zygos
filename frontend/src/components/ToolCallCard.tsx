@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Frame, ToolCard } from "../client/types";
-import PermissionCard from "./PermissionCard";
+import PermissionCard, { OUTCOME } from "./PermissionCard";
 
 const CLIP = 2000;
 
@@ -46,6 +46,7 @@ export default function ToolCallCard({ card, send }: { card: ToolCard; send?: (f
           </button>
         )}
       </div>
+      {card.outcome && <div className="text-text-muted">{OUTCOME[card.outcome]}</div>}
       {open && hasOutput && (
         <>
           <pre className="whitespace-pre-wrap break-words font-mono">{clipped ? `${body.slice(0, CLIP)}…` : body}</pre>

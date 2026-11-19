@@ -230,3 +230,14 @@ test("renders tool cards above the assistant text", () => {
   expect(html.indexOf("find_tasks")).toBeGreaterThan(-1);
   expect(html.indexOf("find_tasks")).toBeLessThan(html.indexOf("REPLY TEXT"));
 });
+
+test("a cancelled card keeps its outcome label in the chat", () => {
+  useChatStore.setState({
+    messages: [{
+      role: "assistant", text: "T", streaming: false,
+      tools: [{ callId: "c1", tool: "find_tasks", server: "archon", args: {}, status: "denied", outcome: "cancelled" }],
+    }],
+  });
+  render(<ChatSurface />);
+  expect(screen.getByText("Cancelled")).toBeTruthy();
+});

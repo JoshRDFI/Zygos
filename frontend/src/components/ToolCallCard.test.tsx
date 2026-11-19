@@ -55,3 +55,24 @@ test("asking card renders the permission card", () => {
     argsSummary: {}, expiresInS: 60, askedAt: Date.now(), canTrust: false, claims: [] } }} />);
   expect(screen.getByRole("button", { name: "Allow once" })).toBeTruthy();
 });
+
+test.each([
+  ["cancelled", "denied", "Cancelled"],
+  ["timed_out", "denied", "Timed out — denied"],
+  ["trusted_tool", "running", "Trusted this tool"],
+  ["trusted_server", "running", "Trusted this server"],
+  ["denied", "denied", "Denied"],
+  ["allowed", "running", "Allowed"],
+] as const)("resolved card shows outcome %s", (outcome, st, label) => {
+  render(<ToolCallCard send={vi.fn()} card={{ ...base, status: st, outcome }} />);
+  expect(screen.getByText(label)).toBeTruthy();
+  expect(screen.queryAllByRole("button", { name: "Allow once" })).toHaveLength(0);
+});
+
+test("trust_failed then done shows the note and the result", async () => {
+  render(<ToolCallCard send={vi.fn()} card={{ ...base, status: "done", outcome: "trust_failed", output: { n: 7 } }} />);
+  expect(screen.getByText("Allowed — couldn't save trust — it will ask again")).toBeTruthy();
+  expect(screen.getByText("done")).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: /output/ }));
+  expect(screen.getByText(/"n": 7/)).toBeTruthy();
+});
