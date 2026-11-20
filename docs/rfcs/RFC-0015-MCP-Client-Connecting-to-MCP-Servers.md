@@ -29,7 +29,17 @@
 - **Does not govern:** Zygos acting as an MCP **server** (later, its own RFC);
   installing MCP servers or their runtimes (`node`, `uv`, Docker — the user does);
   ComfyUI itself, RunPod, or any server's own behaviour; vision input (RFC-0009).
-- **Implementation status:** phase 0 built; phase 1a built (backend, CLI, doctor); phase 1b build A: chat prompt and tool cards built; 1b build B (Tools page) next. Archon `85d6b4ab`.
+- **Implementation status:** phase 0 built; phase 1a built (backend, CLI, doctor); phase 1b built (chat prompt and tool cards; Tools page and `/mcp` routes). Archon `85d6b4ab`.
+- **Note (2026-11-19, additive):** phase 1b is built. The Tools page manages MCP servers: paste
+  `mcpServers` JSON, Preview, then Confirm; each server shows its status, protocol, timeout,
+  secrets (`set`, `not set` or `unknown`, never a value) and tools (trusted, asks or changed).
+  Servers and tools can be switched on or off, trusted or untrusted, a secret replaced, the
+  timeout edited, a server removed, and the list refreshed. The page and `zygos mcp` are two
+  front ends over one module (`zygos/mcp/manage.py`); the `/mcp` routes live in
+  `zygos/api/routes_mcp.py` and sit behind the existing Origin and Host checks. No response
+  carries a secret value, and validation errors never echo input. Changes apply without a
+  restart (`McpSupervisor.sync_now`, `restart`, `refresh`). Servers declared in `config.yaml`
+  are not shown yet.
 
 ## Summary
 

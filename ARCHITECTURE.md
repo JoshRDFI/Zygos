@@ -226,6 +226,12 @@ side-effecting call is permission-gated with an interactive prompt over the WebS
 config rule can loosen a tool's default `ask` to `allow`, but a tool declared `deny` is a
 hard floor config cannot lift.
 
+Tools from MCP servers ([RFC-0015](./docs/rfcs/RFC-0015-MCP-Client-Connecting-to-MCP-Servers.md))
+are offered through the same loop by `McpSupervisor`, and an MCP tool asks until it is trusted.
+`zygos/mcp/manage.py` holds the management logic (add with plan and save, list view, remove,
+on/off, trust, secret replace, timeout); the `zygos mcp` CLI and the `/mcp` routes are both thin
+front ends over it. Secret values never appear in a response.
+
 ---
 
 ## API Surface
@@ -240,6 +246,10 @@ REST handles request/response resources: sessions, config, skills, plans, propos
   health (`healthy`/`unhealthy`/`not_probed`; default `not_probed`, `?probe=1` actively
   probes), and active-session count. (Cycle 1)
 - `POST /sessions` → session id; `GET /sessions` — the in-memory session registry. (Cycle 2)
+- `/mcp` — the Tools page's routes: `GET /mcp` (servers, status, secrets as `set`/`not set`/`unknown`,
+  tools), `POST /mcp/plan` and `POST /mcp/servers` (preview, then save), `DELETE /mcp/servers/{name}`,
+  `PUT .../on`, `.../off`, `.../timeout`, `PUT`/`DELETE .../trust` (servers and tools),
+  `PUT .../secrets/{secret}`, and `POST /mcp/refresh`. Writes are covered by the Origin check.
 
 Each session has one multiplexed WebSocket at `/ws/session/{id}`. All real-time traffic
 flows over that single connection:

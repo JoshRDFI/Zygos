@@ -114,6 +114,10 @@ running commands ask you first — in real time, over the socket — and you can
 tighten any tool in config. The model invokes these tools inside the live turn loop. A tool
 that reaches the network (fetching a page you asked for) does so by your request and in
 plain view — privacy here means your data stays local, not that the assistant can't act.
+Tools from MCP servers ([RFC-0015](./docs/rfcs/RFC-0015-MCP-Client-Connecting-to-MCP-Servers.md))
+join the same loop: you paste the `mcpServers` JSON, local servers are started for you, and each
+tool asks in the chat until you trust it. The Tools page and the `zygos mcp` commands manage
+servers (add, on/off, trust, secrets, timeout, remove) as two front ends over one module.
 `[v1]` `[v2 · built]`
 
 ### Skills and learning — you approve the changes
