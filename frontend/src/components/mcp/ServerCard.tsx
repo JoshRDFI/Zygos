@@ -45,6 +45,7 @@ export default function ServerCard({ server: s }: { server: ServerView }) {
       )}
 
       <div className="flex items-center gap-3 flex-wrap text-xs text-text-muted">
+        <span>{s.era ? `protocol ${s.era}` : "protocol not known yet"}</span>
         {editing ? (
           <span className="flex items-center gap-1">
             <input

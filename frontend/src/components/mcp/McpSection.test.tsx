@@ -237,3 +237,9 @@ test("editing after a completed preview removes Confirm", async () => {
   await userEvent.type(screen.getByLabelText("Server JSON"), "!");
   expect(screen.queryByRole("button", { name: "Confirm" })).not.toBeInTheDocument();
 });
+
+test("shows the protocol, or that it is not known yet", async () => {
+  show(view([server({ name: "a", era: "2025-11-25" }), server({ name: "b", era: null })]));
+  expect(await screen.findByText("protocol 2025-11-25")).toBeInTheDocument();
+  expect(screen.getByText("protocol not known yet")).toBeInTheDocument();
+});
