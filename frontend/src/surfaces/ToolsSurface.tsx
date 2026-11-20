@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getManifest } from "../client/rest";
 import type { Manifest } from "../client/types";
+import McpSection from "../components/mcp/McpSection";
 
 export default function ToolsSurface() {
   const [m, setM] = useState<Manifest | null>(null);
@@ -11,6 +12,8 @@ export default function ToolsSurface() {
   return (
     <div className="p-6 space-y-4">
       <h1 className="text-lg font-mono">Tools</h1>
+      <McpSection />
+      <h2 className="font-mono">Built-in tools</h2>
       {!m ? (
         <div className="text-text-muted">Loading…</div>
       ) : tools.length === 0 ? (
