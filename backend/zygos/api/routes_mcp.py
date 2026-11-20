@@ -21,9 +21,11 @@ Stability: Experimental.
 from __future__ import annotations
 
 import asyncio
+import functools
 import sqlite3
 import time
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Any, Literal, TypeVar
 
@@ -165,18 +167,44 @@ class _NoAnswer:
         return Presence("unknown", _NO_ANSWER)
 
 
+def _presence_executor(state: Any) -> ThreadPoolExecutor:
+    """One thread of the app's own for views that ask the secret store, so a hung keychain
+    never holds a thread of the shared default pool."""
+    executor = getattr(state, "mcp_presence_executor", None)
+    if executor is None:
+        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mcp-presence")
+        state.mcp_presence_executor = executor
+    return executor
+
+
+def _retrieve(future: asyncio.Future[Any]) -> None:
+    if not future.cancelled():
+        future.exception()  # read by a later view or no one; never logged as unretrieved
+
+
 async def _view(request: Request) -> McpView:
     """The view, bounded: when the secret store doesn't answer in time, the secrets read
-    ``unknown`` (a locked keychain can block its thread for long; the loop never waits)."""
+    ``unknown``. One view at a time asks the secret store; while that read is still in
+    flight (a locked keychain can block for long) the others read ``unknown`` at once
+    rather than queue behind it. The event loop never waits on the store."""
     store = _store(request)
-    try:
-        return await asyncio.wait_for(
-            _off_loop(manage.list_view, store, _Answering(_runtime(request).secrets),
-                      mcp_installed=manage.mcp_installed),
-            _VIEW_LIMIT_S,
+    state = request.app.state
+    pending: asyncio.Future[McpView] | None = getattr(state, "mcp_view_pending", None)
+    if pending is None or pending.done():
+        pending = asyncio.get_running_loop().run_in_executor(
+            _presence_executor(state),
+            functools.partial(manage.list_view, store, _Answering(_runtime(request).secrets),
+                              mcp_installed=manage.mcp_installed),
         )
-    except TimeoutError:
-        return await _off_loop(manage.list_view, store, _NoAnswer(), mcp_installed=manage.mcp_installed)
+        pending.add_done_callback(_retrieve)
+        state.mcp_view_pending = pending
+        try:
+            with _refusals():
+                # shield: a timeout must not mark the read done while its thread still runs
+                return await asyncio.wait_for(asyncio.shield(pending), _VIEW_LIMIT_S)
+        except TimeoutError:
+            pass
+    return await _off_loop(manage.list_view, store, _NoAnswer(), mcp_installed=manage.mcp_installed)
 
 
 async def _written(request: Request, *, restart: str | None = None) -> McpView:

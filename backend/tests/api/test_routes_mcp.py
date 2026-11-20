@@ -40,6 +40,9 @@ class PageSecrets:
         self.hang = threading.Event()
         self.release = threading.Event()
         self.presence_error: Exception | None = None
+        self.waiting = 0  # presence calls blocked on ``hang`` right now
+        self.most_waiting = 0
+        self._lock = threading.Lock()
 
     def status(self):
         return SimpleNamespace(available=True, why_unavailable=None)
@@ -55,7 +58,12 @@ class PageSecrets:
 
     def presence(self, handle):
         if self.hang.is_set():
+            with self._lock:
+                self.waiting += 1
+                self.most_waiting = max(self.most_waiting, self.waiting)
             self.release.wait(10)
+            with self._lock:
+                self.waiting -= 1
         if self.presence_error is not None:
             raise self.presence_error
         return Presence("set" if handle in self.values else "not_set")
@@ -168,6 +176,28 @@ async def test_get_mcp_bounded_when_secret_store_hangs(page):
     server = _server(resp.json(), "arch")
     assert server["secrets"] == {"Authorization": "unknown"}
     assert server["secrets_note"] == "the secret store didn't answer in time"
+
+
+async def test_get_mcp_hung_secret_store_blocks_one_thread_only(page):
+    _seed(page.store, _remote("arch", header_names=["Authorization"]))
+    page.secrets.values["mcp:arch:header:Authorization"] = MARKER
+    page.secrets.hang.set()
+    took = []
+    for _ in range(3):
+        t0 = time.monotonic()
+        resp = await page.client.get("/mcp")
+        took.append(time.monotonic() - t0)
+        assert resp.status_code == 200
+        assert _server(resp.json(), "arch")["secrets"] == {"Authorization": "unknown"}
+    assert took[0] < 7.0
+    assert took[1] < 2.0 and took[2] < 2.0  # the hung read is still in flight: not asked again
+    assert page.secrets.most_waiting == 1
+    page.secrets.hang.clear()
+    page.secrets.release.set()
+    await _until(lambda: page.secrets.waiting == 0)
+    await asyncio.sleep(0.05)
+    resp = await page.client.get("/mcp")  # the store answers again: asked afresh
+    assert _server(resp.json(), "arch")["secrets"] == {"Authorization": "set"}
 
 
 async def test_get_mcp_presence_failure_reads_unknown_by_type_name(page):
