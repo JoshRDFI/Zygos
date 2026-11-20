@@ -9,8 +9,13 @@ import dataclasses
 import io
 import json
 import logging
+import os
+import subprocess
+import sys
+import textwrap
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import quote
 
@@ -198,6 +203,63 @@ async def test_get_mcp_hung_secret_store_blocks_one_thread_only(page):
     await asyncio.sleep(0.05)
     resp = await page.client.get("/mcp")  # the store answers again: asked afresh
     assert _server(resp.json(), "arch")["secrets"] == {"Authorization": "set"}
+
+
+_HUNG_CHILD = textwrap.dedent("""
+    import asyncio, dataclasses, sys, threading
+    from pathlib import Path
+    from types import SimpleNamespace
+    import httpx
+    from zygos.api import routes_mcp
+    from zygos.api.app import create_app
+    from zygos.mcp.store import SqliteMcpStore
+    from zygos.mcp.types import ServerSpec
+    from zygos.runtime.bootstrap import build_runtime
+
+    class Hung:
+        def status(self):
+            return SimpleNamespace(available=True, why_unavailable=None)
+        def presence(self, handle):
+            threading.Event().wait()  # a keychain prompt nobody answers
+
+    async def main(cfg, db):
+        SqliteMcpStore(db).put_server(ServerSpec(
+            name="arch", transport="http", url="http://127.0.0.1:9/mcp", header_names=["Authorization"]))
+        routes_mcp._VIEW_LIMIT_S = 0.5
+        runtime = build_runtime(Path(cfg))
+        app = create_app(dataclasses.replace(runtime, secrets=Hung()))
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as client:
+            resp = await client.get("/mcp")
+        print("answered", resp.status_code, resp.json()["servers"][0]["secrets"], flush=True)
+        await app.state.runtime.aclose()
+
+    asyncio.run(main(sys.argv[1], sys.argv[2]))
+""")
+
+
+def test_hung_secret_store_never_keeps_the_process_alive(tmp_path):
+    db = tmp_path / ".zygos" / "preferences.db"
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        f"personalization:\n  db_path: '{db}'\n"
+        "providers:\n  primary: {provider: fake, model: fake-1}\n"
+        "tools:\n  enabled: []\n",
+        encoding="utf-8",
+    )
+    script = tmp_path / "child.py"
+    script.write_text(_HUNG_CHILD, encoding="utf-8")
+    env = {**os.environ, "ZYGOS_HOME": str(tmp_path / "home")}
+    try:
+        done = subprocess.run(
+            [sys.executable, str(script), str(cfg), str(db)], cwd=Path(__file__).resolve().parents[2],
+            env=env, capture_output=True, text=True, timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        out = exc.stdout.decode() if isinstance(exc.stdout, bytes) else exc.stdout
+        raise AssertionError(f"the process didn't exit with a read still hung (stdout: {out!r})") from None
+    assert done.returncode == 0, done.stderr[-2000:]
+    assert "answered 200 {'Authorization': 'unknown'}" in done.stdout
 
 
 async def test_get_mcp_presence_failure_reads_unknown_by_type_name(page):

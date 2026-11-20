@@ -21,11 +21,10 @@ Stability: Experimental.
 from __future__ import annotations
 
 import asyncio
-import functools
 import sqlite3
+import threading
 import time
 from collections.abc import Callable, Iterator
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Any, Literal, TypeVar
 
@@ -167,14 +166,36 @@ class _NoAnswer:
         return Presence("unknown", _NO_ANSWER)
 
 
-def _presence_executor(state: Any) -> ThreadPoolExecutor:
-    """One thread of the app's own for views that ask the secret store, so a hung keychain
-    never holds a thread of the shared default pool."""
-    executor = getattr(state, "mcp_presence_executor", None)
-    if executor is None:
-        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mcp-presence")
-        state.mcp_presence_executor = executor
-    return executor
+def _in_daemon_thread(fn: Callable[[], _T]) -> asyncio.Future[_T]:
+    """Run ``fn`` on a daemon thread of its own and resolve a future on this loop with its
+    outcome. A read stuck on a hung keychain then never holds a thread of the shared
+    default pool, and never keeps the process from exiting (pool threads are joined at
+    exit; a daemon thread is not)."""
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[_T] = loop.create_future()
+
+    def settle(result: Any, error: BaseException | None) -> None:
+        if future.done():
+            return
+        if error is not None:
+            future.set_exception(error)
+        else:
+            future.set_result(result)
+
+    def run() -> None:
+        result: Any = None
+        error: BaseException | None = None
+        try:
+            result = fn()
+        except BaseException as exc:  # noqa: BLE001 - handed to the awaiting view
+            error = exc
+        try:
+            loop.call_soon_threadsafe(settle, result, error)
+        except RuntimeError:
+            pass  # the loop has closed: nobody is waiting for this read
+
+    threading.Thread(target=run, name="mcp-presence", daemon=True).start()
+    return future
 
 
 def _retrieve(future: asyncio.Future[Any]) -> None:
@@ -191,10 +212,9 @@ async def _view(request: Request) -> McpView:
     state = request.app.state
     pending: asyncio.Future[McpView] | None = getattr(state, "mcp_view_pending", None)
     if pending is None or pending.done():
-        pending = asyncio.get_running_loop().run_in_executor(
-            _presence_executor(state),
-            functools.partial(manage.list_view, store, _Answering(_runtime(request).secrets),
-                              mcp_installed=manage.mcp_installed),
+        secrets = _Answering(_runtime(request).secrets)
+        pending = _in_daemon_thread(
+            lambda: manage.list_view(store, secrets, mcp_installed=manage.mcp_installed)
         )
         pending.add_done_callback(_retrieve)
         state.mcp_view_pending = pending
