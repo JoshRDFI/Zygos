@@ -159,7 +159,6 @@ export interface ToolCard {
 export type SecretPresence = "set" | "not set" | "unknown";
 
 export interface ToolView {
-  name: string;
   zname: string;
   server_tool: string;
   description: string;
