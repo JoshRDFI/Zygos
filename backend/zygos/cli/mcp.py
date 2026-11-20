@@ -29,21 +29,19 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from zygos.config.schema import ZygosConfig
-from zygos.mcp.config import describe, status_word, zygos_tool_name
 from zygos.mcp import manage
-from zygos.mcp.offered import checked, noted
-from zygos.mcp.permission import trust_state
-from zygos.mcp.store import McpStoreUnavailable, ServerState, SqliteMcpStore, TrustEntry
+from zygos.mcp.config import status_word
+from zygos.mcp.store import McpStoreUnavailable, ServerState, SqliteMcpStore
 from zygos.mcp.supervisor import NO_MCP, TOOL_COUNT_WARNING
-from zygos.mcp.types import ParsedServer, SeenTool, ServerSpec
-from zygos.secrets import SecretStoreError, build_secret_store
+from zygos.mcp.types import ParsedServer, ServerSpec
+from zygos.secrets import build_secret_store
 
 __all__ = ["add_parser", "run_mcp"]
 
 _ADD_LIST_CAP_S = manage.ADD_LIST_CAP_S
 _READ_BUSY_S = 30.0  # how long a read waits for another writer (then a readable error)
-_TOOL_WARN_OVER = 20
-_LOCAL_HINT = " — its tools are listed when zygos serve starts it"
+_TOOL_WARN_OVER = manage.TOOL_WARN_OVER
+_LOCAL_HINT = manage.LOCAL_HINT
 
 
 def add_parser(subcommands: Any) -> None:
@@ -216,195 +214,122 @@ class _Cli:
         )))
         return True
 
-    def _delete_secrets(self, server: str, handles: list[str]) -> None:
-        for note in manage.delete_secrets(self.secrets, server, handles):
-            self.say(note)
-
     # ---- list ---------------------------------------------------------------------
 
     def list(self) -> int:
-        servers = self.store.servers()
-        if not servers:
+        view = manage.list_view(self.store, self.secrets, mcp_installed=self.mcp_installed)
+        if not view.servers:
             self.say("No MCP servers added. Add one with: zygos mcp add servers.json")
             return 0
-        off = self.store.off()
-        trust = self.store.trust_entries()
-        states = {name: self.store.state(name) for name in servers}
-        tools_by = _tools_by(servers, states, off)
-        for name in sorted(servers):
-            spec, state = servers[name], states[name]
-            server_on = f"server:{name}" not in off
-            if name != min(servers):
+        for i, server in enumerate(view.servers):
+            if i:
                 self.say()
-            self.say(f"{name} ({'on' if server_on else 'off'})")
-            self.say(f"  {describe(spec)}")
-            self.say(f"  protocol {state.era or 'not known yet'}")
-            self.say(f"  status: {_status(spec, state)}")
-            for kind, names in (("env", spec.env_names), ("header", spec.header_names)):
+            self.say(f"{server.name} ({'on' if server.on else 'off'})")
+            self.say(f"  {server.runs}")
+            self.say(f"  protocol {server.era or 'not known yet'}")
+            self.say(f"  status: {_status(server, server)}")
+            for kind, names in (("env", server.env_names), ("header", server.header_names)):
                 for item in names:
-                    self.say(f"  {kind} {item} = {self._presence(f'mcp:{name}:{kind}:{item}')}")
-            tools = tools_by[name]
-            if not tools:
-                hint = _LOCAL_HINT if spec.transport == "stdio" else ""
+                    self.say(f"  {kind} {item} = {_presence_text(server, item)}")
+            if not server.tools:
+                hint = _LOCAL_HINT if server.local else ""
                 self.say(f"  tools: none seen yet{hint}")
                 continue
             self.say("  tools:")
-            for seen in tools:
-                zname = zygos_tool_name(name, seen.name)
-                if seen.problem is not None:
-                    self.say(f"    {seen.name} — left out: {seen.problem}")
+            for tool in server.tools:
+                if tool.problem is not None:
+                    self.say(f"    {tool.server_tool} — left out: {tool.problem}")
                     continue
-                tool_on = f"tool:{zname}" not in off
-                self.say(f"    {seen.name} — {'on' if tool_on else 'off'}, {self._trust_text(name, zname, seen, trust)}")
-        on_count = _count_on(servers, off, tools_by)
+                self.say(f"    {tool.server_tool} — {'on' if tool.on else 'off'}, {_trust_text(tool)}")
+        on_count = view.tools_on
         self.say(f"{on_count} tool{'s' if on_count != 1 else ''} on")
-        if on_count > _TOOL_WARN_OVER:
-            self.say(TOOL_COUNT_WARNING)
-        if not self.mcp_installed():
+        if view.warning is not None:
+            self.say(view.warning)
+        if not view.installed:
             self.say(NO_MCP)
         return 0
 
     def _tools_on(self) -> int:
-        servers = self.store.servers()
-        off = self.store.off()
-        return _count_on(servers, off, _tools_by(servers, {n: self.store.state(n) for n in servers}, off))
-
-    def _presence(self, handle: str) -> str:
-        try:
-            presence = self.secrets.presence(handle)
-        except SecretStoreError as exc:
-            return f"unknown ({exc})"
-        if presence.state == "set":
-            return "set"
-        if presence.state == "not_set":
-            return "not set"
-        return f"unknown ({presence.reason})"
-
-    def _trust_text(self, server: str, zname: str, seen: SeenTool, trust: dict[str, TrustEntry]) -> str:
-        entry = trust.get(zname)
-        if entry is None or entry.server != server:
-            return "not trusted"
-        if trust_state(zname, seen, trust) == "trusted":
-            return "trusted"
-        lines = ["changed since you trusted it"]
-        if entry.description != seen.description:
-            lines += [f"      was: {entry.description}", f"      now: {seen.description}"]
-        if entry.input_schema != seen.input_schema:
-            lines.append("      its input schema changed too" if len(lines) > 1 else "      its input schema changed")
-        return "\n".join(lines)
+        return manage.tools_on(self.store)
 
     # ---- remove, on/off, trust ------------------------------------------------------------
 
     def remove(self, name: str) -> int:
-        spec = self.store.servers().get(name)
-        if spec is None:
-            return self.error(f"no server {name}")
-        self.store.remove_server(name)
-        self._delete_secrets(name, sorted(manage.handles(spec)))
+        try:
+            notes = manage.remove_server(self.store, self.secrets, name)
+        except manage.ManageError as exc:
+            return self.error(exc.reason)
+        for note in notes:
+            self.say(note)
         self.say(f"Removed {name}.")
         return 0
 
-    def _target(self, target: str) -> tuple[ServerSpec, str | None] | None:
-        servers = self.store.servers()
-        if target in servers:
-            return servers[target], None
-        # Server names may contain "/": the longest matching server name wins.
-        for i in range(len(target) - 1, 0, -1):
-            if target[i] == "/" and target[:i] in servers:
-                return servers[target[:i]], target[i + 1:]
-        return None
-
-    def _seen(self, spec: ServerSpec, tool: str | None) -> list[SeenTool] | None:
-        """The tools seen now (one, or all for ``tool=None``); None after printing the error."""
-        tools = self.store.state(spec.name).tools
-        if tool is not None:
-            tools = [t for t in tools if t.name == tool]
-        if tools:
-            return tools
-        hint = _LOCAL_HINT if spec.transport == "stdio" else ""
-        what = f"no tool {tool}" if tool is not None else "no tools"
-        self.error(f"{what} seen on {spec.name} yet{hint}")
-        return None
-
     def switch(self, target: str, on: bool) -> int:
-        found = self._target(target)
-        if found is None:
-            return self.error(f"no server {target.split('/', 1)[0]}")
-        spec, tool = found
         word = "on" if on else "off"
-        if tool is None:
-            # also clears the "switched off" stop zygos serve recorded, atomically
-            self.store.set_server_on(spec.name, on, now=self.clock())
-            self.say(f"{spec.name} is {word}.")
-            return 0
-        zname = zygos_tool_name(spec.name, tool)
-        already_off = f"tool:{zname}" in self.store.off()
-        if not (on and already_off) and self._seen(spec, tool) is None:
-            return 1
-        self.store.set_off("tool", zname, not on, server=spec.name)
+        try:
+            spec, tool = manage.resolve_target(self.store, target)
+            if tool is None:
+                manage.switch_server(self.store, spec.name, on, clock=self.clock)
+                self.say(f"{spec.name} is {word}.")
+                return 0
+            manage.switch_tool(self.store, spec.name, tool, on)
+        except manage.ManageError as exc:
+            return self.error(exc.reason)
         self.say(f"{spec.name}/{tool} is {word}.")
         return 0
 
     def trust(self, target: str) -> int:
-        found = self._target(target)
-        if found is None:
-            return self.error(f"no server {target.split('/', 1)[0]}")
-        spec, tool = found
-        tools = self._seen(spec, tool)
-        if tools is None:
-            return 1
-        if tool is not None:
-            manage.trust_one(self.store, spec.name, tools[0])
-            self.say(f"Trusted {spec.name}/{tool}.")
-        else:
-            entries = manage.trust_all(self.store, spec.name, tools)
-            self.say(f"Trusted the {len(entries)} tool{'s' if len(entries) != 1 else ''} {spec.name} has now.")
-            self.say("Tools it adds later need trusting on their own.")
+        try:
+            spec, tool = manage.resolve_target(self.store, target)
+            if tool is not None:
+                manage.trust_tool(self.store, spec.name, tool)
+                self.say(f"Trusted {spec.name}/{tool}.")
+                return 0
+            entries = manage.trust_server(self.store, spec.name)
+        except manage.ManageError as exc:
+            return self.error(exc.reason)
+        self.say(f"Trusted the {len(entries)} tool{'s' if len(entries) != 1 else ''} {spec.name} has now.")
+        self.say("Tools it adds later need trusting on their own.")
         return 0
 
     def untrust(self, target: str) -> int:
-        found = self._target(target)
-        if found is None:
-            return self.error(f"no server {target.split('/', 1)[0]}")
-        spec, tool = found
-        if tool is not None:
-            zname = zygos_tool_name(spec.name, tool)
-            entry = self.store.trust_entries().get(zname)
-            if entry is None or entry.server != spec.name:
-                self.say(f"{spec.name}/{tool} wasn't trusted.")
+        try:
+            spec, tool = manage.resolve_target(self.store, target)
+            if tool is not None:
+                if manage.untrust_tool(self.store, spec.name, tool):
+                    self.say(f"{spec.name}/{tool} is no longer trusted.")
+                else:
+                    self.say(f"{spec.name}/{tool} wasn't trusted.")
                 return 0
-            self.store.untrust_tool(zname)
-            self.say(f"{spec.name}/{tool} is no longer trusted.")
-            return 0
-        self.store.untrust_server(spec.name)
-        kept = sorted(
-            e.tool for e in self.store.trust_entries().values() if e.server == spec.name and e.via == "tool"
-        )
+            kept = manage.untrust_server(self.store, spec.name)
+        except manage.ManageError as exc:
+            return self.error(exc.reason)
         self.say(f"{spec.name} is no longer trusted as a server.")
         if kept:
             self.say(f"Tools trusted one by one stay trusted ({len(kept)}): zygos mcp untrust {spec.name}/TOOL")
         return 0
 
 
-def _tools_by(
-    servers: dict[str, ServerSpec], states: dict[str, ServerState], off: set[str]
-) -> dict[str, list[SeenTool]]:
-    """Each server's tools with schema problems and name clashes (among servers on) noted."""
-    on = {name for name in servers if f"server:{name}" not in off}
-    return noted({name: checked(state.tools) for name, state in states.items()}, on)
+def _presence_text(server: manage.ServerView, name: str) -> str:
+    found = server.secrets[name]
+    return f"unknown ({server.secret_reasons[name]})" if found == "unknown" else found
 
 
-def _count_on(servers: dict[str, ServerSpec], off: set[str], tools_by: dict[str, list[SeenTool]]) -> int:
-    return sum(
-        1
-        for name in servers
-        if f"server:{name}" not in off
-        for seen in tools_by.get(name, [])
-        if seen.problem is None and f"tool:{zygos_tool_name(name, seen.name)}" not in off
-    )
+def _trust_text(tool: manage.ToolView) -> str:
+    if tool.trust == "asks":
+        return "not trusted"
+    if tool.trust == "trusted":
+        return "trusted"
+    lines = ["changed since you trusted it"]
+    if tool.was != tool.now:
+        lines += [f"      was: {tool.was}", f"      now: {tool.now}"]
+    if tool.schema_changed:
+        lines.append("      its input schema changed too" if len(lines) > 1 else "      its input schema changed")
+    return "\n".join(lines)
 
 
-def _status(spec: ServerSpec, state: ServerState) -> str:
+def _status(spec: ServerSpec | manage.ServerView, state: ServerState | manage.ServerView) -> str:
+    """The status line; a ``ServerView`` carries both the transport and the recorded state."""
     text = status_word(spec.transport, state.status)
     if state.status == "not_started":
         return text

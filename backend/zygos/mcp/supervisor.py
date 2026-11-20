@@ -304,6 +304,49 @@ class McpSupervisor:
             self._list_again(entry, now=False)  # list it again (in the background) to see whether it's down
             raise
 
+    def sync_now(self) -> None:
+        """Apply a record change now rather than on the next turn (a new local server
+        starts in the background). Synchronous, like ``before_turn``."""
+        if self._closed:
+            return
+        self._sync()
+
+    def restart(self, name: str) -> None:
+        """Stop the server's running copy and start it again from the record, so a local
+        server reads its env from the secret store afresh. Nothing happens for a server
+        that isn't running here (unknown or switched off)."""
+        if self._closed:
+            return
+        entry = self._servers.get(name)
+        if entry is not None:
+            self._drop(entry, switched_off=False)
+            # A fresh entry from the state held here (the store may not have it yet): a local
+            # server is started again, a remote one listed again (``next_check`` is 0).
+            fresh = _Server(spec=entry.spec, state=entry.state)
+            self._servers[name] = fresh
+            if not self._mcp_ok:
+                self._fail(fresh, NO_MCP)
+            elif fresh.is_local:
+                self._update(fresh, status="not_started", detail=None, exit_code=None, stderr_tail=None)
+        self._sync()  # starts or lists it; a spec changed in the record meanwhile replaces it
+
+    async def refresh(self, limit_s: float = 5.0) -> None:
+        """List every server that is on again now and wait at most ``limit_s`` for those
+        listings together. Never raises on the limit: a listing still running carries on
+        in the background and lands in the record when it finishes."""
+        if self._closed:
+            return
+        self._sync()
+        for entry in self._servers.values():
+            if not entry.failed:
+                self._list_again(entry, now=True)
+        pending = {
+            entry.list_task for entry in self._servers.values()
+            if entry.list_task is not None and not entry.list_task.done()
+        }
+        if pending:
+            await asyncio.wait(pending, timeout=limit_s)
+
     async def aclose(self) -> None:
         """Cancel background starts/listings, stop local servers, finish pending writes."""
         if self._closed:
