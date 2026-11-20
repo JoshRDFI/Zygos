@@ -39,7 +39,11 @@
   `zygos/api/routes_mcp.py` and sit behind the existing Origin and Host checks. No response
   carries a secret value, and validation errors never echo input. Changes apply without a
   restart (`McpSupervisor.sync_now`, `restart`, `refresh`). Servers declared in `config.yaml`
-  are not shown yet.
+  are not shown yet. A tool route names its server as well as its zygos name
+  (`/mcp/tools/{zname}/trust?server={name}`), because two servers' tools can map to one zygos
+  name; server and tool names are percent-encoded and matched on the path as sent. Replacing a
+  secret restarts the server, and Refresh retries a server that failed, so a server that
+  failed on a locked keychain recovers from the page.
 
 ## Summary
 

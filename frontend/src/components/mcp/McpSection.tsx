@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { refreshMcp } from "../../client/mcp";
-import { useMcpStore } from "../../stores/mcpStore";
+import { ADD_KEY, useMcpStore } from "../../stores/mcpStore";
 import AddServerPanel from "./AddServerPanel";
 import Feedback from "./Feedback";
 import ServerCard from "./ServerCard";
@@ -37,7 +37,7 @@ export default function McpSection() {
       {view.warning && <div className="text-xs">⚠ {view.warning}</div>}
       {Object.entries(notes).filter(([k]) => k.endsWith(":remove") && !view.servers.some((s) => k === `server:${s.name}:remove`))
         .flatMap(([, ns]) => ns).map((n) => <div key={n} className="text-xs text-text-muted">{n}</div>)}
-      {adding && <AddServerPanel onDone={() => setAdding(false)} />}
+      {adding ? <AddServerPanel onDone={() => setAdding(false)} /> : <Feedback k={ADD_KEY} />}
       {view.servers.length === 0 && !adding && <div className="text-text-muted text-sm">No MCP servers.</div>}
       {view.servers.map((s) => <ServerCard key={s.name} server={s} />)}
     </section>

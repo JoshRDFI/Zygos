@@ -248,8 +248,11 @@ REST handles request/response resources: sessions, config, skills, plans, propos
 - `POST /sessions` → session id; `GET /sessions` — the in-memory session registry. (Cycle 2)
 - `/mcp` — the Tools page's routes: `GET /mcp` (servers, status, secrets as `set`/`not set`/`unknown`,
   tools), `POST /mcp/plan` and `POST /mcp/servers` (preview, then save), `DELETE /mcp/servers/{name}`,
-  `PUT .../on`, `.../off`, `.../timeout`, `PUT`/`DELETE .../trust` (servers and tools),
-  `PUT .../secrets/{secret}`, and `POST /mcp/refresh`. Writes are covered by the Origin check.
+  `PUT .../on`, `.../off`, `.../timeout`, `PUT`/`DELETE .../trust` (servers, and tools as
+  `/mcp/tools/{zname}/...?server={name}`, since two servers' tools can share a zygos name),
+  `PUT .../secrets/{secret}`, and `POST /mcp/refresh`. Names are percent-encoded (`/` as `%2F`)
+  and matched on the path as sent, so a name never reaches another route. Writes are covered
+  by the Origin check.
 
 Each session has one multiplexed WebSocket at `/ws/session/{id}`. All real-time traffic
 flows over that single connection:

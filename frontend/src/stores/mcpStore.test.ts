@@ -84,3 +84,21 @@ test("run drops empty notes", async () => {
   await useMcpStore.getState().run("k", async () => ({ view: view(2), notes: [] }));
   expect(useMcpStore.getState().notes.k).toBeUndefined();
 });
+
+test("run keeps the notes a refusal carries, under its key", async () => {
+  await useMcpStore.getState().run("add", async () => {
+    throw new McpError(503, "secret store unavailable", ["fs: the secret TOKEN was overwritten and couldn't be restored"]);
+  });
+  const s = useMcpStore.getState();
+  expect(s.errors.add).toBe("secret store unavailable");
+  expect(s.notes.add).toEqual(["fs: the secret TOKEN was overwritten and couldn't be restored"]);
+});
+
+test("the next action clears what an add left", async () => {
+  useMcpStore.setState({ errors: { add: "old" }, notes: { add: ["fs: added"], k: ["keep"] } });
+  await useMcpStore.getState().run("server:a:on", async () => view(1));
+  const s = useMcpStore.getState();
+  expect(s.notes.add).toBeUndefined();
+  expect(s.errors.add).toBeUndefined();
+  expect(s.notes.k).toEqual(["keep"]);
+});

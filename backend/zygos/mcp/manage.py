@@ -431,17 +431,16 @@ def find_server(store: SqliteMcpStore, name: str) -> ServerSpec:
     return spec
 
 
-def find_tool(store: SqliteMcpStore, zname: str) -> tuple[ServerSpec, SeenTool]:
-    """The server and seen tool behind a zygos tool name (``server__tool``).
+def find_tool(store: SqliteMcpStore, zname: str, server: str) -> tuple[ServerSpec, SeenTool]:
+    """The seen tool behind a zygos tool name (``server__tool``) on the named server.
 
-    Two servers' tools can map to one name (a clash, never offered); the first server by
-    name wins."""
-    servers = store.servers()
-    for name in sorted(servers):
-        for seen in store.state(name).tools:
-            if zygos_tool_name(name, seen.name) == zname:
-                return servers[name], seen
-    raise ManageError("not_found", f"no tool {zname}")
+    The server is named because two servers' tools can map to one zygos name (``x`` with
+    ``_z`` and ``x_`` with ``z`` are both ``x___z``); only that server's tools are looked at."""
+    spec = find_server(store, server)
+    for seen in store.state(spec.name).tools:
+        if zygos_tool_name(spec.name, seen.name) == zname:
+            return spec, seen
+    raise ManageError("not_found", f"no tool {zname} on {spec.name}")
 
 
 def resolve_target(store: SqliteMcpStore, target: str) -> tuple[ServerSpec, str | None]:

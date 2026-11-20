@@ -3,8 +3,14 @@ refresh (RFC-0015).
 
 Each route is a thin front end on ``zygos.mcp.manage``, the functions ``zygos mcp`` runs,
 so the page and the CLI change the record the same way. Record and secret-store calls run
-in a thread. After a write the supervisor applies it at once (``sync_now``); a local
-server whose secret changed is restarted, since it reads its env only when it starts.
+in a thread. After a write the supervisor applies it at once (``sync_now``); a server
+whose secret changed is restarted, since a local server reads its env only when it starts
+and a server that failed on its secrets is otherwise not tried again.
+
+Names in paths are read as sent: the routes match the raw, still percent-encoded path, so
+a server named ``x/trust`` (sent as ``x%2Ftrust``) is one path segment and never reaches
+another route. A tool is named by its zygos name plus the ``server`` query parameter,
+since two servers' tools can share a zygos name.
 
 No response carries a secret value: secrets read ``set``, ``not set`` or ``unknown``, a
 secret PUT answers with the view only, and a body that fails validation is answered by
@@ -27,12 +33,16 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any, Literal, TypeVar
+from urllib.parse import unquote
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
+from starlette.routing import Match
+from starlette.types import Scope
 
 from zygos.mcp import manage
 from zygos.mcp.config import validation_reason
@@ -42,7 +52,33 @@ from zygos.secrets import Presence, SecretStoreError
 
 __all__ = ["mcp_validation_handler", "router"]
 
-router = APIRouter(prefix="/mcp")
+
+
+class _RawPathRoute(APIRoute):
+    """A route matched against the path as sent, still percent-encoded.
+
+    Starlette matches on the decoded path, where a name's ``%2F`` has become ``/``: a
+    server named ``s/secrets`` and a secret named ``trust`` on ``s`` would then share
+    ``/mcp/servers/s/secrets/trust``. On the raw path an encoded name is one segment, so
+    each request reaches the route its sender meant; the path parameters are decoded after
+    the match."""
+
+    def matches(self, scope: Scope) -> tuple[Match, Scope]:
+        raw = scope.get("raw_path") if scope.get("type") == "http" else None
+        if not raw:
+            return super().matches(scope)
+        path = raw.decode("latin-1").split("?", 1)[0]
+        match, child = super().matches({**scope, "path": path})
+        params = child.get("path_params")
+        if match != Match.NONE and params is not None:
+            child["path_params"] = {
+                k: unquote(v) if k in self.param_convertors and isinstance(v, str) else v
+                for k, v in params.items()
+            }
+        return match, child
+
+
+router = APIRouter(prefix="/mcp", route_class=_RawPathRoute)
 
 _T = TypeVar("_T")
 
@@ -328,50 +364,48 @@ async def _listed(request: Request, saved: list[Any], notes: list[str]) -> SaveO
 
 
 # ---- one server -------------------------------------------------------------------------
-# Server names may contain "/", hence ``{name:path}``; the routes with a suffix come before
-# the bare DELETE so the suffix is never read as part of a name.
+# Server names may contain "/": the client sends it as %2F, and ``_RawPathRoute`` keeps the
+# name one segment, so ``{name}`` never takes in a suffix or a part of another route.
 
 
-@router.put("/servers/{name:path}/on", response_model=McpView)
+@router.put("/servers/{name}/on", response_model=McpView)
 async def server_on(name: str, request: Request) -> McpView:
     await _off_loop(manage.switch_server, _store(request), name, True, clock=time.time)
     return await _written(request)
 
 
-@router.put("/servers/{name:path}/off", response_model=McpView)
+@router.put("/servers/{name}/off", response_model=McpView)
 async def server_off(name: str, request: Request) -> McpView:
     await _off_loop(manage.switch_server, _store(request), name, False, clock=time.time)
     return await _written(request)
 
 
-@router.put("/servers/{name:path}/trust", response_model=McpView)
+@router.put("/servers/{name}/trust", response_model=McpView)
 async def trust_server(name: str, request: Request) -> McpView:
     """Trust every tool the server shows now; tools it adds later need trusting on their own."""
     await _off_loop(manage.trust_server, _store(request), name)
     return await _written(request)
 
 
-@router.delete("/servers/{name:path}/trust", response_model=McpView)
+@router.delete("/servers/{name}/trust", response_model=McpView)
 async def untrust_server(name: str, request: Request) -> McpView:
     """Withdraw the server-wide trust; tools trusted one by one stay trusted."""
     await _off_loop(manage.untrust_server, _store(request), name)
     return await _written(request)
 
 
-@router.put("/servers/{name:path}/secrets/{secret}", response_model=McpView)
+@router.put("/servers/{name}/secrets/{secret}", response_model=McpView)
 async def set_secret(name: str, secret: str, body: SecretBody, request: Request) -> McpView:
     """Store a new value for one of the server's secrets; the answer never carries it."""
     store, secrets = _store(request), _runtime(request).secrets
 
-    def put() -> bool:
-        manage.set_secret(store, secrets, name, secret, body.value)
-        return manage.find_server(store, name).transport == "stdio"
-
-    local = await _off_loop(put)
-    return await _written(request, restart=name if local else None)
+    await _off_loop(manage.set_secret, store, secrets, name, secret, body.value)
+    # A restart makes a local server read its env again and lists a remote server again,
+    # which also retries a server that failed on its secrets.
+    return await _written(request, restart=name)
 
 
-@router.put("/servers/{name:path}/timeout", response_model=NotedView)
+@router.put("/servers/{name}/timeout", response_model=NotedView)
 async def set_timeout(name: str, body: TimeoutBody, request: Request) -> NotedView:
     """Set the per-call timeout; trust, on/off and the last listing are kept."""
     spec = await _off_loop(manage.set_timeout, _store(request), name, body.timeout_s)
@@ -379,21 +413,23 @@ async def set_timeout(name: str, body: TimeoutBody, request: Request) -> NotedVi
     return NotedView(view=await _written(request), notes=notes)
 
 
-@router.delete("/servers/{name:path}", response_model=NotedView)
+@router.delete("/servers/{name}", response_model=NotedView)
 async def remove_server(name: str, request: Request) -> NotedView:
     """Remove the server, its state, trust and on/off, then its secrets."""
     notes = await _off_loop(manage.remove_server, _store(request), _runtime(request).secrets, name)
     return NotedView(view=await _written(request), notes=notes)
 
 
-# ---- one tool, by the name the model sees (``server__tool``) -----------------------------
+# ---- one tool, by the name the model sees (``server__tool``) and its server ---------------
 
 
-async def _tool_action(request: Request, zname: str, action: Callable[..., Any], *args: Any) -> McpView:
+async def _tool_action(
+    request: Request, zname: str, server: str, action: Callable[..., Any], *args: Any
+) -> McpView:
     store = _store(request)
 
     def run() -> None:
-        spec, seen = manage.find_tool(store, zname)
+        spec, seen = manage.find_tool(store, zname, server)
         action(store, spec.name, seen.name, *args)
 
     await _off_loop(run)
@@ -401,20 +437,20 @@ async def _tool_action(request: Request, zname: str, action: Callable[..., Any],
 
 
 @router.put("/tools/{zname}/on", response_model=McpView)
-async def tool_on(zname: str, request: Request) -> McpView:
-    return await _tool_action(request, zname, manage.switch_tool, True)
+async def tool_on(zname: str, server: str, request: Request) -> McpView:
+    return await _tool_action(request, zname, server, manage.switch_tool, True)
 
 
 @router.put("/tools/{zname}/off", response_model=McpView)
-async def tool_off(zname: str, request: Request) -> McpView:
-    return await _tool_action(request, zname, manage.switch_tool, False)
+async def tool_off(zname: str, server: str, request: Request) -> McpView:
+    return await _tool_action(request, zname, server, manage.switch_tool, False)
 
 
 @router.put("/tools/{zname}/trust", response_model=McpView)
-async def trust_tool(zname: str, request: Request) -> McpView:
-    return await _tool_action(request, zname, manage.trust_tool)
+async def trust_tool(zname: str, server: str, request: Request) -> McpView:
+    return await _tool_action(request, zname, server, manage.trust_tool)
 
 
 @router.delete("/tools/{zname}/trust", response_model=McpView)
-async def untrust_tool(zname: str, request: Request) -> McpView:
-    return await _tool_action(request, zname, manage.untrust_tool)
+async def untrust_tool(zname: str, server: str, request: Request) -> McpView:
+    return await _tool_action(request, zname, server, manage.untrust_tool)

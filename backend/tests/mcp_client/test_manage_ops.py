@@ -195,11 +195,26 @@ def test_find_server_not_found(store):
 def test_find_tool_maps_zname_back(store):
     seen = _tool("do-it.now")
     _seed(store, _remote("my server"), [_tool("other"), seen])
-    spec, found = find_tool(store, zygos_tool_name("my server", "do-it.now"))
+    spec, found = find_tool(store, zygos_tool_name("my server", "do-it.now"), "my server")
     assert spec.name == "my server" and found == seen
     with pytest.raises(ManageError) as caught:
-        find_tool(store, "my_server__missing")
+        find_tool(store, "my_server__missing", "my server")
     assert caught.value.kind == "not_found"
+    assert caught.value.reason == "no tool my_server__missing on my server"
+    with pytest.raises(ManageError) as caught:
+        find_tool(store, "my_server__other", "gone")
+    assert (caught.value.kind, caught.value.reason) == ("not_found", "no server gone")
+
+
+def test_find_tool_looks_only_on_the_named_server(store):
+    # "x" with tool "_z" and "x_" with tool "z" both map to the zygos name "x___z".
+    _seed(store, _remote("x"), [_tool("_z")])
+    _seed(store, _remote("x_"), [_tool("z")])
+    assert zygos_tool_name("x", "_z") == zygos_tool_name("x_", "z") == "x___z"
+    spec, found = find_tool(store, "x___z", "x_")
+    assert (spec.name, found.name) == ("x_", "z")
+    spec, found = find_tool(store, "x___z", "x")
+    assert (spec.name, found.name) == ("x", "_z")
 
 
 def test_resolve_target_longest_server_name_wins(store):

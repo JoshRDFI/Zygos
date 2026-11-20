@@ -29,7 +29,9 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
 
 const seg = encodeURIComponent;
 const serverPath = (name: string) => `/mcp/servers/${seg(name)}`;
-const toolPath = (zname: string) => `/mcp/tools/${seg(zname)}`;
+/** A tool is named by its zygos name and its server: two servers' tools can share a zygos name. */
+const toolPath = (server: string, zname: string, action: string) =>
+  `/mcp/tools/${seg(zname)}/${action}?server=${seg(server)}`;
 
 export const getMcp = (): Promise<McpView> => send("GET", "/mcp");
 
@@ -44,14 +46,14 @@ export const removeServer = (name: string): Promise<NotedView> => send("DELETE",
 export const setServerOn = (name: string, on: boolean): Promise<McpView> =>
   send("PUT", `${serverPath(name)}/${on ? "on" : "off"}`);
 
-export const setToolOn = (zname: string, on: boolean): Promise<McpView> =>
-  send("PUT", `${toolPath(zname)}/${on ? "on" : "off"}`);
+export const setToolOn = (server: string, zname: string, on: boolean): Promise<McpView> =>
+  send("PUT", toolPath(server, zname, on ? "on" : "off"));
 
 export const setServerTrust = (name: string, trusted: boolean): Promise<McpView> =>
   send(trusted ? "PUT" : "DELETE", `${serverPath(name)}/trust`);
 
-export const setToolTrust = (zname: string, trusted: boolean): Promise<McpView> =>
-  send(trusted ? "PUT" : "DELETE", `${toolPath(zname)}/trust`);
+export const setToolTrust = (server: string, zname: string, trusted: boolean): Promise<McpView> =>
+  send(trusted ? "PUT" : "DELETE", toolPath(server, zname, "trust"));
 
 /** The value goes out in the request body once; the answer is the view, which reads `set`. */
 export const setSecret = (name: string, secret: string, value: string): Promise<McpView> =>

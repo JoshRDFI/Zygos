@@ -1,13 +1,11 @@
 import { useRef, useState } from "react";
 import { McpError, planAdd, saveServers } from "../../client/mcp";
 import type { PlannedServer } from "../../client/types";
-import { useMcpStore } from "../../stores/mcpStore";
+import { ADD_KEY as KEY, useMcpStore } from "../../stores/mcpStore";
 import Feedback from "./Feedback";
 import { BTN } from "./styles";
 
 interface Plan { servers: PlannedServer[]; problems: string[] }
-
-const KEY = "add";
 
 function Preview({ p }: { p: PlannedServer }) {
   return (

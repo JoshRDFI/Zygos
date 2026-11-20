@@ -333,10 +333,15 @@ class McpSupervisor:
     async def refresh(self, limit_s: float = 5.0) -> None:
         """List every server that is on again now and wait at most ``limit_s`` for those
         listings together. Never raises on the limit: a listing still running carries on
-        in the background and lands in the record when it finishes."""
+        in the background and lands in the record when it finishes.
+
+        A server that is on but failed (its secrets couldn't be read, say) is restarted,
+        so it is tried again rather than left failed until it is switched off and on."""
         if self._closed:
             return
         self._sync()
+        for name in [name for name, entry in self._servers.items() if entry.failed]:
+            self.restart(name)
         for entry in self._servers.values():
             if not entry.failed:
                 self._list_again(entry, now=True)

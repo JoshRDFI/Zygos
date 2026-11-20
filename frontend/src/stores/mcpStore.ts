@@ -4,6 +4,10 @@ import type { McpView } from "../client/types";
 
 type Outcome = McpView | { view: McpView; notes: string[] };
 
+/** The control key of an add. What an add left is shown at section level once its panel
+ * closes, so it stays only until the next action, whichever control that is. */
+export const ADD_KEY = "add";
+
 interface McpState {
   view: McpView | null;
   loading: boolean;
@@ -38,15 +42,19 @@ export const useMcpStore = create<McpState>((set, get) => ({
   },
 
   async run(key, action) {
-    const { [key]: _e, ...errors } = get().errors;
-    const { [key]: _n, ...notes } = get().notes;
+    const { [key]: _e, [ADD_KEY]: _ae, ...errors } = get().errors;
+    const { [key]: _n, [ADD_KEY]: _an, ...notes } = get().notes;
     set({ busy: key, errors, notes });
     try {
       const out = await action();
       const [view, got] = "view" in out ? [out.view, out.notes] : [out, []];
       set((s) => ({ view, notes: got.length ? { ...s.notes, [key]: got } : s.notes }));
     } catch (e) {
-      set((s) => ({ errors: { ...s.errors, [key]: message(e) } }));
+      const got = e instanceof McpError ? e.notes : [];
+      set((s) => ({
+        errors: { ...s.errors, [key]: message(e) },
+        notes: got.length ? { ...s.notes, [key]: got } : s.notes,
+      }));
       if (e instanceof McpError && e.status === 404) await get().load();
     } finally {
       set({ busy: null });

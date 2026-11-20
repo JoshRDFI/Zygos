@@ -199,9 +199,9 @@ test("tool trust and on switch call the client", async () => {
   const trust = vi.spyOn(mcp, "setToolTrust").mockResolvedValue(view());
   const on = vi.spyOn(mcp, "setToolOn").mockResolvedValue(view());
   await userEvent.click(await screen.findByRole("button", { name: "trust" }));
-  expect(trust).toHaveBeenCalledWith("archon__find_tasks", true);
+  expect(trust).toHaveBeenCalledWith("archon", "archon__find_tasks", true);
   await userEvent.click(screen.getByRole("checkbox", { name: "find_tasks on" }));
-  expect(on).toHaveBeenCalledWith("archon__find_tasks", false);
+  expect(on).toHaveBeenCalledWith("archon", "archon__find_tasks", false);
 });
 
 test("refresh button calls refreshMcp", async () => {
@@ -242,4 +242,73 @@ test("shows the protocol, or that it is not known yet", async () => {
   show(view([server({ name: "a", era: "2025-11-25" }), server({ name: "b", era: null })]));
   expect(await screen.findByText("protocol 2025-11-25")).toBeInTheDocument();
   expect(screen.getByText("protocol not known yet")).toBeInTheDocument();
+});
+
+test("a tool action names the tool's own server when two servers share a zygos name", async () => {
+  show(view([
+    server({ name: "x", tools: [tool({ zname: "x___z", server_tool: "_z" })] }),
+    server({ name: "x_", on: false, tools: [tool({ zname: "x___z", server_tool: "z" })] }),
+  ]));
+  const trust = vi.spyOn(mcp, "setToolTrust").mockRejectedValue(new McpError(409, "refused"));
+  const row = (await screen.findByText("z")).closest("li") as HTMLElement;
+  await userEvent.click(within(row).getByRole("button", { name: "trust" }));
+  expect(trust).toHaveBeenCalledWith("x_", "x___z", true);
+  expect(within(row).getByText("refused")).toBeInTheDocument();
+  const other = screen.getByText("_z").closest("li") as HTMLElement;
+  expect(within(other).queryByText("refused")).not.toBeInTheDocument();
+});
+
+const addPlan = { servers: [
+  { name: "fs", transport: "stdio" as const, runs: "npx fs", secret_names: [], unused: [], replaces: false, old_runs: null },
+  { name: "b", transport: "http" as const, runs: "http://h/mcp", secret_names: ["TOKEN"], unused: [], replaces: false, old_runs: null },
+], problems: [] };
+
+async function previewAndConfirm() {
+  await userEvent.click(await screen.findByRole("button", { name: /add server/i }));
+  await userEvent.type(screen.getByLabelText("Server JSON"), "x");
+  await userEvent.click(screen.getByRole("button", { name: "Preview" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Confirm" }));
+}
+
+test("after a save, its notes and listing show until the next action", async () => {
+  show(view([]));
+  vi.spyOn(mcp, "planAdd").mockResolvedValue(addPlan);
+  vi.spyOn(mcp, "saveServers").mockResolvedValue({
+    view: view([server({ name: "fs" })]),
+    notes: ["b: not added — its secrets can't be stored"],
+    listing: ["fs: added — starting it now; Refresh lists its tools"],
+  });
+  await previewAndConfirm();
+  await waitFor(() => expect(screen.queryByLabelText("Server JSON")).not.toBeInTheDocument());
+  expect(screen.getByText("b: not added — its secrets can't be stored")).toBeInTheDocument();
+  expect(screen.getByText("fs: added — starting it now; Refresh lists its tools")).toBeInTheDocument();
+  vi.spyOn(mcp, "refreshMcp").mockResolvedValue(view([server({ name: "fs" })]));
+  await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await waitFor(() => expect(screen.queryByText(/not added/)).not.toBeInTheDocument());
+  expect(screen.queryByText(/Refresh lists its tools/)).not.toBeInTheDocument();
+});
+
+test("a save where every server was refused shows the reason and every note", async () => {
+  show(view([]));
+  vi.spyOn(mcp, "planAdd").mockResolvedValue(addPlan);
+  vi.spyOn(mcp, "saveServers").mockRejectedValue(new McpError(503, "the secret store is unavailable", [
+    "fs: not added — the secret store is unavailable",
+    "fs: the secret TOKEN was overwritten and couldn't be restored",
+  ]));
+  await previewAndConfirm();
+  expect(await screen.findByText("the secret store is unavailable")).toBeInTheDocument();
+  expect(screen.getByText("fs: the secret TOKEN was overwritten and couldn't be restored")).toBeInTheDocument();
+  expect(screen.getByText("fs: not added — the secret store is unavailable")).toBeInTheDocument();
+});
+
+test("the add text can't be edited while a preview is in flight", async () => {
+  show(view([]));
+  let release!: (v: typeof planned) => void;
+  vi.spyOn(mcp, "planAdd").mockReturnValue(new Promise((r) => { release = r; }));
+  await userEvent.click(await screen.findByRole("button", { name: /add server/i }));
+  await userEvent.type(screen.getByLabelText("Server JSON"), "x");
+  await userEvent.click(screen.getByRole("button", { name: "Preview" }));
+  expect(screen.getByLabelText("Server JSON")).toBeDisabled();
+  release(planned);
+  await waitFor(() => expect(screen.getByLabelText("Server JSON")).toBeEnabled());
 });

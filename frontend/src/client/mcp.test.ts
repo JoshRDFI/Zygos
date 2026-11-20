@@ -23,8 +23,8 @@ test("encodes names in paths", async () => {
 });
 
 test("encodes tool and secret names too", async () => {
-  reply(200, VIEW); await setToolOn("a b__t/x", false);
-  expect(call()[0]).toBe("/mcp/tools/a%20b__t%2Fx/off");
+  reply(200, VIEW); await setToolOn("a b/1", "a b__t/x", false);
+  expect(call()[0]).toBe("/mcp/tools/a%20b__t%2Fx/off?server=a%20b%2F1");
   fetchMock.mockClear();
   reply(200, VIEW); await setSecret("s/1", "K 1", "v");
   expect(call()[0]).toBe("/mcp/servers/s%2F1/secrets/K%201");
@@ -101,10 +101,10 @@ test("trust uses PUT to trust and DELETE to withdraw", async () => {
   reply(200, VIEW); await setServerTrust("s", false);
   expect(call()[1]?.method).toBe("DELETE");
   fetchMock.mockClear();
-  reply(200, VIEW); await setToolTrust("s__t", true);
-  expect([call()[0], call()[1]?.method]).toEqual(["/mcp/tools/s__t/trust", "PUT"]);
+  reply(200, VIEW); await setToolTrust("s", "s__t", true);
+  expect([call()[0], call()[1]?.method]).toEqual(["/mcp/tools/s__t/trust?server=s", "PUT"]);
   fetchMock.mockClear();
-  reply(200, VIEW); await setToolTrust("s__t", false);
+  reply(200, VIEW); await setToolTrust("s", "s__t", false);
   expect(call()[1]?.method).toBe("DELETE");
 });
 

@@ -99,7 +99,7 @@ export default function ServerCard({ server: s }: { server: ServerView }) {
         <div className="space-y-1 text-xs">
           <div className="text-text-muted">tools ({toolsOn} on of {s.tools.length})</div>
           <ul className="space-y-1">
-            {s.tools.map((t) => <ToolRow key={t.zname} tool={t} greyed={!s.on} />)}
+            {s.tools.map((t) => <ToolRow key={t.server_tool} server={s.name} tool={t} greyed={!s.on} />)}
           </ul>
         </div>
       )}

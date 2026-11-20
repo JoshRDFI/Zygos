@@ -169,3 +169,16 @@ async def test_restart_retries_a_local_failed_on_its_secrets(h):
     sup.restart("loc")
     await _until(lambda: _names(sup.before_turn()) == ["loc__echo"])
     assert h.fakes.locals[0].env == {"TOKEN": "v-1"}
+
+
+async def test_refresh_retries_a_remote_failed_on_its_secrets(h):
+    secrets = FakeSecrets({"mcp:arch:header:Authorization": "v-1"}, locked={"arch"})
+    h.store.put_server(_remote("arch", header_names=["Authorization"]))
+    h.fakes.remote_tools["arch"] = [_tool("find")]
+    sup = h.make(secrets=secrets)
+    await sup.start()
+    await _until(lambda: h.store.state("arch").status == "failed")
+    secrets.locked = set()
+    await sup.refresh(5.0)
+    assert _names(sup.before_turn()) == ["arch__find"]
+    assert h.fakes.headers_seen[-1] == {"Authorization": "v-1"}

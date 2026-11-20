@@ -45,6 +45,7 @@ class PageSecrets:
         self.hang = threading.Event()
         self.release = threading.Event()
         self.presence_error: Exception | None = None
+        self.get_error: Exception | None = None  # raised by ``get`` (a locked keychain)
         self.waiting = 0  # presence calls blocked on ``hang`` right now
         self.most_waiting = 0
         self._lock = threading.Lock()
@@ -53,6 +54,8 @@ class PageSecrets:
         return SimpleNamespace(available=True, why_unavailable=None)
 
     def get(self, handle):
+        if self.get_error is not None:
+            raise self.get_error
         return self.values.get(handle)
 
     def set(self, handle, value):
@@ -459,25 +462,48 @@ async def test_server_trust_with_no_tools_seen_404(page):
 
 async def test_tool_off_and_on(page):
     _seed(page.store, _remote("arch"), [_tool("find"), _tool("get")])
-    off = await page.client.put("/mcp/tools/arch__find/off")
+    off = await page.client.put("/mcp/tools/arch__find/off?server=arch")
     assert off.status_code == 200
     tools = {t["zname"]: t["on"] for t in _server(off.json(), "arch")["tools"]}
     assert tools == {"arch__find": False, "arch__get": True}
     assert off.json()["tools_on"] == 1
-    on = await page.client.put("/mcp/tools/arch__find/on")
+    on = await page.client.put("/mcp/tools/arch__find/on?server=arch")
     assert on.json()["tools_on"] == 2
 
 
 async def test_tool_trust_and_untrust(page):
     _seed(page.store, _remote("arch"), [_tool("find"), _tool("get")])
-    put = await page.client.put("/mcp/tools/arch__find/trust")
+    put = await page.client.put("/mcp/tools/arch__find/trust?server=arch")
     assert put.status_code == 200
     trust = {t["zname"]: t["trust"] for t in _server(put.json(), "arch")["tools"]}
     assert trust == {"arch__find": "trusted", "arch__get": "asks"}
     assert "arch__find" in page.store.trust_entries()
-    gone = await page.client.delete("/mcp/tools/arch__find/trust")
+    gone = await page.client.delete("/mcp/tools/arch__find/trust?server=arch")
     assert gone.status_code == 200
     assert page.store.trust_entries() == {}
+
+
+async def test_tool_actions_reach_only_the_named_server(page):
+    # "x" with tool "_z" and "x_" with tool "z" share the zygos name "x___z".
+    _seed(page.store, _remote("x"), [_tool("_z")])
+    _seed(page.store, _remote("x_"), [_tool("z")])
+    assert (await page.client.put(f"{_path('x_')}/off")).status_code == 200
+    resp = await page.client.put("/mcp/tools/x___z/trust?server=x_")
+    assert resp.status_code == 200
+    assert {z: e.server for z, e in page.store.trust_entries().items()} == {"x___z": "x_"}
+    assert _server(resp.json(), "x")["tools"][0]["trust"] == "asks"
+    gone = await page.client.delete("/mcp/tools/x___z/trust?server=x")
+    assert gone.status_code == 200
+    assert {z: e.server for z, e in page.store.trust_entries().items()} == {"x___z": "x_"}
+
+
+async def test_tool_actions_need_the_server(page):
+    _seed(page.store, _remote("arch"), [_tool("find")])
+    for method, action in (("PUT", "on"), ("PUT", "off"), ("PUT", "trust"), ("DELETE", "trust")):
+        resp = await page.client.request(method, f"/mcp/tools/arch__find/{action}")
+        assert resp.status_code == 422, (method, action)
+        assert isinstance(resp.json()["detail"], str)
+    assert page.store.trust_entries() == {} and page.store.off() == set()
 
 
 async def test_secret_put_never_echoes(page, caplog):
@@ -496,6 +522,32 @@ async def test_secret_put_unknown_secret_404(page):
     assert resp.status_code == 404
     assert resp.json() == {"detail": "no secret Nope on arch"}
     assert page.secrets.values == {}
+
+
+async def test_secret_put_retries_a_remote_server_failed_on_its_secrets(page):
+    page.fakes.remote_tools["arch"] = [_tool("find")]
+    page.secrets.get_error = SecretStoreUnavailable("the keychain is locked")
+    _seed(page.store, _remote("arch", header_names=["Authorization"]))
+    page.sup.sync_now()
+    await _until(lambda: page.store.state("arch").status == "failed")
+    page.secrets.get_error = None
+    resp = await page.client.put("/mcp/servers/arch/secrets/Authorization", json={"value": "new"})
+    assert resp.status_code == 200
+    await _until(lambda: page.store.state("arch").status == "reachable")
+    assert [t.name for t in page.store.state("arch").tools] == ["find"]
+
+
+async def test_refresh_retries_a_server_failed_on_its_secrets(page):
+    page.fakes.remote_tools["arch"] = [_tool("find")]
+    page.secrets.get_error = SecretStoreUnavailable("the keychain is locked")
+    _seed(page.store, _remote("arch", header_names=["Authorization"]))
+    page.sup.sync_now()
+    await _until(lambda: page.store.state("arch").status == "failed")
+    page.secrets.get_error = None
+    resp = await page.client.post("/mcp/refresh")
+    assert resp.status_code == 200
+    assert _server(resp.json(), "arch")["status"] == "reachable"
+    assert [t["zname"] for t in _server(resp.json(), "arch")["tools"]] == ["arch__find"]
 
 
 async def test_secret_put_restarts_a_local_server(page):
@@ -560,9 +612,12 @@ async def test_actions_on_missing_server_404(page):
         assert resp.status_code == 404, (method, url)
         assert resp.json() == {"detail": "no server gone"}, (method, url)
     for method, url in (("PUT", "on"), ("PUT", "off"), ("PUT", "trust"), ("DELETE", "trust")):
-        resp = await page.client.request(method, f"/mcp/tools/gone__find/{url}")
+        resp = await page.client.request(method, f"/mcp/tools/gone__find/{url}?server=gone")
         assert resp.status_code == 404
-        assert resp.json() == {"detail": "no tool gone__find"}
+        assert resp.json() == {"detail": "no server gone"}
+        resp = await page.client.request(method, f"/mcp/tools/other__gone/{url}?server=other")
+        assert resp.status_code == 404
+        assert resp.json() == {"detail": "no tool other__gone on other"}
     assert set(page.store.servers()) == {"other"}
 
 
@@ -588,6 +643,30 @@ async def test_server_routes_handle_slash_and_space_in_name(page):
     resp = await page.client.delete(path)
     assert resp.status_code == 200
     assert set(page.store.servers()) == {"team", "50%off", "x/on"}
+
+
+async def test_server_routes_read_the_name_as_sent(page):
+    # A secret named "trust" on "s" must not trust the server "s/secrets".
+    _seed(page.store, _remote("s", header_names=["trust"]))
+    _seed(page.store, _remote("s/secrets"), [_tool("find")])
+    resp = await page.client.put("/mcp/servers/s/secrets/trust", json={"value": "v"})
+    assert resp.status_code == 200
+    assert page.store.trusted_servers() == set()
+    assert set(page.secrets.values) == {"mcp:s:header:trust"}
+    resp = await page.client.put(f"{_path('s/secrets')}/trust")
+    assert resp.status_code == 200
+    assert page.store.trusted_servers() == {"s/secrets"}
+
+
+async def test_removing_a_server_named_like_a_route(page):
+    # Removing "x/trust" must remove it, not untrust "x".
+    _seed(page.store, _remote("x"), [_tool("find")])
+    _seed(page.store, _remote("x/trust"), [_tool("find")])
+    assert (await page.client.put(f"{_path('x')}/trust")).status_code == 200
+    resp = await page.client.delete(_path("x/trust"))
+    assert resp.status_code == 200
+    assert set(page.store.servers()) == {"x"}
+    assert page.store.trusted_servers() == {"x"}
 
 
 # ---- inputs never echoed; origin --------------------------------------------------------
@@ -633,7 +712,7 @@ async def test_writes_refused_from_foreign_origin(page):
         ("POST", "/mcp/servers", {"text": "{}", "confirm": True, "replaces": []}),
         ("DELETE", "/mcp/servers/arch", None),
         ("PUT", "/mcp/servers/arch/off", None),
-        ("PUT", "/mcp/tools/arch__find/trust", None),
+        ("PUT", "/mcp/tools/arch__find/trust?server=arch", None),
         ("PUT", "/mcp/servers/arch/secrets/KEY", {"value": "x"}),
         ("PUT", "/mcp/servers/arch/timeout", {"timeout_s": 5}),
         ("POST", "/mcp/refresh", None),
@@ -651,7 +730,7 @@ async def test_writes_refused_from_foreign_origin(page):
 async def test_page_and_cli_agree(page):
     _seed(page.store, _remote("arch"), [_tool("find"), _tool("get")])
     _seed(page.store, _remote("notes"), [_tool("write")])
-    assert (await page.client.put("/mcp/tools/arch__find/trust")).status_code == 200
+    assert (await page.client.put("/mcp/tools/arch__find/trust?server=arch")).status_code == 200
     assert (await page.client.put("/mcp/servers/notes/off")).status_code == 200
     args = argparse.Namespace(mcp_command="list")
     out = io.StringIO()

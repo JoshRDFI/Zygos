@@ -8,13 +8,14 @@ import { BTN } from "./styles";
 const TRUST_WORD = { trusted: "trusted", asks: "asks", changed: "changed" } as const;
 const TRUST_ACTION = { trusted: "untrust", asks: "trust", changed: "trust again" } as const;
 
-export default function ToolRow({ tool, greyed }: { tool: ToolView; greyed: boolean }) {
+export default function ToolRow({ server, tool, greyed }: { server: string; tool: ToolView; greyed: boolean }) {
   const busy = useMcpStore((s) => s.busy);
   const run = useMcpStore((s) => s.run);
   const [open, setOpen] = useState(false);
   const off = busy !== null;
-  const onKey = `tool:${tool.zname}:on`;
-  const trustKey = `tool:${tool.zname}:trust`;
+  // Keyed by server too: two servers' tools can share a zygos name.
+  const onKey = `tool:${server}:${tool.zname}:on`;
+  const trustKey = `tool:${server}:${tool.zname}:trust`;
 
   return (
     <li className={`space-y-1 ${greyed ? "opacity-50" : ""}`}>
@@ -33,13 +34,13 @@ export default function ToolRow({ tool, greyed }: { tool: ToolView; greyed: bool
             <label className="flex items-center gap-1 text-text-muted">
               <input
                 type="checkbox" aria-label={`${tool.server_tool} on`} checked={tool.on} disabled={off}
-                onChange={() => run(onKey, () => setToolOn(tool.zname, !tool.on))}
+                onChange={() => run(onKey, () => setToolOn(server, tool.zname, !tool.on))}
               />
               on
             </label>
             <button
               type="button" className={BTN} disabled={off}
-              onClick={() => run(trustKey, () => setToolTrust(tool.zname, tool.trust !== "trusted"))}
+              onClick={() => run(trustKey, () => setToolTrust(server, tool.zname, tool.trust !== "trusted"))}
             >{TRUST_ACTION[tool.trust]}</button>
           </>
         )}
