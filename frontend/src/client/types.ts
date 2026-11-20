@@ -155,3 +155,61 @@ export interface ToolCard {
   output?: unknown; errorMessage?: string;
   permission?: PermissionAsk; outcome?: PermissionOutcome;
 }
+
+export type SecretPresence = "set" | "not set" | "unknown";
+
+export interface ToolView {
+  name: string;
+  zname: string;
+  server_tool: string;
+  description: string;
+  on: boolean;
+  trust: "trusted" | "asks" | "changed";
+  was: string | null;
+  now: string | null;
+  schema_changed: boolean;
+  claims: string[];
+  problem: string | null;
+}
+
+export interface ServerView {
+  name: string;
+  transport: "stdio" | "http" | "sse";
+  local: boolean;
+  runs: string;
+  on: boolean;
+  status: string;
+  status_word: string;
+  detail: string | null;
+  status_at: number | null;
+  era: string | null;
+  exit_code: number | null;
+  stderr_tail: string | null;
+  timeout_s: number;
+  trusted_server: boolean;
+  env_names: string[];
+  header_names: string[];
+  secrets: Record<string, SecretPresence>;
+  secret_reasons: Record<string, string>;
+  secrets_note: string | null;
+  tools: ToolView[];
+  tools_on: number;
+}
+
+export interface McpView {
+  installed: boolean;
+  servers: ServerView[];
+  tools_on: number;
+  warn: boolean;
+  warning: string | null;
+}
+
+export interface PlannedServer {
+  name: string;
+  transport: "stdio" | "http" | "sse";
+  runs: string;
+  secret_names: string[];
+  unused: string[];
+  replaces: boolean;
+  old_runs: string | null;
+}
