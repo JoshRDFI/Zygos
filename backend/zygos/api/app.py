@@ -19,10 +19,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 
 from zygos.api.origin import OriginGuard, allowed_hosts_for
 from zygos.api.permission import WebSocketPromptResolver
 from zygos.api.routes_backends import router as backends_router
+from zygos.api.routes_mcp import mcp_validation_handler
+from zygos.api.routes_mcp import router as mcp_router
 from zygos.api.routes_models import router as models_router
 from zygos.api.routes_preferences import router as preferences_router
 from zygos.api.routes_runtime import router as runtime_router
@@ -153,6 +156,9 @@ def create_app(
     app.include_router(backends_router)
     app.include_router(preferences_router)
     app.include_router(sessions_router)
+    app.include_router(mcp_router)
+    # Under /mcp a 422 never quotes the rejected input: it may be a secret.
+    app.add_exception_handler(RequestValidationError, mcp_validation_handler)
     app.include_router(ws_router)
     return app
 

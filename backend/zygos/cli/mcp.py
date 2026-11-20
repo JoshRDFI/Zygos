@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import importlib.util
 import os
 import sqlite3
 import sys
@@ -64,11 +63,7 @@ def add_parser(subcommands: Any) -> None:
         cmd.add_argument("target", metavar="NAME[/TOOL]")
 
 
-def _mcp_installed() -> bool:
-    try:
-        return importlib.util.find_spec("mcp") is not None
-    except (ImportError, ValueError):
-        return False
+_mcp_installed = manage.mcp_installed
 
 
 def _open_tty() -> TextIO | None:

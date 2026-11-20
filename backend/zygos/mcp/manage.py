@@ -11,6 +11,7 @@ a secret value: secrets show as ``set``, ``not set`` or ``unknown`` (RFC-0015).
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 from collections.abc import Callable, Sequence
 from typing import Any, Literal
 
@@ -30,7 +31,7 @@ from zygos.secrets import SecretStoreError
 __all__ = [
     "ADD_LIST_CAP_S", "LOCAL_HINT", "MAX_PASTE_BYTES", "TOOL_WARN_OVER", "AddPlan", "ManageError", "McpView",
     "PlannedServer", "ServerView", "ToolView", "delete_secrets", "find_server", "find_tool", "handles",
-    "list_after_add", "list_view", "plan_add", "presence", "remove_server", "resolve_target", "save_server",
+    "list_after_add", "list_view", "mcp_installed", "plan_add", "presence", "remove_server", "resolve_target", "save_server",
     "set_secret", "set_timeout", "switch_server", "switch_tool", "tools_on", "trust_all", "trust_entry",
     "trust_one", "trust_server", "trust_tool", "untrust_server", "untrust_tool",
 ]
@@ -40,6 +41,14 @@ ADD_LIST_CAP_S = 20.0  # the listing right after an add waits at most this long
 TOOL_WARN_OVER = 20  # more tools on than this: show TOOL_COUNT_WARNING
 LOCAL_HINT = " — its tools are listed when zygos serve starts it"
 _DEFAULT_TTL_S = 300.0
+
+
+def mcp_installed() -> bool:
+    """Whether the MCP SDK (the ``.[mcp]`` extra) is installed; never imports it."""
+    try:
+        return importlib.util.find_spec("mcp") is not None
+    except (ImportError, ValueError):
+        return False
 
 
 class ManageError(Exception):

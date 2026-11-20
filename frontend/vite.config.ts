@@ -9,6 +9,7 @@ const proxy = {
   "/sessions": { target: BACKEND, changeOrigin: true },
   "/runtime": { target: BACKEND, changeOrigin: true },
   "/preferences": { target: BACKEND, changeOrigin: true },
+  "/mcp": { target: BACKEND, changeOrigin: true },
   "/ws": { target: BACKEND, changeOrigin: true, ws: true },
 };
 
