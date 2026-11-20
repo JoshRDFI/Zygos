@@ -57,6 +57,8 @@ def test_plan_add_describes_without_values(store):
     assert planned.secret_names == ["Authorization"]
     assert planned.replaces is False and planned.old_runs is None
     assert "Bearer x" not in repr(plan)
+    assert "Bearer x" not in repr(plan.items[0])
+    assert "Bearer x" not in repr(plan.items)
     assert all("Bearer x" not in p.model_dump_json() for p in plan.servers)
     assert plan.items[0].secrets  # the values are kept for saving
 
@@ -80,6 +82,7 @@ def test_plan_add_bad_json_is_invalid(store):
         plan_add(store, "{not json sk-secret")
     assert caught.value.kind == "invalid"
     assert caught.value.reason.startswith("not valid JSON")
+    assert "sk-secret" not in caught.value.reason
     assert str(caught.value) == caught.value.reason
 
 
