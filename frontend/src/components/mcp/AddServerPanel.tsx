@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { McpError, planAdd, saveServers } from "../../client/mcp";
 import type { PlannedServer } from "../../client/types";
 import { useMcpStore } from "../../stores/mcpStore";
@@ -28,16 +28,20 @@ export default function AddServerPanel({ onDone }: { onDone: () => void }) {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const latest = useRef(0);
   const off = busy !== null || previewing;
 
-  const edit = (v: string) => { setText(v); setPlan(null); setPreviewError(null); };
+  const edit = (v: string) => { latest.current += 1; setText(v); setPlan(null); setPreviewError(null); };
 
   const preview = async () => {
+    const mine = ++latest.current;
     setPreviewing(true);
     setPreviewError(null);
     try {
-      setPlan(await planAdd(text));
+      const result = await planAdd(text);
+      if (mine === latest.current) setPlan(result);
     } catch (e) {
+      if (mine !== latest.current) return;
       setPlan(null);
       setPreviewError(e instanceof McpError ? e.detail : e instanceof Error ? e.message : String(e));
     } finally {
@@ -59,7 +63,7 @@ export default function AddServerPanel({ onDone }: { onDone: () => void }) {
     <div className="border border-border rounded p-3 space-y-2 text-sm">
       <label className="block text-xs text-text-muted" htmlFor="mcp-add-text">Server JSON</label>
       <textarea
-        id="mcp-add-text" rows={6} value={text} onChange={(e) => edit(e.target.value)}
+        id="mcp-add-text" rows={6} value={text} disabled={previewing} onChange={(e) => edit(e.target.value)}
         className="w-full px-2 py-1 rounded border border-border bg-surface font-mono text-xs"
       />
       <div className="flex gap-2">

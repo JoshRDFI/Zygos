@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import McpSection from "./McpSection";
@@ -209,4 +209,31 @@ test("refresh button calls refreshMcp", async () => {
   const r = vi.spyOn(mcp, "refreshMcp").mockResolvedValue(view());
   await userEvent.click(await screen.findByRole("button", { name: "Refresh" }));
   expect(r).toHaveBeenCalled();
+});
+
+const planned = { servers: [{ name: "fs", transport: "stdio" as const, runs: "npx fs", secret_names: [], unused: [], replaces: true, old_runs: "old" }], problems: [] };
+
+test("a preview that resolves after the text changed is dropped", async () => {
+  show(view([]));
+  let release!: (v: typeof planned) => void;
+  vi.spyOn(mcp, "planAdd").mockReturnValue(new Promise((r) => { release = r; }));
+  await userEvent.click(await screen.findByRole("button", { name: /add server/i }));
+  await userEvent.type(screen.getByLabelText("Server JSON"), "old");
+  await userEvent.click(screen.getByRole("button", { name: "Preview" }));
+  fireEvent.change(screen.getByLabelText("Server JSON"), { target: { value: "new" } });
+  release(planned);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Preview" })).toBeEnabled());
+  expect(screen.queryByText(/This runs/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Confirm" })).not.toBeInTheDocument();
+});
+
+test("editing after a completed preview removes Confirm", async () => {
+  show(view([]));
+  vi.spyOn(mcp, "planAdd").mockResolvedValue(planned);
+  await userEvent.click(await screen.findByRole("button", { name: /add server/i }));
+  await userEvent.type(screen.getByLabelText("Server JSON"), "old");
+  await userEvent.click(screen.getByRole("button", { name: "Preview" }));
+  await screen.findByRole("button", { name: "Confirm" });
+  await userEvent.type(screen.getByLabelText("Server JSON"), "!");
+  expect(screen.queryByRole("button", { name: "Confirm" })).not.toBeInTheDocument();
 });
