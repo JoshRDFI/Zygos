@@ -146,7 +146,7 @@ def _parse_one(name: str, cfg: Any) -> ParsedServer:
     extra = {k: v for k, v in cfg.items() if k not in _KNOWN}
     kwargs: dict[str, Any] = {}
     if "timeout_s" in cfg:
-        kwargs["timeout_s"] = _timeout(name, cfg["timeout_s"])
+        kwargs["timeout_s"] = check_timeout(name, cfg["timeout_s"])
     try:
         spec = ServerSpec(
             name=name, transport=transport, command=command or None, args=args, cwd=cwd,
@@ -157,7 +157,7 @@ def _parse_one(name: str, cfg: Any) -> ParsedServer:
     return ParsedServer(spec=spec, secrets=secrets)
 
 
-def _timeout(server: str, value: Any) -> float:
+def check_timeout(server: str, value: Any) -> float:
     """A per-call timeout: a finite number of seconds, above 0 and at most 600."""
     ok = (
         isinstance(value, (int, float)) and not isinstance(value, bool)

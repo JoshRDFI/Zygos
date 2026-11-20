@@ -28,17 +28,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, TextIO
 
-from pydantic import ValidationError
-
 from zygos.config.schema import ZygosConfig
-from zygos.mcp.config import (
-    McpConfigError, check_server_names, describe, parse_servers, status_word, validation_reason,
-    zygos_tool_name,
-)
+from zygos.mcp.config import describe, status_word, zygos_tool_name
 from zygos.mcp import manage
 from zygos.mcp.offered import checked, noted
 from zygos.mcp.permission import trust_state
-from zygos.mcp.results import McpToolError, McpUnavailable
 from zygos.mcp.store import McpStoreUnavailable, ServerState, SqliteMcpStore, TrustEntry
 from zygos.mcp.supervisor import NO_MCP, TOOL_COUNT_WARNING
 from zygos.mcp.types import ParsedServer, SeenTool, ServerSpec
@@ -46,8 +40,7 @@ from zygos.secrets import SecretStoreError, build_secret_store
 
 __all__ = ["add_parser", "run_mcp"]
 
-_DEFAULT_TTL_S = 300.0
-_ADD_LIST_CAP_S = 20.0  # the listing right after an add waits at most this long
+_ADD_LIST_CAP_S = manage.ADD_LIST_CAP_S
 _READ_BUSY_S = 30.0  # how long a read waits for another writer (then a readable error)
 _TOOL_WARN_OVER = 20
 _LOCAL_HINT = " — its tools are listed when zygos serve starts it"
@@ -156,41 +149,36 @@ class _Cli:
         except OSError as exc:
             return self.error(f"can't read {file}: {exc.strerror or type(exc).__name__}")
         try:
-            parsed = parse_servers(text)
-        except McpConfigError as exc:
-            return self.error(str(exc))
-        except ValidationError as exc:  # parse_servers turns these into McpConfigError; belt and braces
-            return self.error(f"invalid server settings: {validation_reason(exc)}")
-        existing = self.store.servers()
-        problems = check_server_names([p.spec.name for p in parsed], list(existing))
-        if problems:
-            for problem in problems:
+            plan = manage.plan_add(self.store, text)
+        except manage.ManageError as exc:
+            return self.error(exc.reason)
+        if plan.problems:
+            for problem in plan.problems:
                 self.say(f"zygos mcp: {problem}")
             return 1
-        for item in parsed:
-            self._show_planned(item, existing.get(item.spec.name))
+        for planned in plan.servers:
+            self._show_planned(planned)
         if not yes and not self._confirm("Add these servers? [y/N] ", tty):
             self.say("Nothing added.")
             return 1
+        existing = self.store.servers()
         code = 0
-        for item in parsed:
+        for item in plan.items:
             if not self._save(item, existing.get(item.spec.name)):
                 code = 1
         if self._tools_on() > _TOOL_WARN_OVER:
             self.say(TOOL_COUNT_WARNING)
         return code
 
-    def _show_planned(self, item: ParsedServer, old: ServerSpec | None) -> None:
-        spec = item.spec
-        self.say(f"{spec.name}:")
-        self.say(f"  {describe(spec)}")
-        names = [*spec.env_names, *spec.header_names]
-        if names:
-            self.say(f"  secrets: {', '.join(names)} (stored in the secret store)")
-        if spec.extra:
-            self.say(f"  not used by Zygos: {', '.join(sorted(spec.extra))}")
-        if old is not None:
-            self.say(f"  replaces the existing server {spec.name} (its trust is cleared)")
+    def _show_planned(self, planned: manage.PlannedServer) -> None:
+        self.say(f"{planned.name}:")
+        self.say(f"  {planned.runs}")
+        if planned.secret_names:
+            self.say(f"  secrets: {', '.join(planned.secret_names)} (stored in the secret store)")
+        if planned.unused:
+            self.say(f"  not used by Zygos: {', '.join(planned.unused)}")
+        if planned.replaces:
+            self.say(f"  replaces the existing server {planned.name} (its trust is cleared)")
 
     def _confirm(self, prompt: str, tty: TextIO | None) -> bool:
         if tty is not None:
@@ -210,105 +198,27 @@ class _Cli:
 
     def _save(self, item: ParsedServer, old: ServerSpec | None) -> bool:
         spec = item.spec
-        if item.secrets and not self._save_secrets(item):
+        try:
+            notes = manage.save_server(self.store, self.secrets, item, old)
+        except manage.ManageError as exc:
+            self.say(f"{spec.name}: not added — {exc.reason}")
+            for note in exc.notes:
+                self.say(note)
             return False
-        if old is not None:
-            self.store.replace_server(spec)  # one transaction; clears its state, trust and on/off
-            self._delete_secrets(spec.name, sorted(_handles(old) - set(item.secrets)))
-        else:
-            self.store.put_server(spec)
+        for note in notes:
+            self.say(note)
         if spec.transport == "stdio":
             self.say(f"{spec.name}: added{_LOCAL_HINT}")
             return True
-        self._list_once(item)
+        self.say(asyncio.run(manage.list_after_add(
+            self.store, spec, item, list_remote=self.list_remote, mcp_installed=self.mcp_installed,
+            clock=self.clock, cap_s=_ADD_LIST_CAP_S,
+        )))
         return True
-
-    def _save_secrets(self, item: ParsedServer) -> bool:
-        """Store a server's secret values; on a failure put back what was there before."""
-        name = item.spec.name
-        status = self.secrets.status()
-        if not status.available:
-            self.say(f"{name}: not added — its secrets can't be stored: {status.why_unavailable}")
-            return False
-        written: list[str] = []
-        previous: dict[str, str | None] = {}
-        try:
-            previous = {handle: self.secrets.get(handle) for handle in item.secrets}
-            for handle, value in item.secrets.items():
-                self.secrets.set(handle, value)
-                written.append(handle)
-        except SecretStoreError as exc:
-            self.say(f"{name}: not added — its secrets can't be stored: {exc}")
-            self._undo_secrets(name, previous, written)
-            return False
-        return True
-
-    def _undo_secrets(self, server: str, previous: dict[str, str | None], written: list[str]) -> None:
-        stuck: list[str] = []
-        for handle in written:
-            try:
-                if previous[handle] is None:
-                    self.secrets.delete(handle)
-                else:
-                    self.secrets.set(handle, previous[handle])  # type: ignore[arg-type]
-            except SecretStoreError:
-                stuck.append(handle)
-        for handle in stuck:
-            what = "overwritten" if previous[handle] is not None else "saved"
-            undo = "restored" if previous[handle] is not None else "removed"
-            self.say(f"{server}: the secret {_secret_name(handle)} was {what} and couldn't be {undo}")
-        if written and not stuck:
-            self.say(f"{server}: the secrets saved before the failure were restored")
-
-    def _list_once(self, item: ParsedServer) -> None:
-        spec = item.spec
-        if not self.mcp_installed():
-            self.say(f"{spec.name}: added, but its tools couldn't be listed: {NO_MCP}")
-            return
-        prefix = f"mcp:{spec.name}:header:"
-        headers = {h[len(prefix):]: v for h, v in item.secrets.items() if h.startswith(prefix)}
-        limit = min(spec.timeout_s, _ADD_LIST_CAP_S)
-
-        async def bounded() -> Any:
-            return await asyncio.wait_for(self.list_remote(spec, headers, era=None, discover=None), limit)
-
-        try:
-            result = asyncio.run(bounded())
-        except Exception as exc:  # noqa: BLE001 - a failed listing never undoes the add
-            # McpUnavailable/McpToolError reasons are scrubbed of header values; others: type only.
-            if isinstance(exc, TimeoutError):
-                reason = f"no answer within {limit:g} s"
-            elif isinstance(exc, (McpUnavailable, McpToolError)):
-                reason = str(exc)
-            else:
-                reason = type(exc).__name__
-            now = self.clock()
-            self.store.put_state(
-                spec.name, ServerState(status="unreachable", detail=reason, status_at=now)
-            )
-            self.say(f"{spec.name}: added, but its tools couldn't be listed: {reason} — zygos serve tries again")
-            return
-        now = self.clock()
-        ttl = result.ttl_s or _DEFAULT_TTL_S
-        tools = checked(result.tools)
-        self.store.put_state(spec.name, ServerState(
-            era=result.era, discover=result.discover, tools=tools,
-            listed_at=now, expires_at=now + ttl, status="reachable", status_at=now,
-        ))
-        count = len(tools)
-        self.say(f"{spec.name}: added — {count} tool{'s' if count != 1 else ''} listed (protocol {result.era})")
-        if tools:
-            self.say(
-                f"  trust the ones you want: zygos mcp trust {spec.name}/TOOL "
-                f"(or {spec.name} for all {count}) — see zygos mcp list"
-            )
 
     def _delete_secrets(self, server: str, handles: list[str]) -> None:
-        for handle in handles:
-            try:
-                self.secrets.delete(handle)
-            except SecretStoreError as exc:
-                self.say(f"{server}: could not delete the secret {_secret_name(handle)}: {exc}")
+        for note in manage.delete_secrets(self.secrets, server, handles):
+            self.say(note)
 
     # ---- list ---------------------------------------------------------------------
 
@@ -390,7 +300,7 @@ class _Cli:
         if spec is None:
             return self.error(f"no server {name}")
         self.store.remove_server(name)
-        self._delete_secrets(name, sorted(_handles(spec)))
+        self._delete_secrets(name, sorted(manage.handles(spec)))
         self.say(f"Removed {name}.")
         return 0
 
@@ -476,10 +386,6 @@ class _Cli:
         return 0
 
 
-def _secret_name(handle: str) -> str:
-    return handle.rsplit(":", 1)[-1]
-
-
 def _tools_by(
     servers: dict[str, ServerSpec], states: dict[str, ServerState], off: set[str]
 ) -> dict[str, list[SeenTool]]:
@@ -496,12 +402,6 @@ def _count_on(servers: dict[str, ServerSpec], off: set[str], tools_by: dict[str,
         for seen in tools_by.get(name, [])
         if seen.problem is None and f"tool:{zygos_tool_name(name, seen.name)}" not in off
     )
-
-
-def _handles(spec: ServerSpec) -> set[str]:
-    return {f"mcp:{spec.name}:env:{n}" for n in spec.env_names} | {
-        f"mcp:{spec.name}:header:{n}" for n in spec.header_names
-    }
 
 
 def _status(spec: ServerSpec, state: ServerState) -> str:
